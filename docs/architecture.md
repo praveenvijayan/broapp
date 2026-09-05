@@ -8,28 +8,10 @@ document. The browser then talks back to the same process over a WebSocket on
 the same origin. When you compile it, the HTML document is inside the
 executable, and so is the JavaScript runtime.
 
-```
-  ┌─ your machine ──────────────────────────────────────────┐
-  │                                                          │
-  │   ┌── the executable ─────────┐        ┌── browser ───┐  │
-  │   │  Bun runtime              │        │              │  │
-  │   │  your host code           │◀──ws──▶│  your UI     │  │
-  │   │  the UI, embedded as text │──http─▶│  (one doc)   │  │
-  │   └───────────────────────────┘        └──────────────┘  │
-  │            127.0.0.1 : ephemeral port                    │
-  └──────────────────────────────────────────────────────────┘
-```
+![The shape of the thing: the executable, holding the Bun runtime, your host code and the UI embedded as text, serves the single document to the browser over HTTP once; after that the browser calls the host over a WebSocket on the same origin and gets results and stream events back. Everything stays on 127.0.0.1 at an ephemeral port.](../diagrams/broapp-shape.svg)
 
 Nothing leaves the machine. There is no server to run, no container, no
 packaged Chromium.
-
-![One loop of a Broapp application: the tab redeems a one-time token at the trust fence and gets a session cookie, fetches the single embedded document, calls a typed operation and gets its result; a request from another origin is refused at the fence with 403.](../diagrams/broapp-loop.svg)
-
-Over one loop: the tab redeems the one-time launch token at the trust fence and
-gets a session cookie; it fetches the single embedded document; it calls a typed
-operation, which the fence admits and the host validates and runs. A request
-from any other origin, including another port on `127.0.0.1`, meets the same
-fence and is refused before routing.
 
 ## Three layers, and who owns what
 
@@ -69,17 +51,7 @@ a second route. `broapp build` fails if the bundle produces one.
 
 ## The contract
 
-```
-              ┌─────────────────────┐
-              │  shared/contract.ts │   schemas only — no implementation
-              └──────────┬──────────┘
-                  ┌──────┴──────┐
-        imports   │             │   imports
-   ┌──────────────▼──┐       ┌──▼──────────────┐
-   │  host/          │       │  ui/            │
-   │  implementations│       │  components     │
-   └─────────────────┘       └─────────────────┘
-```
+![The contract: host and UI both import shared/contract.ts, which holds schemas and no implementation. The bundler following the browser's import reaches the contract and stops, so no host code is pulled in; a browser import of src/host fails the build.](../diagrams/broapp-contract.svg)
 
 A contract is data: a table of operations and streams, each with schemas for its
 input and output. Both sides import it; neither imports the other. Because it

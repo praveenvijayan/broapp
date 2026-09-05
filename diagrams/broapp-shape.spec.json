@@ -1,0 +1,15 @@
+{
+  "loop": 9,
+  "accent": "#4CF490",
+  "events": [
+    {"id": "ph1", "kind": "phase", "note": "act 1", "at": 0, "until": 1.3, "text": "1 · SERVE", "x": 632, "y": 96, "color": "#4CF490"},
+    {"id": "m1", "kind": "packet", "note": "the one document, script and style inline, over http", "at": 0.3, "travel": 0.6, "label": "DOCUMENT", "label_dy": 14, "from": [260, 224], "to": [440, 224], "glow": {"x": 440, "y": 152, "w": 160, "h": 96}},
+    {"id": "ph2", "kind": "phase", "note": "act 2", "at": 1.6, "until": 3.6, "text": "2 · CALL", "x": 632, "y": 96, "color": "#4CF490"},
+    {"id": "m2", "kind": "packet", "note": "the ui calls a typed operation over the websocket", "at": 1.8, "travel": 0.5, "label": "CALL", "label_dy": 14, "from": [440, 176], "to": [260, 176], "glow": {"x": 60, "y": 144, "w": 200, "h": 120}},
+    {"id": "m3", "kind": "packet", "note": "the host answers on the same socket", "after": "m2", "gap": 0.4, "travel": 0.5, "label": "RESULT", "label_dy": 14, "from": [260, 176], "to": [440, 176], "glow": {"x": 440, "y": 152, "w": 160, "h": 96}},
+    {"id": "ph3", "kind": "phase", "note": "act 3", "at": 4.6, "until": 7.2, "text": "3 · STREAM", "x": 632, "y": 96, "color": "#4CF490"},
+    {"id": "m4", "kind": "packet", "note": "a stream event pushed by the host", "at": 4.8, "travel": 0.6, "label": "EVENT", "label_dy": 14, "from": [260, 176], "to": [440, 176], "glow": {"x": 440, "y": 152, "w": 160, "h": 96}},
+    {"id": "m5", "kind": "packet", "note": "another event, same socket", "after": "m4", "gap": 0.1, "travel": 0.6, "label": "EVENT", "label_dy": 14, "from": [260, 176], "to": [440, 176]},
+    {"id": "m6", "kind": "packet", "note": "and another", "after": "m5", "gap": 0.1, "travel": 0.6, "label": "EVENT", "label_dy": 14, "from": [260, 176], "to": [440, 176]}
+  ]
+}

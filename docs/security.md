@@ -8,6 +8,14 @@ it. Brobridge's own [THREAT-MODEL.md](https://github.com/praveenvijayan/brobridg
 is the authoritative document; this page says how a Broapp application sits
 inside it.
 
+![One loop of a Broapp application: the tab redeems a one-time token at the trust fence and gets a session cookie, fetches the single embedded document, calls a typed operation and gets its result; a request from another origin is refused at the fence with 403.](../diagrams/broapp-loop.svg)
+
+Over one loop: the tab redeems the one-time launch token at the trust fence and
+gets a session cookie; it fetches the single embedded document; it calls a typed
+operation, which the fence admits and the host validates and runs. A request
+from any other origin, including another port on `127.0.0.1`, meets the same
+fence and is refused before routing.
+
 **Loopback binding.** The host binds `127.0.0.1` on an ephemeral port. Broapp
 does not forward Brobridge's `allowNonLoopback` option at all, so a Broapp
 application cannot grow LAN exposure through a configuration change. There is a
