@@ -30,6 +30,13 @@ route answers `403`.
 the filesystem, so there is no traversal to defend against — an unrouted path is
 a `404` that never touched a disk.
 
+**Refusal of framing and other cross-document loads.** The fence allows only
+`Sec-Fetch-Site: same-origin` or `none`. A page on another origin that puts the
+application in an `<iframe>` sends `cross-site` (or `same-site`), so the request
+is refused with a `403` and no frame is rendered. Browsers set `Sec-Fetch-Site`
+themselves and a page cannot forge it. This — not a CSP directive — is what
+stops the application being framed.
+
 **Rate-limited authentication failures.** Twenty per minute per remote address.
 
 ## What Broapp adds
@@ -42,19 +49,30 @@ a host application supply a body — so Broapp puts the policy in a
 ```
 default-src 'none';
 script-src 'sha256-…';
-style-src  'sha256-…';
+style-src  'sha256-…';      (or 'none' when the application ships no CSS)
 img-src 'self' data:;
 font-src 'self' data:;
-connect-src 'self' ws://127.0.0.1:* ws://localhost:* ws://[::1]:*;
-base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'
+connect-src 'self' ws://127.0.0.1:*;
+base-uri 'none'; form-action 'none'; object-src 'none'
 ```
 
 `default-src 'none'` means a directive nobody thought about fails closed. The
 inline script is pinned by **hash**, not permitted by `'unsafe-inline'`, and the
 hash is computed from the exact bytes the browser will execute — there is a test
-that recomputes it from the served document. `connect-src` names the loopback
-hosts explicitly rather than allowing a bare `ws:`, which would allow any host
-on the network.
+that recomputes it from the served document. `connect-src` names the one host
+the bridge can bind rather than allowing a bare `ws:`, which would allow any
+host on the network.
+
+**What is deliberately not in it.** No `frame-ancestors`. It is one of three
+directives — with `report-uri` and `sandbox` — that the CSP specification
+requires user agents to **ignore** when a policy arrives in a `<meta>` element,
+and a `<meta>` element is the only way a host application can express a policy
+here, because Brobridge writes the response headers and offers no hook for
+adding one. Declaring it would put an inert directive in the document and invite
+a reader to count it as protection.
+
+Framing is refused anyway, one layer down, and by something that does work: see
+below.
 
 **An off-origin build check.** `broapp build` fails if the produced document
 loads anything from another origin — a `src`, an `href`, a CSS `url()`, an

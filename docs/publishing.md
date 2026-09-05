@@ -49,13 +49,6 @@ package `create-broapp`. Test it from a clean machine or a container:
 bun create broapp /tmp/verify-me
 ```
 
-**Drop the `overrides` workaround when upstream is fixed.** Every generated
-project carries `"overrides": { "@brobridgejs/core": "0.2.0" }` because
-`brobridge@0.2.0` shipped an unresolved `workspace:^` specifier. When a fixed
-`brobridge` is released, remove the override from the template, from this
-repository's `package.json`, raise the dependency floor, and delete the section
-in the generated README. See [upstream-blockers.md](upstream-blockers.md).
-
 **Decide about signing.** Release binaries are unsigned. macOS notarisation
 needs an Apple Developer account and must run on macOS; Windows needs a
 code-signing certificate. Neither is set up. Until they are, releases should

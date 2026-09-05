@@ -13,11 +13,6 @@ bun install
 bun run dev
 ```
 
-> **Note on `overrides` in `package.json`.** `brobridge@0.2.0` was published with
-> an unresolved `workspace:^` dependency specifier, which no package manager can
-> resolve outside its own repository. The `overrides` entry supplies the missing
-> range so the install succeeds. Remove it once a fixed `brobridge` is released.
-
 `bun run dev` builds the interface, starts the host process, and opens your
 browser. Leave it running; edit anything under `src/` and it rebuilds and
 restarts. After a restart, reload the tab — the host mints a new session each

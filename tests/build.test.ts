@@ -82,9 +82,45 @@ describe('buildPage', () => {
     expect(policy).toContain('ws://127.0.0.1:*');
     // A bare `ws:` would allow any host on the network.
     expect(policy).not.toMatch(/connect-src[^;]*\bws:(?!\/)/);
-    expect(policy).toContain("frame-ancestors 'none'");
+    // Broapp never forwards Brobridge's `host` option, so the bridge can only
+    // ever bind 127.0.0.1. Naming other loopback spellings would widen the
+    // policy to origins the application cannot be served from.
+    expect(policy).not.toContain('localhost');
+    expect(policy).not.toContain('[::1]');
     expect(policy).toContain("object-src 'none'");
     expect(policy).toContain("base-uri 'none'");
+  });
+
+  test('the policy does not carry directives a meta element cannot express', async () => {
+    // `frame-ancestors`, `report-uri` and `sandbox` are ignored by user agents
+    // when a policy arrives in a `<meta>` element. Declaring one would put an
+    // inert directive in the document and invite a reader — or a security
+    // review — to count it as protection that is not there.
+    //
+    // Framing is refused a layer down: Brobridge's trust fence allows only
+    // `Sec-Fetch-Site: same-origin` or `none`, so a cross-origin page that
+    // frames the application receives a 403 instead of a rendered frame.
+    await write('inert.ts', `console.log(1);`);
+    const html = await build('inert.ts', 'dist/inert.html');
+    const policy = /content="(default-src[^"]*)"/.exec(html)?.[1] ?? '';
+
+    for (const directive of ['frame-ancestors', 'report-uri', 'sandbox']) {
+      expect(policy).not.toContain(directive);
+    }
+  });
+
+  test('with no stylesheet, style-src is none rather than a hash of nothing', async () => {
+    // Hashing the empty string yields a real, valid hash — for a stylesheet
+    // that does not exist. It reads like a policy and permits nothing useful;
+    // `'none'` says the same thing honestly.
+    await write('nocss.ts', `document.title = 'no styles here';`);
+    const html = await build('nocss.ts', 'dist/nocss.html');
+    const policy = /content="(default-src[^"]*)"/.exec(html)?.[1] ?? '';
+
+    expect(html).not.toContain('<style>');
+    expect(policy).toContain("style-src 'none'");
+    // The base64 SHA-256 of the empty string.
+    expect(policy).not.toContain('47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=');
   });
 
   test('refuses a stylesheet that imports from a CDN', async () => {

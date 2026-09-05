@@ -5,13 +5,13 @@
     "": {
       "name": "@broapp/workspace",
       "devDependencies": {
-        "@brobridgejs/client": "^0.2.0",
+        "@brobridgejs/client": "^0.2.1",
         "@types/bun": "^1.2.0",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
         "@types/ws": "^8.18.1",
         "broapp": "workspace:*",
-        "brobridge": "^0.2.0",
+        "brobridge": "^0.2.1",
         "typescript": "^5.7.2",
         "ws": "^8.21.3",
       },
@@ -68,9 +68,9 @@
         "broapp": "./src/cli/main.ts",
       },
       "dependencies": {
-        "@brobridgejs/client": "^0.2.0",
-        "@brobridgejs/core": "^0.2.0",
-        "brobridge": "^0.2.0",
+        "@brobridgejs/client": "^0.2.1",
+        "@brobridgejs/core": "^0.2.1",
+        "brobridge": "^0.2.1",
       },
       "devDependencies": {
         "@types/react": "^19.0.0",
@@ -86,15 +86,15 @@
     "packages/create-broapp": {
       "name": "create-broapp",
       "version": "0.1.0",
+      "bin": {
+        "create-broapp": "./src/main.ts",
+      },
     },
   },
-  "overrides": {
-    "@brobridgejs/core": "0.2.0",
-  },
   "packages": {
-    "@brobridgejs/client": ["@brobridgejs/client@0.2.0", "", { "dependencies": { "@brobridgejs/core": "^0.2.0" } }, "sha512-EKID0Iy3KVy2/jr7StgNzU6k2EdwsDGru4B+Gm+cGpSfgJn4ceo4l/lQFubW9/IWcDNzHiE6ozZCNBJfFWD64Q=="],
+    "@brobridgejs/client": ["@brobridgejs/client@0.2.1", "", { "dependencies": { "@brobridgejs/core": "^0.2.1" } }, "sha512-t6TGv8AnpYIo8CfbqSqAqaVCHzSB59UXfcJEnbZuvaVxOYoNwe2GlG299BgYKHsLU1/uG2phKzeGOyT3SQT/kg=="],
 
-    "@brobridgejs/core": ["@brobridgejs/core@0.2.0", "", {}, "sha512-pHa/mSTEXybr0dNpA51LB7RPfgNgVzOE3Qp/5+wIbF7P6bs3OMF3bUVrIc2CisKSwpL5WZ9Xa50NaJItDL5ZLA=="],
+    "@brobridgejs/core": ["@brobridgejs/core@0.2.1", "", {}, "sha512-rTufwoaebQRbKJderPX+KcvzAFn0Zd5AQq6I5kzQZYHPLzpPGxNGkDu57D+vavYxy/4EQlxqxyJ10kdSVzhJHQ=="],
 
     "@types/bun": ["@types/bun@1.4.1", "", { "dependencies": { "bun-types": "1.4.1" } }, "sha512-0AVGiTXGajf1rgKom3N+c5L7CBxuoyyv1i44M0nX4UDK0G/fnRAMiri93nHuVPIb429KKtAgj7HatVmmOjeQLA=="],
 
@@ -108,7 +108,7 @@
 
     "broapp": ["broapp@workspace:packages/broapp"],
 
-    "brobridge": ["brobridge@0.2.0", "", { "dependencies": { "@brobridgejs/core": "workspace:^", "ws": "^8.21.3" } }, "sha512-7pLoh5+IvvMopMNjDVbc8w8PNRPjZiwOlAmzSaCpfPFLcu3ha9S8tD81XFFpPg+/UGmLBwfQWxUftJhKA7WVYw=="],
+    "brobridge": ["brobridge@0.2.1", "", { "dependencies": { "@brobridgejs/core": "^0.2.1", "ws": "^8.21.3" } }, "sha512-cFT/fxz0TLhZl9vMlN79YAoroAzDUGIFP/9FuKXDUcKE/O8BZYybGSmzOB7Rs3ZOprUhLaJVPuZSNbs8pn/k0w=="],
 
     "bun-types": ["bun-types@1.4.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-loKuVrAFZKfEv+JvWkHRS9GW5IqLuLRjVXN9p+vZvBN86O5hf/pBZQ5hSoyipsrMmWObZBDvWnlmKvjKTM0PdA=="],
 

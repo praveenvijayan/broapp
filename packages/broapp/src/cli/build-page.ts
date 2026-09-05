@@ -64,27 +64,41 @@ export interface BuildPageResult {
  * own origin plus `ws:`/`wss:` — the WebSocket URL has a different scheme from
  * the document's, and `'self'` does not cover it in any current browser.
  */
-function policy(scriptHash: string, styleHash: string, extra: BuildPageOptions['csp']): string {
+function policy(scriptHash: string, styleHash: string | null, extra: BuildPageOptions['csp']): string {
   const directives: Record<string, string[]> = {
     'default-src': ["'none'"],
     'script-src': [`'sha256-${scriptHash}'`],
-    'style-src': [`'sha256-${styleHash}'`],
+    // A hash of the empty string is not a policy — it declares that a
+    // stylesheet which is not there is permitted. With no CSS, say `'none'`.
+    'style-src': styleHash === null ? ["'none'"] : [`'sha256-${styleHash}'`],
     'img-src': ["'self'", 'data:'],
     'font-src': ["'self'", 'data:'],
     // The bridge's WebSocket URL has a `ws:` scheme while the document has
     // `http:`. CSP Level 3 says `'self'` covers that upgrade, but not every
-    // engine implements it, so the loopback hosts are named explicitly. The
-    // port is ephemeral and unknowable at build time, hence `:*` — still far
-    // tighter than a bare `ws:`, which would allow any host on the network.
-    'connect-src': [
-      "'self'",
-      'ws://127.0.0.1:*',
-      'ws://localhost:*',
-      'ws://[::1]:*',
-    ],
+    // engine implements it, so the one host the bridge can bind is named
+    // explicitly. The port is ephemeral and unknowable at build time, hence
+    // `:*`.
+    //
+    // Only `127.0.0.1`. Broapp does not forward Brobridge's `host` option, so
+    // the authority is always that — and Brobridge's trust fence refuses any
+    // request whose `Host` header names something else. Listing `localhost` or
+    // `[::1]` would widen the policy to cover origins the application can
+    // never actually be served from.
+    'connect-src': ["'self'", 'ws://127.0.0.1:*'],
     'base-uri': ["'none'"],
     'form-action': ["'none'"],
-    'frame-ancestors': ["'none'"],
+    // No `frame-ancestors`. It is one of the three directives the CSP
+    // specification requires user agents to *ignore* in a `<meta>` element
+    // (with `report-uri` and `sandbox`), and a meta element is the only way a
+    // host application can express a policy — Brobridge sets the response
+    // headers and offers no hook for adding one. Declaring it here would put
+    // an inert directive in the document and invite the reader to count it as
+    // protection.
+    //
+    // Framing is refused anyway, one layer down: Brobridge's trust fence
+    // allows only `Sec-Fetch-Site: same-origin` or `none`, so a page on
+    // another origin that frames the application gets a 403 rather than a
+    // rendered frame. See docs/security.md.
     'object-src': ["'none'"],
   };
   for (const [directive, sources] of Object.entries(extra ?? {})) {
@@ -182,7 +196,7 @@ export async function buildPage(options: BuildPageOptions): Promise<BuildPageRes
   // very script it was computed from.
   const scriptBody = escapeForInlineScript(script);
   const head =
-    `<meta http-equiv="Content-Security-Policy" content="${policy(sha256(scriptBody), sha256(css), options.csp)}">` +
+    `<meta http-equiv="Content-Security-Policy" content="${policy(sha256(scriptBody), css === '' ? null : sha256(css), options.csp)}">` +
     styleTag;
   const finalHtml = template
     .replace('<!--BROAPP_HEAD-->', () => head)
