@@ -92,6 +92,9 @@ const rename = useOperation<AppContract, 'notes.rename'>('notes.rename');
 
 ## Documentation
 
+Browsable at **<https://praveenvijayan.github.io/broapp/>**, generated from the
+files below so the two cannot drift.
+
 - [Architecture](docs/architecture.md) — how the pieces fit, and why.
 - [Security model](docs/security.md) — what is protected, and what is not.
 - [Adding a host operation](docs/host-operations.md)
