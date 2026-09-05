@@ -109,6 +109,22 @@ files below so the two cannot drift.
 - [Scope and limitations](docs/limitations.md)
 - [Contributing](CONTRIBUTING.md)
 
+## Using Broapp from an AI agent
+
+The repository ships an [Agent Skill](https://agentskills.io) in
+[`skills/broapp`](skills/broapp/SKILL.md): the workflow, the rules, and the
+reference material an agent needs to scaffold, extend, verify and ship a
+Broapp application. It follows the open SKILL.md format, so it installs into
+Claude Code, Codex, Cursor, Cline, Copilot, OpenCode and the other agents the
+[skills CLI](https://skills.sh) supports:
+
+```bash
+npx skills add praveenvijayan/broapp
+```
+
+The skill is plain Markdown plus one shell script. Read it before trusting
+it, as with anything an agent will follow.
+
 ## Requirements
 
 Bun 1.2 or newer. Verified on Bun 1.4.0. No other runtime is required, at
