@@ -23,6 +23,14 @@ executable, and so is the JavaScript runtime.
 Nothing leaves the machine. There is no server to run, no container, no
 packaged Chromium.
 
+![One loop of a Broapp application: the tab redeems a one-time token at the trust fence and gets a session cookie, fetches the single embedded document, calls a typed operation and gets its result; a request from another origin is refused at the fence with 403.](../diagrams/broapp-loop.svg)
+
+Over one loop: the tab redeems the one-time launch token at the trust fence and
+gets a session cookie; it fetches the single embedded document; it calls a typed
+operation, which the fence admits and the host validates and runs. A request
+from any other origin, including another port on `127.0.0.1`, meets the same
+fence and is refused before routing.
+
 ## Three layers, and who owns what
 
 **Brobridge** owns the connection. The trust fence that checks `Host` and

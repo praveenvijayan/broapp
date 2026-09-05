@@ -71,7 +71,7 @@ ran. "Cross-compiled, not run" is a phrase this repository uses on purpose.
 **Brobridge stays independent.** Consume its published packages and public API.
 Do not fork, vendor, patch, or reimplement its protocol, authentication or
 streaming. If it lacks something, write a small adapter on public API and record
-the gap in [docs/upstream-blockers.md](docs/upstream-blockers.md).
+the gap in [docs/limitations.md](docs/limitations.md).
 
 **Do not weaken a security default.** No permissive CORS, no `'unsafe-inline'`,
 no LAN binding, no skipping authentication in development. If a workflow is

@@ -13,6 +13,8 @@ You get a working application: a typed call to the host, a cancellable progress
 stream, honest connection states, and `bun run build` producing a single file
 that runs on a machine with no Bun installed.
 
+![One loop of a Broapp application: the tab redeems a one-time token at the trust fence and gets a session cookie, fetches the single embedded document, calls a typed operation and gets its result; a request from another origin is refused at the fence with 403.](diagrams/broapp-loop.svg)
+
 ## This pattern is not new
 
 Compiling a Bun host with `bun build --compile`, embedding a web interface,
@@ -105,7 +107,6 @@ files below so the two cannot drift.
 - [Comparison with Electron, Tauri, and a plain local server](docs/comparison.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Scope and limitations](docs/limitations.md)
-- [Upstream blockers](docs/upstream-blockers.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Requirements
@@ -117,9 +118,7 @@ development time or afterwards.
 
 Version 0.1.0. The packages are **not yet published to npm**, so
 `bun create broapp` does not work until they are — see
-[docs/publishing.md](docs/publishing.md) for what a maintainer has to do, and
-[docs/upstream-blockers.md](docs/upstream-blockers.md) for the one upstream
-issue that affects installation today.
+[docs/publishing.md](docs/publishing.md) for what a maintainer has to do.
 
 ## Licence
 

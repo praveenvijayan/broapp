@@ -9,7 +9,7 @@
  *
  *   bun run scripts/build-site.ts   →  site/dist/
  */
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,12 +41,17 @@ const PAGES: readonly Page[] = [
   { slug: 'comparison.html', title: 'How this compares', source: 'docs/comparison.md', group: 'Reference' },
   { slug: 'troubleshooting.html', title: 'Troubleshooting', source: 'docs/troubleshooting.md', group: 'Reference' },
   { slug: 'limitations.html', title: 'Scope and limitations', source: 'docs/limitations.md', group: 'Reference' },
-  { slug: 'upstream-blockers.html', title: 'Upstream blockers', source: 'docs/upstream-blockers.md', group: 'Reference' },
   { slug: 'publishing.html', title: 'Publishing', source: 'docs/publishing.md', group: 'Reference' },
   { slug: 'contributing.html', title: 'Contributing', source: 'CONTRIBUTING.md', group: 'Reference' },
 ];
 
 const REPO = 'https://github.com/praveenvijayan/broapp';
+
+/**
+ * Repository directories whose files are copied into the site as-is, so a
+ * Markdown image that points at them keeps working after the rewrite.
+ */
+const ASSET_DIRS = ['diagrams'] as const;
 
 /** Rewrite a repository-relative link to its place in the site. */
 function rewriteLink(href: string): string {
@@ -57,6 +62,8 @@ function rewriteLink(href: string): string {
     (candidate) => candidate.source === clean || candidate.source === `docs/${clean}`,
   );
   if (page !== undefined) return page.slug;
+
+  if (ASSET_DIRS.some((dir) => clean.startsWith(`${dir}/`))) return clean;
 
   // Anything else — an example README, a source file — points at the
   // repository, which is where it actually lives.
@@ -90,9 +97,9 @@ function anchor(text: string): string {
  * Taken from the Unicode private use area, so it cannot occur in real
  * documentation text and cannot collide with anything the escaping produces.
  */
-const CODE_MARK = '';
+const CODE_MARK = '';
 
-/** Inline formatting: code spans, links, bold, italic — in that order. */
+/** Inline formatting: code spans, images, links, bold, italic — in that order. */
 function inline(text: string): string {
   const codes: string[] = [];
 
@@ -105,6 +112,9 @@ function inline(text: string): string {
 
   work = escapeHtml(work);
 
+  work = work.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_match, alt: string, src: string) => {
+    return `<img src="${escapeHtml(rewriteLink(src))}" alt="${alt}" loading="lazy">`;
+  });
   work = work.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label: string, href: string) => {
     const target = rewriteLink(href);
     const external = /^https?:/.test(target);
@@ -123,6 +133,8 @@ interface Rendered {
   readonly html: string;
   readonly headings: { readonly level: number; readonly text: string; readonly id: string }[];
 }
+
+const IMAGE_LINE = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/;
 
 function renderMarkdown(markdown: string): Rendered {
   const lines = markdown.split('\n');
@@ -162,6 +174,16 @@ function renderMarkdown(markdown: string): Rendered {
       const text = heading[2] ?? '';
       headings.push({ level, text, id: anchor(text) });
       parts.push(`<h${String(level)} id="${anchor(text)}">${inline(text)}</h${String(level)}>`);
+      index += 1;
+      continue;
+    }
+
+    // An image on a line of its own is a figure, not a paragraph.
+    const image = IMAGE_LINE.exec(line);
+    if (image !== null) {
+      const alt = escapeHtml(image[1] ?? '');
+      const src = escapeHtml(rewriteLink(image[2] ?? ''));
+      parts.push(`<figure class="figure"><img src="${src}" alt="${alt}"></figure>`);
       index += 1;
       continue;
     }
@@ -230,6 +252,7 @@ function renderMarkdown(markdown: string): Rendered {
         current.startsWith('#') ||
         current.startsWith('```') ||
         current.startsWith('>') ||
+        IMAGE_LINE.test(current) ||
         /^\s*([-*]|\d+\.)\s/.test(current) ||
         /^---+$/.test(current.trim())
       ) {
@@ -257,32 +280,96 @@ function splitRow(line: string): string[] {
 /*  Page shell                                                                  */
 /* -------------------------------------------------------------------------- */
 
+const GROUPS = [...new Set(PAGES.map((page) => page.group))];
+
 function nav(current: Page): string {
-  const groups = [...new Set(PAGES.map((page) => page.group))];
-  return groups
-    .map((group) => {
-      const items = PAGES.filter((page) => page.group === group)
-        .map((page) => {
-          const here = page.slug === current.slug ? ' aria-current="page"' : '';
-          return `<li><a href="${page.slug}"${here}>${escapeHtml(page.title)}</a></li>`;
-        })
-        .join('');
-      return `<div class="nav__group"><h2 class="nav__heading">${escapeHtml(group)}</h2><ul class="nav__list">${items}</ul></div>`;
-    })
-    .join('');
+  return GROUPS.map((group) => {
+    const items = PAGES.filter((page) => page.group === group)
+      .map((page) => {
+        const here = page.slug === current.slug ? ' aria-current="page"' : '';
+        return `<li><a href="${page.slug}"${here}>${escapeHtml(page.title)}</a></li>`;
+      })
+      .join('');
+    return `<div class="nav__group"><h2 class="nav__heading">${escapeHtml(group)}</h2><ul class="nav__list">${items}</ul></div>`;
+  }).join('');
+}
+
+function footerColumns(): string {
+  return GROUPS.map((group) => {
+    const items = PAGES.filter((page) => page.group === group)
+      .map((page) => `<li><a href="${page.slug}">${escapeHtml(page.title)}</a></li>`)
+      .join('');
+    return `<div class="footer__col"><h2 class="footer__heading">${escapeHtml(group)}</h2><ul>${items}</ul></div>`;
+  }).join('');
+}
+
+/**
+ * The home page opens on a declaration, then the README continues underneath.
+ *
+ * The lead paragraph, the install snippet and the figure are lifted out of the
+ * rendered README so the hero is still generated from the repository's own
+ * words rather than copied into this script.
+ */
+function homeHero(body: string): { hero: string; rest: string } {
+  let rest = body;
+  const take = (pattern: RegExp): string => {
+    const match = pattern.exec(rest);
+    if (match === null) return '';
+    rest = rest.replace(match[0], '');
+    return match[0];
+  };
+
+  take(/<h1[^>]*>[\s\S]*?<\/h1>\n?/);
+  const lead = take(/<p>[\s\S]*?<\/p>\n?/).replace(/<\/?strong>/g, '');
+  const snippet = take(/<pre class="code"[^>]*>[\s\S]*?<\/pre>\n?/);
+  const figure = take(/<figure class="figure">[\s\S]*?<\/figure>\n?/);
+
+  const hero = `
+<section class="hero">
+  <p class="eyebrow">Local applications · Bun + browser + Brobridge</p>
+  <h1 class="hero__title">One process.<br>One tab.<br>One file.</h1>
+  <div class="hero__lead">${lead}</div>
+  <div class="hero__actions">
+    <a class="button" href="architecture.html">Read the architecture</a>
+    <a class="textlink" href="${REPO}" rel="noopener">View on GitHub</a>
+  </div>
+</section>
+<section class="media" aria-label="Overview">
+  <div class="card card--dark">
+    <p class="card__label">How a request travels</p>
+    ${figure.replace('<figure class="figure">', '<figure class="figure figure--card">')}
+  </div>
+  <div class="card card--stone">
+    <p class="card__label">Start</p>
+    ${snippet}
+    <p class="card__note">You get a working application: a typed call to the host, a cancellable
+    progress stream, honest connection states, and a build that produces one executable.</p>
+  </div>
+</section>`;
+
+  return { hero, rest: rest.replace(/^\n+/, '') };
 }
 
 function shell(page: Page, body: string, headings: Rendered['headings']): string {
+  const home = page.slug === 'index.html';
   const onThisPage = headings
     .filter((heading) => heading.level === 2)
     .map((heading) => `<li><a href="#${heading.id}">${escapeHtml(heading.text)}</a></li>`)
     .join('');
 
-  const title = page.title === 'Broapp' ? 'Broapp' : `${page.title} · Broapp`;
+  const title = home ? 'Broapp' : `${page.title} · Broapp`;
   const toc =
-    onThisPage === ''
+    onThisPage === '' || home
       ? ''
       : `<nav class="toc" aria-label="On this page"><h2 class="toc__heading">On this page</h2><ul class="toc__list">${onThisPage}</ul></nav>`;
+
+  let hero = '';
+  let article = body;
+  if (home) {
+    const split = homeHero(body);
+    hero = split.hero;
+    article = split.rest;
+  }
 
   return `<!doctype html>
 <html lang="en">
@@ -291,31 +378,57 @@ function shell(page: Page, body: string, headings: Rendered['headings']): string
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="Scaffold a local application: a Bun process that serves a browser UI over an authenticated loopback connection, and compiles to one executable.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Space+Grotesk:wght@400;500&display=swap" rel="stylesheet">
 <style>${STYLES}</style>
 </head>
-<body>
+<body class="${home ? 'is-home' : 'is-doc'}">
 <a class="skip" href="#main">Skip to content</a>
+
+<div class="announce">
+  <p>Version 0.1.0 · Not yet on npm, so <code>bun create broapp</code> does not work yet.
+  <a href="publishing.html">Generate from a checkout</a></p>
+</div>
 
 <header class="topbar">
   <a class="topbar__brand" href="index.html">Broapp</a>
-  <nav class="topbar__links"><a href="${REPO}" rel="noopener">GitHub</a></nav>
-  <button class="topbar__toggle" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  <nav class="topbar__menu" aria-label="Primary">
+    <a href="architecture.html">Architecture</a>
+    <a href="security.html">Security</a>
+    <a href="host-operations.html">Guides</a>
+    <a href="comparison.html">Reference</a>
+  </nav>
+  <div class="topbar__actions">
+    <a class="button button--small" href="${REPO}" rel="noopener">GitHub</a>
+    <button class="topbar__toggle" type="button" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  </div>
 </header>
 
-<div class="layout">
+${hero}
+
+<div class="layout${home ? ' layout--home' : ''}">
   <nav class="sidebar" id="sidebar" aria-label="Documentation">${nav(page)}</nav>
 
   <main class="main" id="main">
-    <article class="prose">${body}</article>
-    <footer class="footer">
-      <p>Broapp is MIT licensed. Transport, authentication and streaming are
-      <a href="https://github.com/praveenvijayan/brobridge" rel="noopener">Brobridge</a>, used unchanged.</p>
-      <p><a href="${REPO}/blob/main/${page.source}" rel="noopener">Edit this page on GitHub</a></p>
-    </footer>
+    <article class="prose">${article}</article>
+    <p class="edit"><a href="${REPO}/blob/main/${page.source}" rel="noopener">Edit this page on GitHub</a></p>
   </main>
 
   ${toc}
 </div>
+
+<footer class="footer">
+  <div class="footer__inner">
+    <div class="footer__brand">
+      <p class="eyebrow eyebrow--coral">Broapp</p>
+      <p class="footer__claim">A Bun process, a browser tab, one executable.</p>
+      <p class="footer__legal">MIT licensed. Transport, authentication and streaming are
+      <a href="https://github.com/praveenvijayan/brobridge" rel="noopener">Brobridge</a>, used unchanged.</p>
+    </div>
+    ${footerColumns()}
+  </div>
+</footer>
 
 <script>
   // The only script on the site: one button, for narrow screens.
@@ -333,123 +446,267 @@ function shell(page: Page, body: string, headings: Rendered['headings']): string
 `;
 }
 
+/*
+ * Design tokens follow a restrained editorial system: a white canvas, one
+ * near-black primary, a deep green product band, warm stone surfaces, coral as
+ * a small warm accent, and a display / body type split. Surfaces are flat;
+ * depth is borders and surface alternation, never shadows.
+ */
 const STYLES = `
 :root {
-  color-scheme: light dark;
-  --bg: #fbfbfa;
-  --surface: #ffffff;
-  --border: #e4e3e0;
-  --text: #1b1a18;
-  --muted: #6b6862;
-  --accent: #1f5f4f;
-  --accent-soft: #eaf3f0;
-  --code-bg: #f4f4f2;
-  --max: 44rem;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #16171a;
-    --surface: #1c1e22;
-    --border: #33363c;
-    --text: #eceef1;
-    --muted: #a3a8b1;
-    --accent: #6fd3b4;
-    --accent-soft: #1d2b28;
-    --code-bg: #202329;
-  }
+  color-scheme: light;
+  --primary: #17171c;
+  --black: #000000;
+  --ink: #212121;
+  --deep-green: #003c33;
+  --canvas: #ffffff;
+  --stone: #eeece7;
+  --pale-green: #edfce9;
+  --pale-blue: #f1f5ff;
+  --hairline: #d9d9dd;
+  --border-light: #e5e7eb;
+  --card-border: #f2f2f2;
+  --muted: #93939f;
+  --slate: #75758a;
+  --body-muted: #616161;
+  --blue: #1863dc;
+  --focus: #4c6ee6;
+  --coral: #ff7759;
+  --on-dark: #ffffff;
+
+  --display: "Space Grotesk", "CohereText", Inter, ui-sans-serif, system-ui, sans-serif;
+  --body: Inter, "Unica77 Cohere Web", Arial, ui-sans-serif, system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --r-xs: 4px; --r-sm: 8px; --r-md: 16px; --r-lg: 22px; --r-pill: 32px;
+  --measure: 44rem;
+  --wide: 84rem;
 }
 *, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--body);
   font-size: 16px;
-  line-height: 1.62;
-  -webkit-text-size-adjust: 100%;
+  line-height: 1.5;
+  font-feature-settings: "ss01", "cv11";
 }
-a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+a { color: var(--blue); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { color: var(--ink); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
+img { max-width: 100%; height: auto; display: block; }
 
-.skip { position: absolute; left: -9999px; padding: 0.6rem 1rem; background: var(--accent); color: var(--bg); z-index: 10; }
+.skip { position: absolute; left: -9999px; padding: 0.6rem 1rem; background: var(--primary); color: var(--on-dark); z-index: 20; }
 .skip:focus { left: 0.5rem; top: 0.5rem; }
 
-.topbar {
-  position: sticky; top: 0; z-index: 5;
-  display: flex; align-items: center; gap: 1rem;
-  padding: 0.7rem 1.25rem;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+/* ---- eyebrow: uppercase mono label ---------------------------------- */
+.eyebrow {
+  margin: 0 0 1rem;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.28px;
+  text-transform: uppercase;
+  color: var(--slate);
 }
-.topbar__brand { font-weight: 680; font-size: 1.05rem; color: var(--text); text-decoration: none; letter-spacing: -0.01em; }
-.topbar__links { margin-left: auto; font-size: 0.92rem; }
+.eyebrow--coral { color: var(--coral); }
+
+/* ---- buttons --------------------------------------------------------- */
+.button {
+  display: inline-block;
+  padding: 12px 24px;
+  background: var(--primary);
+  color: var(--on-dark);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.71;
+  text-decoration: none;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--primary);
+}
+.button:hover { background: var(--black); color: var(--on-dark); }
+.button--small { padding: 6px 14px; }
+.textlink { color: var(--ink); font-size: 16px; text-decoration-color: var(--hairline); }
+.textlink:hover { text-decoration-color: var(--ink); }
+
+/* ---- announcement bar ----------------------------------------------- */
+.announce {
+  min-height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 1.25rem;
+  background: var(--black);
+  color: var(--on-dark);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+.announce p { margin: 0.55rem 0; }
+.announce a { color: var(--on-dark); }
+.announce code { background: rgba(255,255,255,0.12); color: var(--on-dark); }
+
+/* ---- topbar: brand left, menu centre, action right ------------------ */
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 2rem;
+  background: var(--canvas);
+  border-bottom: 1px solid var(--hairline);
+}
+.topbar__brand { font-family: var(--display); font-size: 20px; font-weight: 500; letter-spacing: -0.4px; color: var(--ink); text-decoration: none; }
+.topbar__menu { display: flex; gap: 1.75rem; justify-content: center; }
+.topbar__menu a { color: var(--ink); font-size: 14px; text-decoration: none; }
+.topbar__menu a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.topbar__actions { display: flex; justify-content: flex-end; align-items: center; gap: 0.75rem; }
 .topbar__toggle {
   display: none;
-  padding: 0.35rem 0.7rem; font: inherit; font-size: 0.88rem; font-weight: 600;
-  background: transparent; color: var(--text);
-  border: 1px solid var(--border); border-radius: 7px; cursor: pointer;
+  padding: 6px 12px; font: inherit; font-size: 14px; font-weight: 500;
+  background: transparent; color: var(--primary);
+  border: 1px solid var(--primary); border-radius: 30px; cursor: pointer;
 }
 
+/* ---- home hero -------------------------------------------------------- */
+.hero {
+  max-width: var(--wide);
+  margin: 0 auto;
+  padding: 80px 2rem 48px;
+}
+.hero__title {
+  margin: 0 0 32px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(48px, 8vw, 96px);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.hero__lead { max-width: 40rem; font-size: 18px; line-height: 1.4; color: var(--body-muted); }
+.hero__lead p { margin: 0; }
+.hero__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; margin-top: 32px; }
+
+/* the two-card media composition under the declaration */
+.media {
+  max-width: var(--wide);
+  margin: 0 auto;
+  padding: 0 2rem 80px;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 24px;
+  align-items: stretch;
+}
+.card { border-radius: var(--r-lg); padding: 32px; border: 1px solid var(--card-border); }
+.card--dark { background: var(--primary); color: var(--on-dark); border-color: var(--primary); }
+.card--stone { background: var(--stone); color: var(--ink); border-color: var(--stone); display: flex; flex-direction: column; }
+.card__label {
+  margin: 0 0 20px;
+  font-family: var(--mono); font-size: 12px; letter-spacing: 0.28px; text-transform: uppercase;
+  color: inherit; opacity: 0.7;
+}
+.card--stone .code { margin: 0; background: var(--canvas); border-color: var(--canvas); }
+.card__note { margin: 24px 0 0; font-size: 14px; line-height: 1.5; color: var(--body-muted); }
+.figure { margin: 0 0 1.5rem; }
+.figure img { width: 100%; border-radius: var(--r-sm); }
+.figure--card { margin: 0; }
+.figure--card img { border-radius: var(--r-sm); }
+
+/* ---- documentation layout ------------------------------------------ */
 .layout {
   display: grid;
   grid-template-columns: 15rem minmax(0, 1fr) 13rem;
-  gap: 2.5rem;
-  max-width: 78rem;
+  gap: 3rem;
+  max-width: var(--wide);
   margin: 0 auto;
-  padding: 2rem 1.25rem 5rem;
+  padding: 48px 2rem 96px;
   align-items: start;
 }
+.layout--home { grid-template-columns: minmax(0, 1fr); padding-top: 0; border-top: 1px solid var(--hairline); }
+.layout--home .sidebar, .layout--home .toc { display: none; }
+.layout--home .main { max-width: var(--measure); margin: 0 auto; padding-top: 64px; }
 
-.sidebar { position: sticky; top: 4.2rem; font-size: 0.92rem; }
-.nav__group + .nav__group { margin-top: 1.4rem; }
-.nav__heading { margin: 0 0 0.45rem; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.sidebar { position: sticky; top: 4.6rem; font-size: 14px; }
+.nav__group + .nav__group { margin-top: 1.75rem; }
+.nav__heading { margin: 0 0 0.5rem; font-family: var(--mono); font-size: 12px; font-weight: 400; letter-spacing: 0.28px; text-transform: uppercase; color: var(--slate); }
 .nav__list { list-style: none; margin: 0; padding: 0; }
 .nav__list li { margin: 0; }
-.nav__list a { display: block; padding: 0.24rem 0.55rem; margin-left: -0.55rem; border-radius: 6px; color: var(--muted); text-decoration: none; }
-.nav__list a:hover { color: var(--text); background: var(--code-bg); }
-.nav__list a[aria-current="page"] { color: var(--accent); background: var(--accent-soft); font-weight: 620; }
+.nav__list a { display: block; padding: 6px 12px; margin-left: -12px; border-radius: 30px; color: var(--body-muted); text-decoration: none; }
+.nav__list a:hover { color: var(--ink); background: var(--stone); }
+.nav__list a[aria-current="page"] { color: var(--deep-green); background: var(--pale-green); }
 
-.toc { position: sticky; top: 4.2rem; font-size: 0.86rem; }
-.toc__heading { margin: 0 0 0.45rem; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
-.toc__list { list-style: none; margin: 0; padding: 0; }
-.toc__list a { display: block; padding: 0.16rem 0; color: var(--muted); text-decoration: none; }
-.toc__list a:hover { color: var(--accent); }
+.toc { position: sticky; top: 4.6rem; font-size: 14px; }
+.toc__heading { margin: 0 0 0.5rem; font-family: var(--mono); font-size: 12px; font-weight: 400; letter-spacing: 0.28px; text-transform: uppercase; color: var(--slate); }
+.toc__list { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--hairline); }
+.toc__list a { display: block; padding: 4px 0 4px 12px; color: var(--body-muted); text-decoration: none; }
+.toc__list a:hover { color: var(--ink); }
 
 .main { min-width: 0; }
-.prose { max-width: var(--max); }
-.prose h1 { margin: 0 0 1.1rem; font-size: 2rem; font-weight: 680; line-height: 1.2; letter-spacing: -0.022em; }
-.prose h2 { margin: 2.4rem 0 0.8rem; padding-top: 0.6rem; border-top: 1px solid var(--border); font-size: 1.3rem; font-weight: 660; letter-spacing: -0.012em; }
-.prose h3 { margin: 1.8rem 0 0.6rem; font-size: 1.05rem; font-weight: 650; }
-.prose h4 { margin: 1.4rem 0 0.5rem; font-size: 0.95rem; font-weight: 650; color: var(--muted); }
-.prose p { margin: 0 0 1rem; }
-.prose ul, .prose ol { margin: 0 0 1rem; padding-left: 1.35rem; }
-.prose li { margin: 0.3rem 0; }
-.prose hr { margin: 2.5rem 0; border: 0; border-top: 1px solid var(--border); }
-.prose blockquote { margin: 0 0 1rem; padding: 0.15rem 1rem; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; }
+.prose { max-width: var(--measure); }
+.prose h1 { margin: 0 0 1.5rem; font-family: var(--display); font-size: 48px; font-weight: 400; line-height: 1.2; letter-spacing: -0.48px; }
+.prose h2 { margin: 3.5rem 0 1rem; padding-top: 1.5rem; border-top: 1px solid var(--hairline); font-family: var(--display); font-size: 32px; font-weight: 400; line-height: 1.2; letter-spacing: -0.32px; }
+.prose h3 { margin: 2.25rem 0 0.75rem; font-family: var(--display); font-size: 24px; font-weight: 400; line-height: 1.3; }
+.prose h4 { margin: 1.75rem 0 0.5rem; font-family: var(--mono); font-size: 14px; font-weight: 400; letter-spacing: 0.28px; text-transform: uppercase; color: var(--slate); }
+.prose p { margin: 0 0 1.1rem; }
+.prose ul, .prose ol { margin: 0 0 1.1rem; padding-left: 1.4rem; }
+.prose li { margin: 0.35rem 0; }
+.prose li::marker { color: var(--muted); }
+.prose hr { margin: 3rem 0; border: 0; border-top: 1px solid var(--hairline); }
+.prose blockquote { margin: 0 0 1.1rem; padding: 16px 24px; background: var(--pale-blue); border-radius: var(--r-sm); color: var(--ink); }
 .prose blockquote p:last-child { margin-bottom: 0; }
+.prose strong { font-weight: 500; }
 
-code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 0.875em; background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; }
-.code { margin: 0 0 1.2rem; padding: 0.9rem 1rem; background: var(--code-bg); border: 1px solid var(--border); border-radius: 9px; overflow-x: auto; font-size: 0.86rem; line-height: 1.55; }
+code { font-family: var(--mono); font-size: 0.875em; background: var(--stone); padding: 0.1em 0.4em; border-radius: var(--r-xs); }
+.code { margin: 0 0 1.5rem; padding: 16px 20px; background: var(--stone); border: 1px solid var(--stone); border-radius: var(--r-sm); overflow-x: auto; font-size: 14px; line-height: 1.6; }
 .code code { background: none; padding: 0; font-size: inherit; }
 
-.table-scroll { overflow-x: auto; margin: 0 0 1.2rem; }
-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
-th, td { padding: 0.5rem 0.7rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
-th { font-weight: 650; color: var(--muted); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.table-scroll { overflow-x: auto; margin: 0 0 1.5rem; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { padding: 12px 12px 12px 0; text-align: left; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+th { font-family: var(--mono); font-weight: 400; color: var(--slate); font-size: 12px; text-transform: uppercase; letter-spacing: 0.28px; }
 
-.footer { max-width: var(--max); margin-top: 3.5rem; padding-top: 1.2rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.86rem; }
-.footer p { margin: 0 0 0.4rem; }
+.edit { max-width: var(--measure); margin: 3rem 0 0; font-size: 14px; color: var(--muted); }
+.edit a { color: var(--slate); }
 
+/* ---- footer: dark band ------------------------------------------------ */
+.footer { background: var(--primary); color: var(--on-dark); }
+.footer__inner {
+  max-width: var(--wide);
+  margin: 0 auto;
+  padding: 64px 2rem 48px;
+  display: grid;
+  grid-template-columns: 2fr repeat(3, 1fr);
+  gap: 32px;
+}
+.footer__claim { margin: 0 0 16px; font-family: var(--display); font-size: 24px; line-height: 1.3; letter-spacing: -0.24px; max-width: 22rem; }
+.footer__legal { margin: 0; font-size: 12px; line-height: 1.4; color: var(--muted); max-width: 22rem; }
+.footer__legal a { color: var(--on-dark); }
+.footer__heading { margin: 0 0 12px; font-family: var(--mono); font-size: 12px; font-weight: 400; letter-spacing: 0.28px; text-transform: uppercase; color: var(--on-dark); }
+.footer__col ul { list-style: none; margin: 0; padding: 0; }
+.footer__col li { margin: 0 0 6px; }
+.footer__col a { color: var(--muted); font-size: 14px; text-decoration: none; }
+.footer__col a:hover { color: var(--on-dark); text-decoration: underline; }
+
+/* ---- responsive -------------------------------------------------------- */
 @media (max-width: 68rem) {
   .layout { grid-template-columns: 14rem minmax(0, 1fr); }
   .toc { display: none; }
+  .footer__inner { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 48rem) {
-  .topbar__toggle { display: block; }
-  .layout { grid-template-columns: minmax(0, 1fr); gap: 0; padding-top: 1.25rem; }
-  .sidebar { display: none; position: static; margin-bottom: 1.75rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
+  .topbar { grid-template-columns: 1fr auto; padding: 0.75rem 1.25rem; }
+  .topbar__menu { display: none; }
+  .topbar__toggle { display: inline-block; }
+  .hero { padding: 48px 1.25rem 32px; }
+  .hero__title { font-size: clamp(40px, 12vw, 64px); }
+  .media { grid-template-columns: minmax(0, 1fr); padding: 0 1.25rem 48px; }
+  .card { padding: 24px; }
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 24px 1.25rem 64px; }
+  .sidebar { display: none; position: static; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--hairline); }
   .sidebar--open { display: block; }
-  .prose h1 { font-size: 1.65rem; }
+  .prose h1 { font-size: 32px; }
+  .prose h2 { font-size: 24px; }
+  .footer__inner { grid-template-columns: 1fr; padding: 48px 1.25rem 32px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
@@ -466,6 +723,15 @@ for (const page of PAGES) {
   const rendered = renderMarkdown(markdown);
   await writeFile(join(out, page.slug), shell(page, rendered.html, rendered.headings), 'utf8');
   console.log(`  ${page.slug.padEnd(28)} <- ${page.source}`);
+}
+
+for (const dir of ASSET_DIRS) {
+  await mkdir(join(out, dir), { recursive: true });
+  for (const name of await readdir(join(root, dir))) {
+    if (!name.endsWith('.svg')) continue;
+    await copyFile(join(root, dir, name), join(out, dir, name));
+    console.log(`  ${`${dir}/${name}`.padEnd(28)} <- ${dir}/${name}`);
+  }
 }
 
 // Tells GitHub Pages not to run the output through Jekyll, which would ignore

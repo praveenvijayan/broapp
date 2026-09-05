@@ -7,8 +7,7 @@
 Only `brobridge@0.2.0` has this defect. Raise the dependency to `^0.2.1`, which
 publishes a real range, and delete any `"overrides": { "@brobridgejs/core": … }`
 entry left over from the 0.2.0 workaround: an exact override pins the protocol
-core below the server and client that need it. Details in
-[upstream-blockers.md](upstream-blockers.md).
+core below the server and client that need it.
 
 ### `bun create broapp` cannot find the package
 
