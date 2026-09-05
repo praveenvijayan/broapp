@@ -28,7 +28,7 @@
     "access": "public"
   },
   "bin": {
-    "create-broapp": "./src/main.ts"
+    "create-broapp": "src/main.ts"
   },
   "files": [
     "src",
