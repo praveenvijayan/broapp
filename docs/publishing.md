@@ -5,11 +5,12 @@ what a maintainer has to do, and what they have to decide.
 
 ## Status
 
-Neither package is on npm yet. `broapp` and `create-broapp` are both
-unregistered, so `bun create broapp` does not work until someone publishes them.
-
-Until then, generate from a checkout — see
-[troubleshooting.md](troubleshooting.md).
+Both packages are on npm as of 2026-09-05, at version 0.1.0:
+[broapp](https://www.npmjs.com/package/broapp) and
+[create-broapp](https://www.npmjs.com/package/create-broapp). Each was
+published with provenance from the `Publish to npm` workflow, so
+`bun create broapp my-app` works. To generate from an unreleased checkout
+instead, see [troubleshooting.md](troubleshooting.md).
 
 ## Before publishing
 
@@ -27,9 +28,9 @@ Until then, generate from a checkout — see
 
 These are the things a person has to do. None of them happen from a push.
 
-**Register the names.** `broapp` and `create-broapp` are both free on npm as of
-2026-09-05. Publishing claims them. Check again first — an unpublished name is
-not a reservation.
+**Bump the version.** The names are claimed; a version that already exists
+cannot be published again, and cannot be republished after an unpublish. Raise
+the version in both `package.json` files before running the workflow.
 
 **Publish `broapp` first, then `create-broapp`.** Never the other way round.
 

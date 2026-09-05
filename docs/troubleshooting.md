@@ -11,8 +11,11 @@ core below the server and client that need it.
 
 ### `bun create broapp` cannot find the package
 
-The packages are not published to npm yet. Until they are, generate from a
-checkout:
+Both packages are on npm, so first confirm the registry you are talking to can
+see them: `npm view create-broapp version`. A private mirror that has not
+synced, or a stale Bun cache (`bun pm cache rm`), are the usual causes.
+
+To generate from an unreleased checkout instead of the published package:
 
 ```bash
 bun run scripts/pack-local.ts

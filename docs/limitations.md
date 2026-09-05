@@ -65,11 +65,6 @@ need more; `defineContract` accepts anything with a `parse` method.
 React. Everything is inline, so that is one request and no waterfall, but it is
 not tiny. A smaller UI library would shrink it substantially.
 
-## Not published yet
-
-`create-broapp` and `broapp` are not on npm, so `bun create broapp` does not
-work. Generating from a checkout does. See [publishing.md](publishing.md).
-
 ## Verified on
 
 Bun 1.4.0 on macOS 15 (`darwin-arm64`). The Linux and Windows targets compile
