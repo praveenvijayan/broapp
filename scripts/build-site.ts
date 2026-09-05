@@ -350,6 +350,43 @@ function homeHero(body: string): { hero: string; rest: string } {
   return { hero, rest: rest.replace(/^\n+/, '') };
 }
 
+/**
+ * The home page's "What Broapp contributes" section becomes a dark feature
+ * band: each list item is a capability card, with its bold lead as the title.
+ *
+ * Keyed on the heading's id so the README stays the source of the words. If
+ * the heading is renamed the section simply renders as ordinary prose.
+ */
+function contributionBand(body: string): { before: string; band: string; after: string } {
+  const pattern =
+    /<h2 id="what-broapp-contributes">([\s\S]*?)<\/h2>\n<p>([\s\S]*?)<\/p>\n<ul>([\s\S]*?)<\/ul>\n<p>([\s\S]*?)<\/p>/;
+  const match = pattern.exec(body);
+  if (match === null) return { before: body, band: '', after: '' };
+  const [whole, heading = '', lead = '', list = '', note = ''] = match;
+
+  const cards = list.replace(
+    /<li><strong>([^<]*?)\.?<\/strong>\s*([\s\S]*?)<\/li>/g,
+    (_item, title: string, text: string) =>
+      `<li class="capability"><h3 class="capability__title">${title}</h3><p class="capability__text">${text}</p></li>`,
+  );
+
+  const band = `<section class="band-wrap" id="what-broapp-contributes">
+  <div class="band" aria-labelledby="band-title">
+    <p class="eyebrow eyebrow--coral">${heading}</p>
+    <h2 class="band__title" id="band-title">${lead}</h2>
+    <ul class="band__grid">${cards}</ul>
+    <p class="band__note">${note}</p>
+  </div>
+</section>`;
+
+  const at = body.indexOf(whole);
+  return {
+    before: body.slice(0, at).trimEnd(),
+    band,
+    after: body.slice(at + whole.length).replace(/^\n+/, ''),
+  };
+}
+
 function shell(page: Page, body: string, headings: Rendered['headings']): string {
   const home = page.slug === 'index.html';
   const onThisPage = headings
@@ -365,11 +402,21 @@ function shell(page: Page, body: string, headings: Rendered['headings']): string
 
   let hero = '';
   let article = body;
+  let band = '';
+  let after = '';
   if (home) {
     const split = homeHero(body);
     hero = split.hero;
-    article = split.rest;
+    const sections = contributionBand(split.rest);
+    article = sections.before;
+    band = sections.band;
+    after = sections.after;
   }
+  const layoutClass = home ? 'layout layout--home' : 'layout';
+  const tail =
+    after === ''
+      ? ''
+      : `<div class="${layoutClass} layout--continued"><main class="main"><article class="prose">${after}</article></main></div>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -407,16 +454,20 @@ function shell(page: Page, body: string, headings: Rendered['headings']): string
 
 ${hero}
 
-<div class="layout${home ? ' layout--home' : ''}">
+<div class="${layoutClass}">
   <nav class="sidebar" id="sidebar" aria-label="Documentation">${nav(page)}</nav>
 
   <main class="main" id="main">
     <article class="prose">${article}</article>
-    <p class="edit"><a href="${REPO}/blob/main/${page.source}" rel="noopener">Edit this page on GitHub</a></p>
+    ${band === '' ? `<p class="edit"><a href="${REPO}/blob/main/${page.source}" rel="noopener">Edit this page on GitHub</a></p>` : ''}
   </main>
 
   ${toc}
 </div>
+
+${band}
+${tail}
+${band === '' ? '' : `<div class="${layoutClass} layout--edit"><main class="main"><p class="edit"><a href="${REPO}/blob/main/${page.source}" rel="noopener">Edit this page on GitHub</a></p></main></div>`}
 
 <footer class="footer">
   <div class="footer__inner">
@@ -612,6 +663,48 @@ img { max-width: 100%; height: auto; display: block; }
 .figure--card { margin: 0; }
 .figure--card img { border-radius: var(--r-sm); }
 
+/* ---- dark feature band (home) ---------------------------------------- */
+.band-wrap { max-width: var(--wide); margin: 0 auto; padding: 16px 2rem; }
+.band {
+  padding: 80px;
+  background: var(--deep-green);
+  color: var(--on-dark);
+  border-radius: var(--r-lg);
+}
+.band .eyebrow { margin-bottom: 24px; }
+.band__title {
+  margin: 0 0 48px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  max-width: 30rem;
+  font-family: var(--display);
+  font-size: 48px !important;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.48px;
+  color: var(--on-dark);
+}
+.band__grid {
+  list-style: none;
+  margin: 0 0 48px !important;
+  padding: 0 !important;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.capability {
+  margin: 0 !important;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--r-sm);
+}
+.capability__title { margin: 0 0 12px !important; font-family: var(--display); font-size: 24px !important; font-weight: 400; line-height: 1.3; color: var(--on-dark); }
+.capability__text { margin: 0 !important; font-size: 15px; line-height: 1.5; color: rgba(255, 255, 255, 0.78); }
+.capability__text code, .band__note code { background: rgba(255, 255, 255, 0.12); color: var(--on-dark); }
+.band__note { margin: 0 !important; max-width: 40rem; font-size: 16px; line-height: 1.5; color: rgba(255, 255, 255, 0.78); }
+.band__note a { color: var(--on-dark); }
+
 /* ---- documentation layout ------------------------------------------ */
 .layout {
   display: grid;
@@ -624,7 +717,12 @@ img { max-width: 100%; height: auto; display: block; }
 }
 .layout--home { grid-template-columns: minmax(0, 1fr); padding-top: 0; border-top: 1px solid var(--hairline); }
 .layout--home .sidebar, .layout--home .toc { display: none; }
-.layout--home .main { max-width: var(--measure); margin: 0 auto; padding-top: 64px; }
+.layout--home .main { width: 100%; max-width: var(--measure); margin: 0 auto; padding-top: 64px; }
+.layout--continued { border-top: 0; padding-bottom: 0; }
+.layout--continued .main { padding-top: 0; }
+.layout--continued .prose h2:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.layout--edit { border-top: 0; padding-top: 0; }
+.layout--edit .main { padding-top: 0; }
 
 .sidebar { position: sticky; top: 4.6rem; font-size: 14px; }
 .nav__group + .nav__group { margin-top: 1.75rem; }
@@ -692,6 +790,8 @@ th { font-family: var(--mono); font-weight: 400; color: var(--slate); font-size:
   .layout { grid-template-columns: 14rem minmax(0, 1fr); }
   .toc { display: none; }
   .footer__inner { grid-template-columns: 1fr 1fr; }
+  .band { padding: 48px; }
+  .band__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 48rem) {
   .topbar { grid-template-columns: 1fr auto; padding: 0.75rem 1.25rem; }
@@ -707,6 +807,10 @@ th { font-family: var(--mono); font-weight: 400; color: var(--slate); font-size:
   .prose h1 { font-size: 32px; }
   .prose h2 { font-size: 24px; }
   .footer__inner { grid-template-columns: 1fr; padding: 48px 1.25rem 32px; }
+  .band-wrap { padding: 8px 1.25rem; }
+  .band { padding: 32px 24px; }
+  .band__title { font-size: 32px !important; }
+  .band__grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }

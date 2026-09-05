@@ -24,12 +24,21 @@ desktop-shaped software. [glitchedit](https://github.com/HelgeSverre/glitchedit)
 [bun-webui](https://github.com/webui-dev/bun-webui) all do it, and
 [brolog](https://github.com/praveenvijayan/brolog) does it over Brobridge.
 
-Broapp did not invent it. What Broapp contributes is the reusable developer
-experience around it: a generator, one development command, a typed contract
-between host and browser, a build that embeds the interface and enforces its own
-offline and content-security guarantees, a lifecycle with documented shutdown
-behaviour, and a release pipeline. The security-sensitive parts — the trust
-fence, the one-time launch token, the session cookie, the framing, resume — are
+Broapp did not invent it.
+
+## What Broapp contributes
+
+The reusable developer experience around the pattern:
+
+- **A generator.** `bun create broapp` scaffolds a working application, refuses unsafe destinations and never overwrites your files.
+- **One development command.** `bun run dev` rebuilds and restarts the host without spawning a tab per save.
+- **A typed contract.** One table of operations and streams that host and browser both import, validated on the host.
+- **A build that enforces its own guarantees.** The interface is embedded as one document, with a hash-pinned content-security policy and a check that nothing loads off-origin.
+- **A lifecycle with documented shutdown.** Two explicit modes, attachment tracked from the session hook, and real shutdown behaviour.
+- **A release pipeline.** Six compilation targets, native smoke tests where a runner exists, and cross-compiled binaries labelled as such.
+
+The security-sensitive parts — the trust fence, the one-time launch token, the
+session cookie, the framing, resume — are
 [Brobridge](https://github.com/praveenvijayan/brobridge), used unchanged.
 
 ## What is in here
