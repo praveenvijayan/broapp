@@ -387,8 +387,8 @@ function shell(page: Page, body: string, headings: Rendered['headings']): string
 <a class="skip" href="#main">Skip to content</a>
 
 <div class="announce">
-  <p>Version 0.1.0 · Not yet on npm, so <code>bun create broapp</code> does not work yet.
-  <a href="publishing.html">Generate from a checkout</a></p>
+  <p>Version 0.1.0 · Published to npm. Scaffold with <code>bun create broapp my-app</code>.
+  <a href="https://www.npmjs.com/package/create-broapp" rel="noopener">View on npm</a></p>
 </div>
 
 <header class="topbar">
