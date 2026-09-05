@@ -16,17 +16,38 @@ what Broapp does about it, and what would let Broapp drop the workaround.
 }
 ```
 
-`workspace:^` is a monorepo-local protocol. It is meant to be rewritten to a
-real range at publish time, and it was not. A package manager reading it
-outside the Brobridge repository has no workspace to resolve it against:
+`workspace:^` is a monorepo-local protocol. It must be rewritten to a real
+range before the tarball reaches npm, and for this package it was not. A package
+manager reading it outside the Brobridge repository has no workspace to resolve
+it against:
 
 ```
 error: Workspace dependency "@brobridgejs/core" not found
 error: @brobridgejs/core@workspace:^ failed to resolve
 ```
 
-`@brobridgejs/client@0.2.0` is unaffected — it correctly declares
-`"@brobridgejs/core": "^0.2.0"` — so only the server package is broken.
+Only `brobridge` is affected. `@brobridgejs/client@0.2.0` and
+`@brobridgejs/adapters@0.2.0` declare the same `workspace:^` in their sources
+and both published `^0.2.0` correctly, so the source manifests are not the
+problem — the packing step for this one package was.
+
+**Root cause, established by experiment.** The rewrite is the package manager's
+job, and the two managers behave differently:
+
+| Command | Result for `packages/server` |
+| --- | --- |
+| `npm pack` | emits a tarball with `"@brobridgejs/core": "workspace:^"` verbatim |
+| `pnpm pack`, dependency not installed | exits 1, `ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL`, emits nothing |
+| `pnpm pack`, after `pnpm install` | emits `"@brobridgejs/core": "^0.2.0"` |
+
+pnpm never produces a broken tarball — it either rewrites correctly or refuses.
+npm passes the specifier straight through. So the published `brobridge@0.2.0`
+tarball was produced by **npm**, not by the repository's pnpm/changesets
+pipeline, which is consistent with `publish-manual.yml`'s own note about "a
+first publish before the changesets flow is wired up".
+
+The source needs no change. Republishing through pnpm with a completed install
+produces a correct manifest as-is.
 
 **What Broapp does.** Every Broapp project, and every generated application,
 carries an `overrides` entry that supplies the missing range:
