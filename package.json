@@ -1,0 +1,38 @@
+{
+  "name": "@broapp/workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Broapp \u2014 a starter kit for local applications built on Bun, a browser UI, and Brobridge",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -b tsconfig.json",
+    "test": "bun test tests packages",
+    "check": "bun run typecheck && bun run test",
+    "pack:local": "bun run scripts/pack-local.ts",
+    "dryrun": "bun run scripts/release-dry-run.ts",
+    "site": "bun run scripts/build-site.ts",
+    "smoke": "bun run scripts/smoke-binary.ts"
+  },
+  "devDependencies": {
+    "@brobridgejs/client": "^0.2.0",
+    "@types/bun": "^1.2.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.1",
+    "broapp": "workspace:*",
+    "brobridge": "^0.2.0",
+    "typescript": "^5.7.2",
+    "ws": "^8.21.3"
+  },
+  "overrides": {
+    "@brobridgejs/core": "0.2.0"
+  }
+}

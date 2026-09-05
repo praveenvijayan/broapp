@@ -1,0 +1,444 @@
+/*
+ * Ordinary CSS, no framework, no web fonts.
+ *
+ * A web font would be an off-origin request, which would break offline
+ * operation and tell a third party when this application runs — so the type
+ * stack is the platform's. `broapp build` fails the build if an off-origin URL
+ * appears in the bundled document, so this is enforced rather than remembered.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --border: #e3e2df;
+  --text: #1b1a18;
+  --text-muted: #6b6862;
+  --accent: #1f5f4f;
+  --accent-contrast: #ffffff;
+  --ok: #1f5f4f;
+  --pending: #8a6a12;
+  --bad: #96311f;
+  --focus: #1f5f4f;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a;
+    --surface: #1e2024;
+    --border: #32353b;
+    --text: #eceef1;
+    --text-muted: #a2a7b0;
+    --accent: #6fd3b4;
+    --accent-contrast: #10231e;
+    --ok: #6fd3b4;
+    --pending: #e0b95a;
+    --bad: #f08a76;
+    --focus: #6fd3b4;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-text-size-adjust: 100%;
+}
+
+/*
+ * A visible focus ring on every interactive element. `:focus-visible` shows it
+ * for keyboard users without putting a ring around a clicked button.
+ */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.app {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+
+.app__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+}
+
+.app__title {
+  margin: 0 0 0.35rem;
+  font-size: 1.6rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.app__lede {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--text-muted);
+}
+
+.app__main {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.app__footer {
+  margin-top: 2rem;
+}
+
+/* Cards -------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.25rem 1.4rem;
+}
+
+.card__title {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+  font-weight: 640;
+}
+
+.card__lede {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+  font-size: 0.94rem;
+}
+
+/* Connection badge --------------------------------------------------- */
+
+.badge {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0 0.5rem;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  max-width: 17rem;
+}
+
+.badge__dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.badge[data-tone="ok"] .badge__dot {
+  background: var(--ok);
+}
+
+.badge[data-tone="pending"] .badge__dot {
+  background: var(--pending);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.badge[data-tone="bad"] .badge__dot {
+  background: var(--bad);
+}
+
+.badge__text {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.badge__detail {
+  grid-column: 2;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/*
+ * Motion is decoration here. A user who has asked their system to reduce it
+ * gets a static dot, which conveys exactly the same information.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Forms -------------------------------------------------------------- */
+
+.form__label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.form__label--inline {
+  margin: 0;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.form__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.input--select {
+  flex: 0 1 15rem;
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
+.button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.button--danger {
+  background: transparent;
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+/* Progress ----------------------------------------------------------- */
+
+.progress {
+  width: 100%;
+  height: 0.5rem;
+  margin: 1rem 0 0.6rem;
+  appearance: none;
+  border: none;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.progress::-webkit-progress-bar {
+  background: var(--border);
+}
+
+.progress::-webkit-progress-value {
+  background: var(--accent);
+}
+
+.progress::-moz-progress-bar {
+  background: var(--accent);
+}
+
+/* Messages ----------------------------------------------------------- */
+
+.message {
+  margin: 0.85rem 0 0;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  min-height: 1.4em;
+}
+
+.message--ok {
+  color: var(--text);
+}
+
+.message--error {
+  color: var(--bad);
+}
+
+.message__meta {
+  color: var(--text-muted);
+}
+
+/* Developer panel ---------------------------------------------------- */
+
+.details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.4rem 1rem;
+}
+
+.details__summary {
+  cursor: pointer;
+  padding: 0.55rem 0;
+  font-weight: 600;
+  font-size: 0.94rem;
+}
+
+.details__body {
+  padding-bottom: 0.75rem;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+}
+
+.details__body p {
+  margin: 0 0 0.9rem;
+}
+
+.details__note {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.86rem;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) 1fr;
+  gap: 0.3rem 1rem;
+  margin: 0 0 1rem;
+}
+
+.facts dt {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+@media (max-width: 30rem) {
+  .facts {
+    grid-template-columns: 1fr;
+    gap: 0 0;
+  }
+
+  .facts dd {
+    margin-bottom: 0.5rem;
+  }
+}
+
+/* File processor ----------------------------------------------------- */
+
+.card__head {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.path {
+  margin: 0 0 0.6rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.files {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  max-height: 18rem;
+  overflow-y: auto;
+  border-radius: 8px;
+}
+
+.files__item + .files__item {
+  border-top: 1px solid var(--border);
+}
+
+.files__label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.2rem;
+  cursor: pointer;
+}
+
+.files__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.files__meta {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.skipped {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}

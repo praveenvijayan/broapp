@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test tests
+
+  examples:
+    name: Example — ${{ matrix.example }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [dashboard, file-processor, notes]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: examples/${{ matrix.example }}
+        run: bunx tsc --noEmit
+      - name: Test
+        working-directory: examples/${{ matrix.example }}
+        # Not every example has tests; run them only where they exist.
+        run: |
+          if [ -d tests ]; then bun test tests; else echo "no tests"; fi
+      - name: Build
+        working-directory: examples/${{ matrix.example }}
+        run: bun run build
+      - name: Smoke test the native binary
+        working-directory: examples/${{ matrix.example }}
+        run: bun run ../../scripts/smoke-binary.ts ./release/${{ matrix.example }}
+
+  dry-run:
+    name: Release dry run — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      # Packs the publishable packages, generates a project *outside* the
+      # workspace from the packed tarballs, builds it, and runs the compiled
+      # binary from an unrelated directory. This is the check that catches a
+      # package that works from the monorepo and not from npm.
+      - run: bun run scripts/release-dry-run.ts
+
+  cross-compile:
+    name: Cross-compile every target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - name: Build all targets
+        working-directory: examples/notes
+        run: bun run build:all
+      # Deliberately no execution step. A cross-compiled binary is built, not
+      # run; claiming otherwise is the thing this repository is careful about.
+      - name: Report
+        working-directory: examples/notes
+        run: |
+          echo "Compiled (NOT executed — cross-compilation only):"
+          ls -lh release/

@@ -1,0 +1,33 @@
+{
+  "name": "file-processor",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Process files under an authorized directory, with progress and cancellation.",
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "scripts": {
+    "dev": "broapp dev",
+    "build": "broapp build",
+    "build:page": "broapp build --page",
+    "build:all": "broapp build --all-targets",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "check": "bun run typecheck && bun run test"
+  },
+  "dependencies": {
+    "broapp": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "@brobridgejs/core": "0.2.0"
+  }
+}

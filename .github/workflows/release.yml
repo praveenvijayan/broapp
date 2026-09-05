@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      example:
+        description: Example to build binaries for
+        required: false
+        default: notes
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test tests
+      - run: bun run scripts/release-dry-run.ts
+
+  # Built where they run. A cross-compiled binary would be faster to produce and
+  # would not have been executed by anything, which is exactly what a release
+  # must not ship unverified.
+  binaries:
+    name: ${{ matrix.target }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: darwin-arm64, native: true }
+          - { os: macos-13, target: darwin-x64, native: true }
+          - { os: ubuntu-latest, target: linux-x64, native: true }
+          - { os: windows-latest, target: windows-x64, native: true }
+          # No hosted runner for these, so they are cross-compiled and labelled.
+          - { os: ubuntu-latest, target: linux-arm64, native: false }
+          - { os: ubuntu-latest, target: linux-x64-musl, native: false }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+
+      - name: Build
+        working-directory: examples/${{ github.event.inputs.example || 'notes' }}
+        run: bun run build -- --target ${{ matrix.target }}
+
+      - name: Smoke test (native only)
+        if: matrix.native
+        working-directory: examples/${{ github.event.inputs.example || 'notes' }}
+        shell: bash
+        run: |
+          name=${{ github.event.inputs.example || 'notes' }}
+          binary="./release/${name}-${{ matrix.target }}"
+          [ -f "$binary.exe" ] && binary="$binary.exe"
+          bun run ../../scripts/smoke-binary.ts "$binary"
+
+      - name: Archive
+        working-directory: examples/${{ github.event.inputs.example || 'notes' }}
+        shell: bash
+        run: |
+          name=${{ github.event.inputs.example || 'notes' }}
+          cd release
+          if [[ "${{ matrix.target }}" == windows-* ]]; then
+            # Zip does not carry a Unix executable bit, but Windows does not
+            # need one. Every other target ships a tarball for that reason.
+            7z a "${name}-${{ matrix.target }}.zip" "${name}-${{ matrix.target }}.exe"
+          else
+            chmod +x "${name}-${{ matrix.target }}"
+            tar -czf "${name}-${{ matrix.target }}.tar.gz" "${name}-${{ matrix.target }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            examples/*/release/*.tar.gz
+            examples/*/release/*.zip
+          if-no-files-found: error
+
+  draft:
+    name: Draft release
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Collect and checksum
+        run: |
+          mkdir -p dist
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} dist/ \;
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create a draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Draft, always. Publishing is a human decision, and these binaries
+          # are unsigned — see docs/packaging.md for what that means on each
+          # platform.
+          draft: true
+          generate_release_notes: true
+          files: dist/*
+          body: |
+            ## Verification
+
+            | Target | Compiled | Executed in CI |
+            | --- | --- | --- |
+            | darwin-arm64 | yes | yes |
+            | darwin-x64 | yes | yes |
+            | linux-x64 | yes | yes |
+            | windows-x64 | yes | yes |
+            | linux-arm64 | yes | **no** — cross-compiled, no runner |
+            | linux-x64-musl | yes | **no** — cross-compiled, no runner |
+
+            Binaries are **not signed**. macOS will need Gatekeeper bypassed or
+            the binary signed and notarised; Windows will show SmartScreen. See
+            `docs/packaging.md`.
+
+            Check downloads against `SHA256SUMS`:
+
+            ```
+            sha256sum -c SHA256SUMS --ignore-missing
+            ```

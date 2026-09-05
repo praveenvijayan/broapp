@@ -1,0 +1,42 @@
+{
+  "name": "create-broapp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Scaffold a local application built on Bun, a browser UI, and Brobridge",
+  "license": "MIT",
+  "homepage": "https://github.com/praveenvijayan/broapp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/praveenvijayan/broapp.git",
+    "directory": "packages/create-broapp"
+  },
+  "bugs": {
+    "url": "https://github.com/praveenvijayan/broapp/issues"
+  },
+  "keywords": [
+    "bun",
+    "brobridge",
+    "create",
+    "scaffold",
+    "starter",
+    "local-first"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "create-broapp": "./src/main.ts"
+  },
+  "files": [
+    "src",
+    "template",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepack": "bun run ../../scripts/stage-template.ts"
+  }
+}
