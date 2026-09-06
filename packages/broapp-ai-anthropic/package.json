@@ -1,6 +1,6 @@
 {
   "name": "broapp-ai-anthropic",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Anthropic provider for a Broapp application's AI layer",
   "license": "MIT",
@@ -40,7 +40,7 @@
     "ai": "7.0.93"
   },
   "peerDependencies": {
-    "broapp": ">=0.2.0"
+    "broapp": ">=0.2.1"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",

@@ -8,7 +8,7 @@ what a maintainer has to do, and what they have to decide.
 [broapp](https://www.npmjs.com/package/broapp) and
 [create-broapp](https://www.npmjs.com/package/create-broapp) are on npm as of
 2026-09-05, at version 0.1.0, each published with provenance from the
-`Publish to npm` workflow, so `bun create broapp my-app` works. Version 0.2.0
+`Publish to npm` workflow, so `bun create broapp my-app` works. Version 0.2.1
 adds the AI layer and two new packages,
 [broapp-ai-anthropic](https://www.npmjs.com/package/broapp-ai-anthropic) and
 [broapp-ai-compatible](https://www.npmjs.com/package/broapp-ai-compatible),

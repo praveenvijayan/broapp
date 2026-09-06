@@ -1,6 +1,6 @@
 {
   "name": "create-broapp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Scaffold a local application built on Bun, a browser UI, and Brobridge",
   "license": "MIT",

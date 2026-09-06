@@ -68,7 +68,7 @@
     },
     "packages/broapp": {
       "name": "broapp",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "bin": {
         "broapp": "src/cli/main.ts",
       },
@@ -92,7 +92,7 @@
     },
     "packages/broapp-ai-anthropic": {
       "name": "broapp-ai-anthropic",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@ai-sdk/anthropic": "4.0.49",
         "ai": "7.0.93",
@@ -103,12 +103,12 @@
         "typescript": "^5.7.2",
       },
       "peerDependencies": {
-        "broapp": ">=0.2.0",
+        "broapp": ">=0.2.1",
       },
     },
     "packages/broapp-ai-compatible": {
       "name": "broapp-ai-compatible",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@ai-sdk/openai-compatible": "3.0.44",
         "ai": "7.0.93",
@@ -119,12 +119,12 @@
         "typescript": "^5.7.2",
       },
       "peerDependencies": {
-        "broapp": ">=0.2.0",
+        "broapp": ">=0.2.1",
       },
     },
     "packages/create-broapp": {
       "name": "create-broapp",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "bin": {
         "create-broapp": "./src/main.ts",
       },

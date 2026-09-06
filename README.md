@@ -147,8 +147,8 @@ development time or afterwards.
 
 ## Status
 
-Version 0.2.0 in this repository. `broapp` and `create-broapp` 0.1.0 are on
-npm, so `bun create broapp` works today; 0.2.0 and the two AI provider
+Version 0.2.1 in this repository. `broapp` and `create-broapp` 0.1.0 are on
+npm, so `bun create broapp` works today; 0.2.1 and the two AI provider
 packages are prepared and await publication — see
 [docs/publishing.md](docs/publishing.md) for what a maintainer has to do.
 
