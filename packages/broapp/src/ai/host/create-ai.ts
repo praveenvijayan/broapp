@@ -25,8 +25,10 @@ import type { ProviderInfo } from '../shared/types.ts';
 
 import { AdapterError, toPublicError, type AdapterConfig, type ProviderAdapter } from './adapter.ts';
 import { createRegistry, type Registry } from './registry.ts';
+import { runChat, type RunDeps } from './run.ts';
 import { createFileSecretStore, createMemorySecretStore } from './secrets.ts';
 import { createSettingsStore } from './settings.ts';
+import { createConfirmations, type AiContextProviders, type AiTool } from './tool.ts';
 
 /** What the application is, in the words a model is given. */
 export interface AiAppDescription {
@@ -43,7 +45,24 @@ export interface CreateAiOptions {
   /** Defaults to `globalThis.fetch`. Tests inject a fake. */
   readonly fetch?: typeof fetch;
   readonly logger?: HostLogger;
+  readonly context?: AiContextProviders;
+  readonly tools?: Record<string, AiTool>;
+  /** Character budget for context documents in one turn. Default 40_000. */
+  readonly contextBudgetChars?: number;
+  /** Max model steps (tool round trips) per turn. Default 8. */
+  readonly maxSteps?: number;
+  /** How long a `confirm` tool waits for the user. Default 300_000 ms. */
+  readonly confirmTimeoutMs?: number;
 }
+
+/**
+ * What a tool may be called.
+ *
+ * Dots are allowed so that a contract route can be its own tool name, which is
+ * what `fromContract` does. Anything else risks a provider rejecting the whole
+ * request over a name the application chose carelessly.
+ */
+const TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.]*$/;
 
 /** The AI layer, ready to mount. */
 export interface Ai {
@@ -57,6 +76,11 @@ export interface Ai {
 /** How long a provider is given to answer a listing or a connection test. */
 const PROVIDER_TIMEOUT_MS = 20_000;
 
+/** Defaults for the run loop, all overridable per application. */
+const DEFAULT_CONTEXT_BUDGET_CHARS = 40_000;
+const DEFAULT_MAX_STEPS = 8;
+const DEFAULT_CONFIRM_TIMEOUT_MS = 300_000;
+
 /** Build the AI layer for one application. */
 export function createAi(options: CreateAiOptions): Ai {
   if (options.providers.length === 0) {
@@ -68,6 +92,11 @@ export function createAi(options: CreateAiOptions): Ai {
       throw new TypeError(`two provider adapters share the id ${JSON.stringify(adapter.id)}`);
     }
     seen.add(adapter.id);
+  }
+  for (const name of Object.keys(options.tools ?? {})) {
+    if (!TOOL_NAME_PATTERN.test(name)) {
+      throw new TypeError(`tool name ${JSON.stringify(name)} must be letters, digits, "_" or "."`);
+    }
   }
 
   // Both stores are built once and kept. `remember` chooses between them, and
@@ -133,14 +162,23 @@ export function createAi(options: CreateAiOptions): Ai {
     }
   });
 
-  // Replaced in the chat layer. Registered now because `mount` refuses to
-  // start with a route the contract declares and no handler implements, and a
-  // half-mounted AI layer would be worse than one that says so.
-  const notYet = (): never => {
-    throw publicError.unavailable('Chat is not available yet.');
+  const confirmations = createConfirmations();
+  const runDeps: RunDeps = {
+    registry,
+    app: options.app,
+    context: options.context ?? {},
+    tools: options.tools ?? {},
+    contextBudgetChars: options.contextBudgetChars ?? DEFAULT_CONTEXT_BUDGET_CHARS,
+    maxSteps: options.maxSteps ?? DEFAULT_MAX_STEPS,
+    confirmTimeoutMs: options.confirmTimeoutMs ?? DEFAULT_CONFIRM_TIMEOUT_MS,
+    confirmations,
+    logger: options.logger ?? console,
   };
-  host.stream('ai.chat', notYet);
-  host.operation('ai.chatConfirm', notYet);
+
+  host.stream('ai.chat', (params, sink) => runChat(params, sink, runDeps));
+  host.operation('ai.chatConfirm', ({ runId, callId, approve }) => ({
+    accepted: confirmations.answer(runId, callId, approve),
+  }));
 
   /** The current provider config, or the "not set up" error. */
   async function requireConfig(): Promise<{ adapter: ProviderAdapter; config: AdapterConfig }> {

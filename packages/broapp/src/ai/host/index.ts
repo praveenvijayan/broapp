@@ -13,7 +13,18 @@ export { AdapterError, isLoopbackUrl, toPublicError } from './adapter.ts';
 export type { AdapterConfig, AdapterErrorCode, ProviderAdapter } from './adapter.ts';
 
 export { createFakeAdapter } from './fake.ts';
-export type { FakeAdapterOptions } from './fake.ts';
+export type { FakeAdapter, FakeAdapterOptions, FakeStep } from './fake.ts';
+
+export { fromContract } from './from-contract.ts';
+export type { ContractToolAllowList } from './from-contract.ts';
+
+export type {
+  AiContextProviders,
+  AiTool,
+  Confirmations,
+  ContextDocument,
+  ContextRef,
+} from './tool.ts';
 
 export { apiKeySecretName, createFileSecretStore, createMemorySecretStore } from './secrets.ts';
 export type { SecretStore } from './secrets.ts';
