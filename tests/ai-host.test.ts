@@ -103,6 +103,15 @@ describe('the AI layer on a bridge', () => {
     });
   });
 
+  test('a provider chosen with no model asks for a model, not for a provider', async () => {
+    const test = await start(createFakeAdapter());
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'fake' });
+    await expect(client.call('ai.connectionTest', undefined)).rejects.toMatchObject({
+      message: 'Choose a model for Fake provider.',
+    });
+  });
+
   test('choosing a provider and model makes it configured', async () => {
     const test = await start(createFakeAdapter());
     const client = await test.connect(merged);
@@ -128,8 +137,11 @@ describe('the AI layer on a bridge', () => {
     const before = await client.call('ai.settingsUpdate', { provider: 'fake', modelId: 'fake-1' });
     expect(before.configured).toBe(false);
     expect(before.hasKey).toBe(false);
+    // The missing key is named, rather than "AI is not set up": the user has
+    // chosen a provider and is looking at the panel.
     await expect(client.call('ai.connectionTest', undefined)).rejects.toMatchObject({
       code: 'unavailable',
+      message: 'An API key is required for Fake provider.',
     });
 
     const after = await client.call('ai.settingsUpdate', { apiKey: 'sk-test-1234abcd' });

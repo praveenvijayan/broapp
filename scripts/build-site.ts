@@ -37,6 +37,7 @@ const PAGES: readonly Page[] = [
   { slug: 'development.html', title: 'Development workflow', source: 'docs/development.md', group: 'Guides' },
   { slug: 'lifecycle.html', title: 'Lifecycle', source: 'docs/lifecycle.md', group: 'Guides' },
   { slug: 'packaging.html', title: 'Packaging and release', source: 'docs/packaging.md', group: 'Guides' },
+  { slug: 'ai.html', title: 'AI layer', source: 'docs/ai.md', group: 'Guides' },
 
   { slug: 'comparison.html', title: 'How this compares', source: 'docs/comparison.md', group: 'Reference' },
   { slug: 'troubleshooting.html', title: 'Troubleshooting', source: 'docs/troubleshooting.md', group: 'Reference' },

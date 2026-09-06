@@ -92,9 +92,15 @@ export function createRegistry(options: RegistryOptions): Registry {
     adapter: (id) => byId.get(id) ?? null,
 
     configFor(adapter) {
-      // No key: this is the view used to answer "does this provider stay on
-      // the machine", which must not depend on whether a key is stored.
-      return configFrom(options.settingsStore.read(), adapter, null);
+      const settings = options.settingsStore.read();
+      // The stored base URL belongs to the *selected* provider. Applying it to
+      // the others would have told the user that Anthropic runs on their
+      // computer, simply because they had Ollama selected a moment ago.
+      const scoped: StoredSettings =
+        settings.provider === adapter.id ? settings : { ...settings, baseUrl: null };
+      // No key either: whether a provider stays on this machine is a property
+      // of the address, and the answer must not depend on what is stored.
+      return configFrom(scoped, adapter, null);
     },
 
     async currentConfig() {
@@ -108,13 +114,14 @@ export function createRegistry(options: RegistryOptions): Registry {
 
     async resolve() {
       const settings = options.settingsStore.read();
-      if (settings.provider === null || settings.modelId === null) {
-        throw publicError.unavailable(NOT_SET_UP);
-      }
+      if (settings.provider === null) throw publicError.unavailable(NOT_SET_UP);
       const adapter = byId.get(settings.provider);
       if (adapter === undefined) {
         throw publicError.unavailable('The configured AI provider is not available in this build.');
       }
+      // The key and the address come before the model on purpose: the list of
+      // models is fetched *from* the provider, so telling a user to choose one
+      // before they can see any is an instruction they cannot follow.
       const apiKey = await keyFor(settings, adapter.id);
       if (adapter.needs.apiKey && (apiKey === null || apiKey === '')) {
         throw publicError.unavailable(`An API key is required for ${adapter.label}.`);
@@ -122,6 +129,12 @@ export function createRegistry(options: RegistryOptions): Registry {
       const config = configFrom(settings, adapter, apiKey);
       if (adapter.needs.baseUrl === 'required' && (config.baseUrl === null || config.baseUrl === '')) {
         throw publicError.unavailable(`A server address is required for ${adapter.label}.`);
+      }
+      if (settings.modelId === null) {
+        // Distinct from "not set up": the user is looking at the settings panel
+        // with a provider selected, and being told to choose a provider is an
+        // instruction they have already followed.
+        throw publicError.unavailable(`Choose a model for ${adapter.label}.`);
       }
       return { adapter, config, modelId: settings.modelId };
     },

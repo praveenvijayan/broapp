@@ -36,6 +36,7 @@ The reusable developer experience around the pattern:
 - **A build that enforces its own guarantees.** The interface is embedded as one document, with a hash-pinned content-security policy and a check that nothing loads off-origin.
 - **A lifecycle with documented shutdown.** Two explicit modes, attachment tracked from the session hook, and real shutdown behaviour.
 - **A release pipeline.** Six compilation targets, native smoke tests where a runner exists, and cross-compiled binaries labelled as such.
+- **An optional AI layer.** Host-only and provider-independent: settings, key storage, context, tools derived from your contract, and a confirmation step before anything changes. Off until a user sets it up.
 
 The security-sensitive parts — the trust fence, the one-time launch token, the
 session cookie, the framing, resume — are
@@ -47,6 +48,8 @@ session cookie, the framing, resume — are
 | --- | --- |
 | `packages/create-broapp` | The generator. `bun create broapp` runs this. |
 | `packages/broapp` | Runtime and build tooling. Generated projects depend on it. |
+| `packages/broapp-ai-anthropic` | Anthropic provider for the AI layer. |
+| `packages/broapp-ai-compatible` | OpenAI, Ollama and any OpenAI-compatible server. |
 | `templates/react-ts` | The canonical template. React + TypeScript, ordinary CSS. |
 | `examples/dashboard` | Streaming system metrics; independent streams and reconnect. |
 | `examples/file-processor` | Progress and cancellation, inside an authorized directory. |
@@ -62,6 +65,7 @@ testing whether the tooling is enough.
 ```
 src/shared/contract.ts    What the UI may ask the host to do. Both sides import it.
 src/host/                 The implementations, and startup.
+src/host/ai.ts            Optional: which providers, what the model may read and do.
 src/ui/                   React components and the browser entry point.
 ```
 
@@ -113,6 +117,7 @@ files below so the two cannot drift.
 - [Development and production lifecycle](docs/lifecycle.md)
 - [Development workflow](docs/development.md)
 - [Packaging and release](docs/packaging.md)
+- [The AI layer](docs/ai.md) — turning it on, what the model is told, what leaves the machine.
 - [Comparison with Electron, Tauri, and a plain local server](docs/comparison.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Scope and limitations](docs/limitations.md)

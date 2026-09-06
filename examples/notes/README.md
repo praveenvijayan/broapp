@@ -50,9 +50,31 @@ Every value reaches SQLite as a bound parameter; no statement is assembled by
 string concatenation. There is a test that stores `'; DROP TABLE notes; --` as a
 title and reads it back verbatim.
 
+## AI
+
+The example is also the reference for Broapp's optional [AI layer](../../docs/ai.md).
+It is off until you open **Settings** and choose a provider; four are compiled
+in — Anthropic, Ollama, OpenAI, and any OpenAI-compatible server.
+
+What it shows:
+
+- **The model reads your notes, not your disk.** `context.resolve` turns the
+  `note:<id>` reference for the note you are editing into a document, and
+  `context.search` runs the same bounded `LIKE` query the application uses.
+  Nothing else is visible to it.
+- **Reading is free; changing asks.** `notes.list` is a read tool and runs when
+  the model asks for it. `notes.create`, `notes.update` and `notes.remove` are
+  confirm tools: the chat shows what is about to happen and waits for Allow or
+  Decline. The tools come from the contract, so a model's arguments are
+  validated exactly like a call from the browser.
+- **Where the data goes is on screen.** The settings panel says whether the
+  chosen provider runs on this computer or receives your notes, always, without
+  opening a menu.
+
 ## Where to look
 
 - `src/host/db.ts` — migrations, queries, backup, shutdown.
 - `src/host/operations.ts` — validation and the public/internal error boundary.
+- `src/host/ai.ts` — what the model may read, and what it may do.
 - `tests/db.test.ts` — migration idempotence, persistence across restart,
-  backup readability.
+  backup readability, and the two queries the AI layer uses.

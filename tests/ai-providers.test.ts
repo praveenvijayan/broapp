@@ -245,6 +245,16 @@ describe('both providers in a running application', () => {
       ['ollama', true],
     ]);
 
+    // Selecting the local provider stores its loopback address. That address
+    // belongs to Ollama alone: reporting Anthropic as local because of it
+    // would be exactly the wrong answer to "does this leave my computer".
+    await client.call('ai.settingsUpdate', { provider: 'ollama' });
+    const afterSelecting = await client.call('ai.providersList', undefined);
+    expect(afterSelecting.providers.map((entry) => [entry.id, entry.local])).toEqual([
+      ['anthropic', false],
+      ['ollama', true],
+    ]);
+
     await client.call('ai.settingsUpdate', {
       provider: 'anthropic',
       modelId: 'claude-opus-5',

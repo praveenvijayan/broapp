@@ -13,7 +13,7 @@ executable, and so is the JavaScript runtime.
 Nothing leaves the machine. There is no server to run, no container, no
 packaged Chromium.
 
-## Three layers, and who owns what
+## Four layers, and who owns what
 
 **Brobridge** owns the connection. The trust fence that checks `Host` and
 `Origin`, the one-time launch token, the HMAC-signed session cookie, the frame
@@ -26,6 +26,15 @@ development convenient.
 error boundary, the stream framing, the lifecycle, the build, the generator.
 
 **Your application** owns the operations and the interface.
+
+**The AI layer**, when an application turns it on, owns the fourth. It is
+optional, it is host-only, and it is provider-independent: settings and key
+storage, the context an application chooses to expose, tools derived from the
+contract, and the confirmation step before a tool changes anything. It runs in
+the host process because the browser cannot reach a provider — the page's
+content-security policy allows `'self'` and loopback and nothing else — and
+because a key in a page is a key that has been published. An application that
+does not call `createAi` carries none of it. See [the AI layer](ai.md).
 
 This split is why the interesting security properties are not Broapp's to get
 wrong. It is also why Broapp is small.
@@ -117,3 +126,4 @@ See [lifecycle.md](lifecycle.md).
 - Two documented lifecycle modes with real shutdown.
 - A per-user data directory, resolved once, overridable.
 - One development command that does not spawn a tab per save.
+- An optional, host-only AI layer: settings, key storage, context, tools derived from the contract, and confirmation before anything changes.

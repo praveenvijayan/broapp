@@ -78,6 +78,10 @@ export interface Store {
   readonly path: string;
   readonly schemaVersion: number;
   list(done: boolean | null | undefined): Note[];
+  /** Case-insensitive substring search over title and body, newest first. */
+  search(text: string, limit: number): Note[];
+  /** Notes by id, in the order asked, skipping ids that no longer exist. */
+  byIds(ids: readonly number[]): Note[];
   create(input: { title: string; body: string }): Note;
   update(input: { id: number; title: string; body: string; done: boolean }): Note;
   remove(id: number): boolean;
@@ -129,7 +133,21 @@ export function openStore(directory: string): Store {
     ),
     remove: db.query<{ id: number }, [number]>('DELETE FROM notes WHERE id = ? RETURNING id'),
     count: db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM notes'),
+    // `LIKE` on this table is case-insensitive for ASCII by default, which is
+    // what a note search wants. The pattern is bound, not spliced, so a note
+    // body full of `%` is a search for `%` rather than a wildcard injection.
+    // `id DESC` breaks the tie between two notes written in the same
+    // millisecond, so the model is shown a stable order.
+    search: db.query<Row, [string, string, number]>(
+      `SELECT id, title, body, done, created_at, updated_at FROM notes
+       WHERE title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\'
+       ORDER BY updated_at DESC, id DESC LIMIT ?`,
+    ),
   };
+
+  /** Turn user text into a LIKE pattern that matches it literally. */
+  const contains = (text: string): string =>
+    `%${text.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
 
   return {
     path,
@@ -143,6 +161,27 @@ export function openStore(directory: string): Store {
           ? statements.listAll.all()
           : statements.listByDone.all(done ? 1 : 0);
       return rows.map(toNote);
+    },
+
+    search(text, limit) {
+      const trimmed = text.trim();
+      if (trimmed === '') return [];
+      // Clamped rather than trusted: the caller is the AI layer, and a limit
+      // of a million would be a way to make this process allocate.
+      const capped = Math.max(1, Math.min(Math.trunc(limit), 100));
+      const pattern = contains(trimmed);
+      return statements.search.all(pattern, pattern, capped).map(toNote);
+    },
+
+    byIds(ids) {
+      // One prepared lookup per id, in the order asked. A generated `IN (...)`
+      // clause would need a statement per arity and would lose the order.
+      const notes: Note[] = [];
+      for (const id of ids) {
+        const row = statements.byId.get(id);
+        if (row !== null) notes.push(toNote(row));
+      }
+      return notes;
     },
 
     create({ title, body }) {

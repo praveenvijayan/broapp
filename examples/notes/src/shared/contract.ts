@@ -34,6 +34,7 @@ export const contract = defineContract({
     },
 
     'notes.create': {
+      summary: 'Create a note with a title and a body.',
       input: s.object({
         title: s.string({ min: 1, max: LIMITS.title }),
         body: s.string({ max: LIMITS.body }),
@@ -42,6 +43,7 @@ export const contract = defineContract({
     },
 
     'notes.update': {
+      summary: 'Replace a note\'s title, body and done flag. Every field is required.',
       input: s.object({
         id: s.number({ int: true, min: 1 }),
         title: s.string({ min: 1, max: LIMITS.title }),
@@ -52,6 +54,7 @@ export const contract = defineContract({
     },
 
     'notes.remove': {
+      summary: 'Delete a note by id.',
       input: s.object({ id: s.number({ int: true, min: 1 }) }),
       output: s.object({ removed: s.boolean() }),
     },

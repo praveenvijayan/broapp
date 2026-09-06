@@ -191,7 +191,15 @@ Write tests for pure host logic (a database module, a path-containment
 check) with `bun test`. The transport, fence and validation already have
 tests upstream; do not re-test Brobridge.
 
-### 9. Ship
+### 9. Add AI, only if asked
+
+An assistant is a fourth layer, off by default. `createAi` in `src/host/ai.ts`,
+mounted beside the application; `<AiProvider>` and the two panels in the
+browser. Tools come from the contract: reading is a `read` tool, anything that
+changes the user's data is a `confirm` tool and waits for them.
+[references/ai-layer.md](references/ai-layer.md).
+
+### 10. Ship
 
 `bun run build` compiles for the current machine into `release/`.
 `bun run build -- --target linux-x64` or `bun run build:all` cross-compiles;
@@ -225,6 +233,9 @@ alternative instead.
 10. **Do not claim the app is audited or sandboxed.** Loopback HTTP is not
     TLS; authentication is not a sandbox; the process has the user's
     permissions.
+11. **Do not give a model a tool that changes data without confirmation**,
+    and do not let the browser talk to an AI provider or hold a key. See
+    [references/ai-layer.md](references/ai-layer.md).
 
 ## Done checklist
 
@@ -253,6 +264,8 @@ Load only what the current step needs.
   What Brobridge protects, what it does not, and rules for operations.
 - [references/build-and-release.md](references/build-and-release.md)
   Targets, `broapp.config.ts`, CSP, signing, checksums, replacing a binary.
+- [references/ai-layer.md](references/ai-layer.md)
+  The optional AI layer: turning it on, tool permissions, keys, testing.
 - [references/troubleshooting.md](references/troubleshooting.md)
   Symptom to cause for install, dev, build, run and operation failures.
 - [scripts/verify.sh](scripts/verify.sh)

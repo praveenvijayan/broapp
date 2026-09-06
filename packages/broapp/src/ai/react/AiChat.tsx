@@ -10,7 +10,7 @@
  */
 import * as React from 'react';
 
-import { useAiChat, type ToolCallState } from './use-ai-chat.ts';
+import { useAiChat, type AiChatOptions, type ToolCallState } from './use-ai-chat.ts';
 import { useAiSettings } from './use-ai-settings.ts';
 
 /** Props for {@link AiChat}. */
@@ -19,6 +19,8 @@ export interface AiChatProps {
   readonly refs?: readonly string[];
   readonly placeholder?: string;
   readonly emptyText?: string;
+  /** Called when a tool call settles, so the application can refetch. */
+  readonly onToolResult?: AiChatOptions['onToolResult'];
 }
 
 function ToolCall({
@@ -58,9 +60,17 @@ function ToolCall({
   );
 }
 
-export function AiChat({ refs, placeholder, emptyText }: AiChatProps): React.ReactElement {
+export function AiChat({
+  refs,
+  placeholder,
+  emptyText,
+  onToolResult,
+}: AiChatProps): React.ReactElement {
   const { settings } = useAiSettings();
-  const chat = useAiChat(refs === undefined ? {} : { refs });
+  const chat = useAiChat({
+    ...(refs === undefined ? {} : { refs }),
+    ...(onToolResult === undefined ? {} : { onToolResult }),
+  });
   const [draft, setDraft] = React.useState('');
   const input = React.useRef<HTMLTextAreaElement | null>(null);
   const busy = chat.status === 'streaming' || chat.status === 'awaiting-confirmation';

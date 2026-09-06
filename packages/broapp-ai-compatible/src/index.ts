@@ -134,6 +134,10 @@ export function openaiCompatible(options: CompatibleOptions): ProviderAdapter {
         baseURL,
         ...(config.apiKey === null || config.apiKey === '' ? {} : { apiKey: config.apiKey }),
         fetch: config.fetch,
+        // Without this the server omits token counts from a streamed response,
+        // and the interface can only report zero. Every server that implements
+        // the API accepts the option; one that ignores it is no worse off.
+        includeUsage: true,
       });
       return provider.chatModel(modelId);
     },

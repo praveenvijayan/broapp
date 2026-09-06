@@ -16,7 +16,7 @@ export { useAiModels } from './use-ai-models.ts';
 export type { AiModelsHook } from './use-ai-models.ts';
 
 export { useAiChat } from './use-ai-chat.ts';
-export type { AiChatHook, ChatMessage, ToolCallState } from './use-ai-chat.ts';
+export type { AiChatHook, AiChatOptions, ChatMessage, ToolCallState } from './use-ai-chat.ts';
 
 export { AiSettings } from './AiSettings.tsx';
 export { AiChat } from './AiChat.tsx';

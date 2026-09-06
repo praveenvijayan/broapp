@@ -20,6 +20,7 @@ import { join } from 'node:path';
 
 import { ensureDataDir, startApp } from 'broapp/host';
 
+import { createNotesAi } from './ai.ts';
 import { createApp, type StoreState } from './operations.ts';
 import { openStore } from './db.ts';
 
@@ -88,6 +89,10 @@ async function main(): Promise<number> {
   }
 
   const app = createApp(state);
+  // The AI layer is a second host app on the same bridge. It is built
+  // unconditionally and costs nothing until the user chooses a provider: no
+  // key, no provider, no requests.
+  const ai = createNotesAi(app, state, dataDir);
 
   const running = await startApp({
     page,
@@ -95,11 +100,16 @@ async function main(): Promise<number> {
     version: VERSION,
     mode: lifecycle,
     openBrowser: !argv.includes('--no-open') && process.env['BROAPP_OPEN_BROWSER'] !== '0',
-    register: (bridge) => app.mount(bridge),
+    register: (bridge) => {
+      app.mount(bridge);
+      ai.mount(bridge);
+    },
     // An idle exit must not throw away a computation someone is watching. The
-    // grace period is for a closed tab, not for a busy host.
-    isBusy: () => app.activeStreams > 0,
+    // grace period is for a closed tab, not for a busy host — and a chat turn
+    // in progress is exactly that.
+    isBusy: () => app.activeStreams > 0 || ai.activeStreams > 0,
     onShutdown: () => {
+      ai.abortAll('the application is shutting down');
       app.abortAll('the application is shutting down');
       // Checkpoint the WAL and close the handle. Skipping this leaves a
       // database that needs its sidecar files to be readable.

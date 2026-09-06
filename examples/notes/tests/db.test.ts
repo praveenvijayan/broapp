@@ -188,3 +188,51 @@ describe('failure', () => {
     expect(() => openStore(directory)).toThrow();
   });
 });
+
+describe('search and lookup, the two queries the AI layer needs', () => {
+  /** Open the store for this test, so `afterEach` closes it. */
+  const open = (): Store => {
+    store = openStore(directory);
+    return store;
+  };
+
+  test('finds a note by part of its title or body, whatever the case', () => {
+    const store = open();
+    store.create({ title: 'Shopping', body: 'milk and BREAD' });
+    store.create({ title: 'Reading', body: 'a book about bread ovens' });
+    store.create({ title: 'Nothing', body: 'unrelated' });
+
+    expect(store.search('bread', 10).map((note) => note.title)).toEqual(['Reading', 'Shopping']);
+    expect(store.search('SHOP', 10).map((note) => note.title)).toEqual(['Shopping']);
+    expect(store.search('   ', 10)).toEqual([]);
+  });
+
+  test('treats wildcards in the query as text, not as wildcards', () => {
+    const store = open();
+    store.create({ title: 'Discount', body: '50% off' });
+    store.create({ title: 'Plain', body: 'nothing special' });
+    // A bare `%` would otherwise match every note, which is a search that
+    // quietly hands the model the whole database.
+    expect(store.search('%', 10).map((note) => note.title)).toEqual(['Discount']);
+    expect(store.search('_', 10)).toEqual([]);
+  });
+
+  test('respects the limit, and clamps an absurd one', () => {
+    const store = open();
+    for (let n = 0; n < 5; n += 1) store.create({ title: `Note ${String(n)}`, body: 'x' });
+    expect(store.search('Note', 2)).toHaveLength(2);
+    expect(store.search('Note', 1_000_000)).toHaveLength(5);
+  });
+
+  test('byIds keeps the order asked and skips ids that are gone', () => {
+    const store = open();
+    const first = store.create({ title: 'First', body: '' });
+    const second = store.create({ title: 'Second', body: '' });
+    expect(store.byIds([second.id, first.id]).map((note) => note.title)).toEqual([
+      'Second',
+      'First',
+    ]);
+    expect(store.byIds([first.id, 9_999]).map((note) => note.title)).toEqual(['First']);
+    expect(store.byIds([])).toEqual([]);
+  });
+});

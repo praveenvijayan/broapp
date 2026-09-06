@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useConnection, useOperation } from 'broapp/react';
+import { AiChat, AiSettings } from 'broapp/ai/react';
 
 import { ConnectionBadge } from './ConnectionBadge.tsx';
 import { NoteEditor } from './NoteEditor.tsx';
@@ -29,6 +30,7 @@ export function App(): React.ReactElement {
 
   const [filter, setFilter] = useState<Filter>('all');
   const [editing, setEditing] = useState<number | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   const { run: runList } = list;
   const { run: runStatus } = status;
@@ -79,11 +81,30 @@ export function App(): React.ReactElement {
           <p className="app__lede">
             Kept in a SQLite database on this computer. Nothing leaves it.
           </p>
+          <p className="app__lede">
+            AI features are optional and off until you set them up in Settings.
+          </p>
         </div>
-        <ConnectionBadge />
+        <div className="app__header-actions">
+          <button
+            className="button"
+            type="button"
+            aria-expanded={showSettings}
+            onClick={() => setShowSettings((open) => !open)}
+          >
+            Settings
+          </button>
+          <ConnectionBadge />
+        </div>
       </header>
 
       <main className="app__main">
+        {showSettings && (
+          <section className="card">
+            <AiSettings />
+          </section>
+        )}
+
         {unhealthy && (
           <p className="message message--error" role="alert">
             The notes database could not be opened, so nothing can be saved. Its location is in the
@@ -178,6 +199,18 @@ export function App(): React.ReactElement {
             )}
           </ul>
         </section>
+
+        {/* The note being edited is what the user is looking at, so it is what
+            the model is shown. Everything else it needs it has to search for. */}
+        <AiChat
+          refs={editing === null ? [] : [`note:${String(editing)}`]}
+          placeholder="Ask about your notes…"
+          onToolResult={(call) => {
+            // A confirmed tool may have changed the database, so the list is
+            // refetched rather than guessed at.
+            if (call.status === 'done' && call.tool !== 'notes.list') refresh();
+          }}
+        />
       </main>
 
       <footer className="app__footer">

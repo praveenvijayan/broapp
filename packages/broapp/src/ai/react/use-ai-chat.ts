@@ -65,7 +65,20 @@ function toHistory(messages: readonly ChatMessage[]): ChatTurn[] {
   return turns.slice(-MAX_HISTORY);
 }
 
-export function useAiChat(options: { refs?: readonly string[] } = {}): AiChatHook {
+/** Options for {@link useAiChat}. */
+export interface AiChatOptions {
+  /** Records the user is looking at, sent with every message. */
+  readonly refs?: readonly string[];
+  /**
+   * Called when a tool call settles.
+   *
+   * An application uses it to refetch whatever the model just changed. It is
+   * called for denied calls too, so a panel can stop showing them as pending.
+   */
+  onToolResult?(call: ToolCallState): void;
+}
+
+export function useAiChat(options: AiChatOptions = {}): AiChatHook {
   const shared = useAiContext();
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [status, setStatus] = React.useState<AiChatHook['status']>('idle');
@@ -78,6 +91,12 @@ export function useAiChat(options: { refs?: readonly string[] } = {}): AiChatHoo
   // Read inside the subscription callbacks, which are created once per send.
   const refsRef = React.useRef<readonly string[]>(refs);
   refsRef.current = refs;
+  const onToolResult = React.useRef<AiChatOptions['onToolResult']>(undefined);
+  onToolResult.current = options.onToolResult;
+  // The tool calls of the turn in progress, by call id. A state updater cannot
+  // be used to find one: React runs it when it chooses, so anything read out
+  // of it is read too late to hand to a callback.
+  const calls = React.useRef(new Map<string, ToolCallState>());
 
   React.useEffect(() => {
     mounted.current = true;
@@ -110,6 +129,12 @@ export function useAiChat(options: { refs?: readonly string[] } = {}): AiChatHoo
           patchPending((message) => ({ ...message, content: message.content + (event.text ?? '') }));
           break;
         case 'tool-call':
+          calls.current.set(event.callId ?? '', {
+            callId: event.callId ?? '',
+            tool: event.tool ?? '',
+            input: event.input,
+            status: 'running',
+          });
           patchPending((message) => ({
             ...message,
             toolCalls: [
@@ -132,21 +157,27 @@ export function useAiChat(options: { refs?: readonly string[] } = {}): AiChatHoo
             ),
           }));
           break;
-        case 'tool-result':
+        case 'tool-result': {
           setStatus((current) => (current === 'awaiting-confirmation' ? 'streaming' : current));
+          const started = calls.current.get(event.callId ?? '');
+          const settled: ToolCallState = {
+            callId: event.callId ?? '',
+            tool: event.tool ?? started?.tool ?? '',
+            input: started?.input,
+            status: event.denied === true ? 'denied' : 'done',
+            output: event.output,
+          };
+          calls.current.set(settled.callId, settled);
           patchPending((message) => ({
             ...message,
             toolCalls: message.toolCalls.map((call) =>
-              call.callId === event.callId
-                ? {
-                    ...call,
-                    status: event.denied === true ? 'denied' : 'done',
-                    output: event.output,
-                  }
-                : call,
+              call.callId === settled.callId ? settled : call,
             ),
           }));
+          // The application refetches whatever the model just changed.
+          onToolResult.current?.(settled);
           break;
+        }
         case 'usage':
           setUsage({
             inputTokens: event.inputTokens ?? 0,
@@ -180,6 +211,7 @@ export function useAiChat(options: { refs?: readonly string[] } = {}): AiChatHoo
       if (trimmed === '') return;
 
       const history = toHistory(messages);
+      calls.current.clear();
       const id = newRunId();
       runId.current = id;
       setError(null);

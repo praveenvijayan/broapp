@@ -130,6 +130,25 @@ expose an operation you would be uncomfortable with arbitrary page code calling.
 read the data directory, read the process's memory, and attach a debugger. No
 local application defends against this, and one that claims to is lying.
 
+**AI providers see what you send them.** The AI layer is off until a user
+configures it, and a local provider keeps everything on the machine. A remote
+one is given the message, the conversation history, the full text of every
+document the application resolved for that turn, search snippets, the tool
+descriptions, and each tool call's input and output — that is what generating an
+answer requires. `<AiSettings/>` states this on screen, worded for the provider
+chosen; an application must not hide the notice. Whether a provider counts as
+local is decided by its address, so a loopback proxy that forwards elsewhere
+would be reported as local.
+
+**The API key is a file, not a vault.** It is written to
+`<dataDir>/ai/secrets.json` with mode `0600` — the posture of
+`~/.aws/credentials`, not of a keychain. That rules out another *user* on the
+machine and a world-readable backup. It does not rule out another process
+running as the same user, for the reason in the paragraph above. A user who
+does not want the key on disk can turn "Remember key on this computer" off, and
+it is held in memory for the life of the process instead. See
+[the AI layer](ai.md).
+
 **Neither Broapp nor Brobridge has been independently audited.** Brobridge's
 threat model is written down and its invariants have tests. That is not the same
 as an audit, and this project does not claim it is.
