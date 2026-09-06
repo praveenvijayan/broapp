@@ -8,6 +8,7 @@
 export {
   assertNoReservedRoutes,
   defineContract,
+  effectOf,
   mergeContracts,
   RESERVED_GROUPS,
   splitRoute,
@@ -16,6 +17,7 @@ export type {
   AnyContract,
   Contract,
   ContractShape,
+  Effect,
   ShapeOf,
   OperationInput,
   OperationName,

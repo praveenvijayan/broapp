@@ -68,7 +68,8 @@ export interface ChatTurn {
  *
  *   text        text
  *   tool-call   callId, tool, input, permission
- *   confirm     callId, tool, input          (waits for ai.chat.confirm)
+ *   confirm     callId, tool, input, requestId, releaseId, argumentsHash
+ *                                            (waits for ai.chatConfirm)
  *   tool-result callId, tool, output, denied?
  *   usage       inputTokens, outputTokens
  *   done        —
@@ -83,6 +84,10 @@ export interface ChatEvent {
   output?: unknown;
   denied?: boolean;
   permission?: ToolPermission;
+  /** On `confirm`: what the gate is waiting on, so an answer can name it. */
+  requestId?: string;
+  releaseId?: string;
+  argumentsHash?: string;
   inputTokens?: number;
   outputTokens?: number;
   code?: string;

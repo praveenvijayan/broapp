@@ -18,12 +18,14 @@ export type { FakeAdapter, FakeAdapterOptions, FakeStep } from './fake.ts';
 export { fromContract } from './from-contract.ts';
 export type { ContractToolAllowList } from './from-contract.ts';
 
+export { GUARDED, guardedTool } from './tool.ts';
 export type {
   AiContextProviders,
   AiTool,
-  Confirmations,
   ContextDocument,
   ContextRef,
+  GuardedTool,
+  GuardedToolDefinition,
 } from './tool.ts';
 
 export { apiKeySecretName, createFileSecretStore, createMemorySecretStore } from './secrets.ts';

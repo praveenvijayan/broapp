@@ -17,7 +17,7 @@ import type { Bridge } from 'brobridge';
 // is what makes a browser bundle of `broapp/ai/host` fail to build. Bun's
 // browser target polyfills `node:fs`, so the file stores alone would not stop
 // this code from being bundled into a page.
-import { createReservedHostApp } from '../../host/index.ts';
+import { createPendingApprovals, createReservedHostApp } from '../../host/index.ts';
 import type { HostApp, HostLogger } from '../../host/app.ts';
 import { publicError } from '../../shared/errors.ts';
 import { aiContract, type AiContract } from '../shared/contract.ts';
@@ -28,7 +28,7 @@ import { createRegistry, type Registry } from './registry.ts';
 import { runChat, type RunDeps } from './run.ts';
 import { createFileSecretStore, createMemorySecretStore } from './secrets.ts';
 import { createSettingsStore } from './settings.ts';
-import { createConfirmations, type AiContextProviders, type AiTool } from './tool.ts';
+import { GUARDED, type AiContextProviders, type AiTool } from './tool.ts';
 
 /** What the application is, in the words a model is given. */
 export interface AiAppDescription {
@@ -93,9 +93,18 @@ export function createAi(options: CreateAiOptions): Ai {
     }
     seen.add(adapter.id);
   }
-  for (const name of Object.keys(options.tools ?? {})) {
+  for (const [name, definition] of Object.entries(options.tools ?? {})) {
     if (!TOOL_NAME_PATTERN.test(name)) {
       throw new TypeError(`tool name ${JSON.stringify(name)} must be letters, digits, "_" or "."`);
+    }
+    // A tool is host code that a model gets to trigger. Whether it asked
+    // anybody first is not visible in its type, so the brand is required
+    // rather than hoped for: an application cannot hand a model an ungated
+    // capability by forgetting one wrapper.
+    if ((definition as { [GUARDED]?: true })[GUARDED] !== true) {
+      throw new TypeError(
+        `tool ${JSON.stringify(name)} does not pass the gate; build it with guardedTool()`,
+      );
     }
   }
 
@@ -162,7 +171,7 @@ export function createAi(options: CreateAiOptions): Ai {
     }
   });
 
-  const confirmations = createConfirmations();
+  const approvals = createPendingApprovals(options.logger);
   const runDeps: RunDeps = {
     registry,
     app: options.app,
@@ -171,13 +180,17 @@ export function createAi(options: CreateAiOptions): Ai {
     contextBudgetChars: options.contextBudgetChars ?? DEFAULT_CONTEXT_BUDGET_CHARS,
     maxSteps: options.maxSteps ?? DEFAULT_MAX_STEPS,
     confirmTimeoutMs: options.confirmTimeoutMs ?? DEFAULT_CONFIRM_TIMEOUT_MS,
-    confirmations,
+    approvals,
     logger: options.logger ?? console,
   };
 
   host.stream('ai.chat', (params, sink) => runChat(params, sink, runDeps));
+  // The wire shape is unchanged: a run and a call name the question, and
+  // `accepted` says whether anybody was waiting on it. What changed is where
+  // the answer goes — into the same approval table the gate asks.
   host.operation('ai.chatConfirm', ({ runId, callId, approve }) => ({
-    accepted: confirmations.answer(runId, callId, approve),
+    accepted:
+      approvals.answer({ requestId: `${runId}:${callId}`, approved: approve }) === 'accepted',
   }));
 
   /** The current provider config, or the "not set up" error. */

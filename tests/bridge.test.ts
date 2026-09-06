@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
 import { createHostApp, publicError } from 'broapp/host';
+import type { Envelope } from 'broapp/host';
 import { BroappError } from 'broapp/client';
 import { defineContract, s } from 'broapp/shared';
 
@@ -322,15 +323,23 @@ describe('multiple tabs', () => {
   });
 });
 
+/**
+ * The envelope `invoke` needs. A test stands in for the adapter that would
+ * build one, which is the only place a channel is ever chosen.
+ */
+function directCall(): Envelope {
+  return { requestId: crypto.randomUUID(), channel: 'user', caller: 'test' };
+}
+
 describe('invoke', () => {
   test('runs an operation without a bridge', async () => {
     // The AI layer calls operations this way, so it has to go through the same
     // validation the browser's calls do rather than reaching the handler raw.
-    expect(await buildApp().invoke('demo.echo', { text: 'a' })).toEqual({ text: 'A' });
+    expect(await buildApp().invoke('demo.echo', { text: 'a' }, directCall())).toEqual({ text: 'A' });
   });
 
   test('rejects invalid input the same way a browser call would', async () => {
-    const failed = buildApp().invoke('demo.echo', { text: '' });
+    const failed = buildApp().invoke('demo.echo', { text: '' }, directCall());
     // `PublicError.toBridgeError` prefixes the code, which is what the browser
     // sees too; an in-host caller must not get a softer error.
     await expect(failed).rejects.toThrow(/invalid_input/);
@@ -338,7 +347,7 @@ describe('invoke', () => {
   });
 
   test('an unexpected failure does not leak its message', async () => {
-    const failed = buildApp().invoke('demo.boom', undefined);
+    const failed = buildApp().invoke('demo.boom', undefined, directCall());
     await expect(failed).rejects.toThrow();
     try {
       await failed;
@@ -348,6 +357,6 @@ describe('invoke', () => {
   });
 
   test('a stream is not invokable', () => {
-    expect(() => buildApp().invoke('demo.ticks' as never, {})).toThrow(TypeError);
+    expect(() => buildApp().invoke('demo.ticks' as never, {}, directCall())).toThrow(TypeError);
   });
 });

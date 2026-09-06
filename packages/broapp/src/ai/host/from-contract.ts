@@ -7,17 +7,20 @@
  * that does not exist, and a change to an operation's input reaches the tool
  * description without anybody remembering to update it.
  *
- * The permission split is the important part. `read` operations run as soon as
- * the model asks; `confirm` operations wait for the user. Nothing is a tool
- * unless it is named here, so the default for an application's surface is that
- * the model cannot reach it.
+ * The lists here *select*; they no longer decide. What a call is allowed to do
+ * is the route's own `effect`, and the gate reads it from the contract. The
+ * list a route sits in has to agree with what it declares, and a route that
+ * declares nothing takes the list's word for it — which is how an application
+ * written before effects existed still says what it meant. Nothing is a tool
+ * unless it is named here, so the default for an application's surface is
+ * still that the model cannot reach it.
  */
 import type { HostApp } from '../../host/app.ts';
+import type { Effect } from '../../shared/contract.ts';
 import type { AnyContract, OperationName } from '../../shared/contract.ts';
 import type { JsonSchema } from '../../shared/schema.ts';
-import type { ToolPermission } from '../shared/types.ts';
 
-import type { AiTool } from './tool.ts';
+import { GUARDED, type GuardedTool } from './tool.ts';
 
 /** Which operations a model may call, and how much ceremony each needs. */
 export interface ContractToolAllowList<C extends AnyContract> {
@@ -25,12 +28,15 @@ export interface ContractToolAllowList<C extends AnyContract> {
   readonly confirm?: readonly OperationName<C>[];
 }
 
+/** What each list means about a route that does not declare an effect. */
+const IMPLIED: Record<'read' | 'confirm', Effect> = { read: 'read', confirm: 'write' };
+
 /** Build tools from operations the contract already describes. */
 export function fromContract<C extends AnyContract>(
   contract: C,
   app: HostApp<C>,
   allow: ContractToolAllowList<C>,
-): Record<string, AiTool> {
+): Record<string, GuardedTool> {
   const read = allow.read ?? [];
   const confirm = allow.confirm ?? [];
 
@@ -41,12 +47,12 @@ export function fromContract<C extends AnyContract>(
     );
   }
 
-  const tools: Record<string, AiTool> = {};
-  const groups: readonly (readonly [readonly OperationName<C>[], ToolPermission])[] = [
+  const tools: Record<string, GuardedTool> = {};
+  const groups: readonly (readonly [readonly OperationName<C>[], 'read' | 'confirm'])[] = [
     [read, 'read'],
     [confirm, 'confirm'],
   ];
-  for (const [routes, permission] of groups) {
+  for (const [routes, list] of groups) {
     for (const route of routes) {
       const spec = contract.operations[route];
       if (spec === undefined) {
@@ -59,6 +65,17 @@ export function fromContract<C extends AnyContract>(
           `operation ${JSON.stringify(route)} needs a summary before it can be offered to a model`,
         );
       }
+      const declared = spec.effect;
+      // A list that disagrees with the contract is a misunderstanding about
+      // what an operation does, and the two readings differ in exactly the way
+      // that matters: one asks the user and the other does not. Neither is
+      // safe to guess at, so it is refused where a developer can see it.
+      if (declared !== undefined && declared !== IMPLIED[list] && !(list === 'confirm' && declared === 'external')) {
+        throw new TypeError(
+          `operation ${JSON.stringify(route)} is listed as a ${list} tool but declares effect ${JSON.stringify(declared)}`,
+        );
+      }
+      const effect: Effect = declared ?? IMPLIED[list];
       const describe = (spec.input as { toJsonSchema?: () => JsonSchema }).toJsonSchema;
       if (typeof describe !== 'function') {
         throw new TypeError(
@@ -71,13 +88,16 @@ export function fromContract<C extends AnyContract>(
       // lost by turning it back into "no argument" here.
       const takesNothing = spec.input.kind === 'void';
       tools[route] = {
+        [GUARDED]: true,
         description: spec.summary,
         inputSchema: describe.call(spec.input),
-        permission,
-        // `invoke` validates the input and applies the same error boundary a
-        // call from the browser gets, so a model's arguments are no more
-        // trusted than a tab's.
-        execute: (input) => app.invoke(route, takesNothing ? undefined : input),
+        effect,
+        // `invoke` validates the input, guards it and applies the same error
+        // boundary a call from the browser gets, so a model's arguments are no
+        // more trusted than a tab's. The hint is what the list decided, and it
+        // only applies where the contract itself is silent.
+        execute: (input, envelope) =>
+          app.invoke(route, takesNothing ? undefined : input, { ...envelope, effectHint: effect }),
       };
     }
   }

@@ -25,6 +25,7 @@ export const LIMITS = { title: 200, body: 20_000 } as const;
 export const contract = defineContract({
   operations: {
     'notes.list': {
+      effect: 'read',
       summary: 'Every note, newest first.',
       input: s.object({
         /** Omit for all; true or false to filter. */
@@ -34,6 +35,7 @@ export const contract = defineContract({
     },
 
     'notes.create': {
+      effect: 'write',
       summary: 'Create a note with a title and a body.',
       input: s.object({
         title: s.string({ min: 1, max: LIMITS.title }),
@@ -43,6 +45,7 @@ export const contract = defineContract({
     },
 
     'notes.update': {
+      effect: 'write',
       summary: 'Replace a note\'s title, body and done flag. Every field is required.',
       input: s.object({
         id: s.number({ int: true, min: 1 }),
@@ -54,12 +57,14 @@ export const contract = defineContract({
     },
 
     'notes.remove': {
+      effect: 'write',
       summary: 'Delete a note by id.',
       input: s.object({ id: s.number({ int: true, min: 1 }) }),
       output: s.object({ removed: s.boolean() }),
     },
 
     'notes.status': {
+      effect: 'read',
       summary: 'Where the database is, what version it is at, and whether it is healthy.',
       input: s.void(),
       output: s.object({
@@ -73,6 +78,7 @@ export const contract = defineContract({
     },
 
     'notes.backup': {
+      effect: 'write',
       summary: 'Write a consistent copy of the database beside it.',
       input: s.void(),
       output: s.object({ path: s.string(), bytes: s.number() }),

@@ -16,6 +16,7 @@ import type { BridgeStream } from '@brobridgejs/core';
 
 import type {
   AnyContract,
+  Effect,
   OperationInput,
   OperationName,
   OperationOutput,
@@ -23,10 +24,13 @@ import type {
   StreamName,
   StreamParams,
 } from '../shared/contract.ts';
-import { assertNoReservedRoutes, splitRoute } from '../shared/contract.ts';
+import { assertNoReservedRoutes, effectOf, splitRoute } from '../shared/contract.ts';
 import { INTERNAL_ERROR_MESSAGE, isPublicBridgeError, PublicError } from '../shared/errors.ts';
 import { encodeEvent } from '../shared/ndjson.ts';
 import { ValidationError } from '../shared/schema.ts';
+
+import { createGate } from './gate.ts';
+import type { Channel, Envelope, ExecutionMode, Gate } from './gate.ts';
 
 /**
  * What an operation handler is told about its caller.
@@ -41,6 +45,14 @@ import { ValidationError } from '../shared/schema.ts';
 export interface CallContext {
   /** The route name, for logging. */
   readonly route: string;
+  /** Correlates this call with the gate's record and any approval it needed. */
+  readonly requestId: string;
+  /** Who asked, as the adapter that received the request said so. */
+  readonly channel: Channel;
+  /** Free text naming the caller: 'tab', 'ai:<runId>', 'mcp:<client>'. */
+  readonly caller: string;
+  /** `preview` means the data directory is a copy and nothing may leave the machine. */
+  readonly mode: ExecutionMode;
 }
 
 /** A unary operation implementation. */
@@ -81,6 +93,12 @@ export interface HostLogger {
 /** Options for {@link createHostApp}. */
 export interface HostAppOptions {
   readonly logger?: HostLogger;
+  /**
+   * The gate every call passes. An application that does not supply one gets a
+   * live gate for an unreleased application: the policy still applies, there is
+   * simply nothing recording it and no release to bind an approval to.
+   */
+  readonly gate?: Gate;
 }
 
 /** A contract with implementations attached, ready to mount on a bridge. */
@@ -106,12 +124,22 @@ export interface HostApp<C extends AnyContract> {
    * A route that is a stream, or one no handler implements, is a programming
    * error rather than a call failure, so it throws `TypeError` at the call
    * site instead of rejecting.
+   *
+   * The envelope is required, and required to be built by the adapter making
+   * the call rather than passed through from whatever asked it to. That is
+   * what stops a model from invoking an operation as the user.
    */
-  invoke<K extends OperationName<C>>(name: K, input: unknown): Promise<OperationOutput<C, K>>;
+  invoke<K extends OperationName<C>>(
+    name: K,
+    input: unknown,
+    envelope: Envelope,
+  ): Promise<OperationOutput<C, K>>;
   /** Abort every stream this app currently has open. Called during shutdown. */
   abortAll(reason: string): void;
   /** How many streams are running right now. */
   readonly activeStreams: number;
+  /** The gate this application's calls pass through. */
+  readonly gate: Gate;
 }
 
 /**
@@ -141,6 +169,12 @@ export function createReservedHostApp<C extends AnyContract>(
   options: HostAppOptions = {},
 ): HostApp<C> {
   const logger: HostLogger = options.logger ?? console;
+  // An application that was not given a gate still has one. There is no
+  // ungated path into a handler, so the only question a missing option answers
+  // is what the records say, not whether the policy applies.
+  const gate: Gate =
+    options.gate ??
+    createGate({ appId: 'app', releaseId: 'unreleased', mode: 'live', logger });
   const operations = new Map<string, OperationHandler<C, never>>();
   const streams = new Map<string, StreamHandlerFor<C, never>>();
   const running = new Set<AbortController>();
@@ -159,13 +193,12 @@ export function createReservedHostApp<C extends AnyContract>(
    * call is not more trusted than a browser call just because it originates
    * inside the host — so there is one implementation and two callers.
    */
-  async function runOperation(route: string, raw: unknown): Promise<unknown> {
+  async function runOperation(route: string, raw: unknown, envelope: Envelope): Promise<unknown> {
     const spec = contract.operations[route];
     const handler = operations.get(route);
     if (spec === undefined || handler === undefined) {
       throw new TypeError(`operation ${JSON.stringify(route)} has no implementation`);
     }
-    const context: CallContext = { route };
     let input: unknown;
     try {
       input = spec.input.parse(raw);
@@ -173,13 +206,27 @@ export function createReservedHostApp<C extends AnyContract>(
       // A validation message names a field and a constraint from the contract
       // the browser already has. It carries nothing the caller did not send,
       // so it is safe to return and useful to see.
+      //
+      // This is deliberately before the gate. A call that never had valid
+      // arguments asked nobody for anything, so there is nothing to approve and
+      // nothing worth recording.
       throw new PublicError(
         'invalid_input',
         cause instanceof ValidationError ? cause.message : 'invalid input',
       ).toBridgeError();
     }
+    const context: CallContext = {
+      route,
+      requestId: envelope.requestId,
+      channel: envelope.channel,
+      caller: envelope.caller,
+      mode: gate.mode === 'preview' || envelope.mode === 'preview' ? 'preview' : 'live',
+    };
     try {
-      const output = await handler(input as never, context);
+      const output = await gate.guard(
+        { ...envelope, route, effect: spec.effect ?? envelope.effectHint ?? 'write', input },
+        () => Promise.resolve(handler(input as never, context)),
+      );
       return spec.output.parse(output);
     } catch (cause) {
       throw wrap(cause, route, logger);
@@ -201,7 +248,7 @@ export function createReservedHostApp<C extends AnyContract>(
       return app;
     },
 
-    invoke(name, input) {
+    invoke(name, input, envelope) {
       // Structural mistakes surface synchronously: a stream is not invokable
       // and a missing handler is a bug, and neither should look like a failed
       // call to whatever is awaiting the result.
@@ -214,7 +261,7 @@ export function createReservedHostApp<C extends AnyContract>(
       if (!operations.has(name)) {
         throw new TypeError(`operation ${JSON.stringify(name)} has no implementation`);
       }
-      return runOperation(name, input).catch((cause: unknown) => {
+      return runOperation(name, input, envelope).catch((cause: unknown) => {
         // On the bridge, Brobridge reduces an unexpected failure to a fixed
         // sentence on the way out. `invoke` has no transport to do that, and
         // its caller is the AI layer, which may put what it is given into a
@@ -226,6 +273,8 @@ export function createReservedHostApp<C extends AnyContract>(
     get activeStreams() {
       return running.size;
     },
+
+    gate,
 
     abortAll(reason) {
       for (const controller of running) controller.abort(new Error(reason));
@@ -248,7 +297,15 @@ export function createReservedHostApp<C extends AnyContract>(
         const { group, member } = splitRoute(route);
         if (contract.operations[route] === undefined) continue;
         const service = groups.get(group) ?? {};
-        service[member] = (raw: unknown): Promise<unknown> => runOperation(route, raw);
+        // The envelope is built here and nowhere else on this path. A tab has
+        // no way to describe itself as anything other than the user, because
+        // nothing it sends is read when this is filled in.
+        service[member] = (raw: unknown): Promise<unknown> =>
+          runOperation(route, raw, {
+            requestId: crypto.randomUUID(),
+            channel: 'user',
+            caller: 'tab',
+          });
         groups.set(group, service);
       }
       for (const [group, service] of groups) bridge.expose(group, service);
@@ -257,7 +314,7 @@ export function createReservedHostApp<C extends AnyContract>(
         const spec = contract.streams[route];
         if (spec === undefined) continue;
         bridge.stream(route, (stream: BridgeStream, streamContext: StreamContext) =>
-          runStream(stream, streamContext, route, spec, handler, running, logger),
+          runStream(stream, streamContext, route, spec, handler, running, logger, gate),
         );
       }
     },
@@ -297,10 +354,15 @@ async function runStream<E>(
   stream: BridgeStream,
   streamContext: StreamContext,
   route: string,
-  spec: { params: { parse(value: unknown): unknown }; event: { parse(value: unknown): unknown } },
+  spec: {
+    params: { parse(value: unknown): unknown };
+    event: { parse(value: unknown): unknown };
+    effect?: Effect;
+  },
   handler: (params: never, sink: StreamSink<E>) => void | Promise<void>,
   running: Set<AbortController>,
   logger: HostLogger,
+  gate: Gate,
 ): Promise<void> {
   const controller = new AbortController();
   running.add(controller);
@@ -333,7 +395,23 @@ async function runStream<E>(
   };
 
   try {
-    await handler(params as never, sink);
+    // A stream is guarded once, when it starts. Its events are the one call's
+    // output, not a series of calls, so there is nothing further to decide
+    // once the handler is running.
+    await gate.guard(
+      {
+        requestId: crypto.randomUUID(),
+        channel: 'user',
+        caller: 'tab',
+        signal: controller.signal,
+        route,
+        effect: effectOf(spec),
+        input: params,
+      },
+      async () => {
+        await handler(params as never, sink);
+      },
+    );
     if (!controller.signal.aborted) await stream.end();
   } catch (cause) {
     // A cancelled stream is not a fault: the browser asked for it, the stream

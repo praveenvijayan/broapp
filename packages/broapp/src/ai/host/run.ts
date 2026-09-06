@@ -17,12 +17,16 @@ import { jsonSchema, stepCountIs, streamText, tool } from 'ai';
 import type { ModelMessage, ToolSet } from 'ai';
 
 import type { HostLogger, StreamSink } from '../../host/app.ts';
+import type { PendingApprovals } from '../../host/approvals.ts';
+import type { ApprovalQuestion, Approver } from '../../host/gate.ts';
+import type { Effect } from '../../shared/contract.ts';
 import { fromTransportError, PublicError } from '../../shared/errors.ts';
+import type { ToolPermission } from '../shared/types.ts';
 import type { ChatEvent, StreamChatParams } from './run-types.ts';
 
 import { AdapterError } from './adapter.ts';
 import type { Registry } from './registry.ts';
-import type { AiContextProviders, AiTool, Confirmations, ContextDocument } from './tool.ts';
+import type { AiContextProviders, AiTool, ContextDocument } from './tool.ts';
 
 /** What the run loop needs from the `Ai` that owns it. */
 export interface RunDeps {
@@ -33,8 +37,19 @@ export interface RunDeps {
   readonly contextBudgetChars: number;
   readonly maxSteps: number;
   readonly confirmTimeoutMs: number;
-  readonly confirmations: Confirmations;
+  readonly approvals: PendingApprovals;
   readonly logger: HostLogger;
+}
+
+/**
+ * What the browser is told about a tool before it runs.
+ *
+ * The browser's vocabulary is still `read` and `confirm`, because that is what
+ * it shows a person; the gate's vocabulary is the effect. The mapping is here,
+ * in one place, so the two never drift into meaning different things.
+ */
+function permissionOf(effect: Effect): ToolPermission {
+  return effect === 'read' ? 'read' : 'confirm';
 }
 
 /** How many records a search may contribute to one turn. */
@@ -172,8 +187,72 @@ function safeMessage(cause: unknown, logger: HostLogger): string {
   return 'The AI provider returned an error.';
 }
 
-/** Build the AI SDK tool set, wrapping each tool in the permission dance. */
-function buildTools(params: StreamChatParams, deps: RunDeps, sink: StreamSink<ChatEvent>): ToolSet {
+/**
+ * The approver for one run.
+ *
+ * The gate decides that a person has to be asked; this is how the asking
+ * reaches them. The `confirm` event goes out on the same stream the browser is
+ * already watching, and the answer comes back on `ai.chatConfirm`, which hands
+ * it to the same approval table. The run's own deadline is applied here rather
+ * than left to the gate's, because how long a chat turn should wait for a
+ * click is a property of the chat, not of the application.
+ */
+function createRunApprover(
+  deps: RunDeps,
+  sink: StreamSink<ChatEvent>,
+  callIdOf: (requestId: string) => string,
+): Approver {
+  return {
+    async ask(question: ApprovalQuestion, signal: AbortSignal): Promise<boolean> {
+      await sink.emit({
+        type: 'confirm',
+        callId: callIdOf(question.requestId),
+        tool: question.route,
+        input: question.input,
+        requestId: question.requestId,
+        releaseId: question.releaseId,
+        argumentsHash: question.argumentsHash,
+      });
+      // A question nobody answers is a denial. The gate has a deadline of its
+      // own, but it belongs to the application; this one belongs to the turn.
+      const waiting = new AbortController();
+      const timer = setTimeout(
+        () => waiting.abort(new Error('the question timed out')),
+        deps.confirmTimeoutMs,
+      );
+      const relay = (): void => waiting.abort(new Error('the run was cancelled'));
+      signal.addEventListener('abort', relay, { once: true });
+      if (signal.aborted) relay();
+      try {
+        return await deps.approvals.ask(question, waiting.signal);
+      } finally {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', relay);
+      }
+    },
+  };
+}
+
+/**
+ * True when a tool call failed because nobody allowed it.
+ *
+ * The gate throws a `PublicError` with code `rejected`; a tool that reached it
+ * through `HostApp.invoke` has had that turned into the marked bridge error the
+ * browser would have seen. Both are the same answer — the user said no — and
+ * both have to become an ordinary tool result rather than a failure.
+ */
+function wasDeclined(cause: unknown): boolean {
+  if (cause instanceof PublicError) return cause.code === 'rejected';
+  return fromTransportError(cause).code === 'rejected';
+}
+
+/** Build the AI SDK tool set, each call carrying the run's envelope to the gate. */
+function buildTools(
+  params: StreamChatParams,
+  deps: RunDeps,
+  sink: StreamSink<ChatEvent>,
+  approver: Approver,
+): ToolSet {
   const tools: ToolSet = {};
   for (const [name, definition] of Object.entries(deps.tools)) {
     tools[name] = tool({
@@ -186,18 +265,27 @@ function buildTools(params: StreamChatParams, deps: RunDeps, sink: StreamSink<Ch
           callId,
           tool: name,
           input,
-          permission: definition.permission,
+          permission: permissionOf(definition.effect),
         });
 
-        if (definition.permission === 'confirm') {
-          await sink.emit({ type: 'confirm', callId, tool: name, input });
-          const approved = await deps.confirmations.wait(
-            params.runId,
-            callId,
-            deps.confirmTimeoutMs,
+        let output: unknown;
+        try {
+          // The envelope is built here, from what the run loop knows. Nothing
+          // the model produced is read when it is filled in, which is what
+          // stops a model from calling a tool as the user.
+          output = await definition.execute(
+            input,
+            {
+              requestId: `${params.runId}:${callId}`,
+              channel: 'ai',
+              caller: `ai:${params.runId}`,
+              signal: sink.signal,
+              approver,
+            },
             sink.signal,
           );
-          if (!approved) {
+        } catch (cause) {
+          if (wasDeclined(cause)) {
             // A refusal is an ordinary result, not a failure: the model has to
             // be told, so it can say something rather than retry.
             await sink.emit({
@@ -209,12 +297,6 @@ function buildTools(params: StreamChatParams, deps: RunDeps, sink: StreamSink<Ch
             });
             return DECLINED;
           }
-        }
-
-        let output: unknown;
-        try {
-          output = await definition.execute(input, sink.signal);
-        } catch (cause) {
           // One tool failing is not the turn failing. The model gets the
           // reason and can carry on or explain.
           output = { error: safeToolMessage(cause, name, deps.logger) };
@@ -257,6 +339,13 @@ export async function runChat(
   const resolved = await deps.registry.resolve();
   const documents = await assembleContext(params, deps, sink.signal);
 
+  // One approver per run. The request identifier the gate will use is
+  // `<runId>:<callId>`, so the call a `confirm` event names can be recovered
+  // from it — which is what keeps `ai.chatConfirm`'s wire shape unchanged.
+  const approver = createRunApprover(deps, sink, (requestId) =>
+    requestId.startsWith(`${params.runId}:`) ? requestId.slice(params.runId.length + 1) : requestId,
+  );
+
   const result = streamText({
     // Always a model *instance*. A string here would be resolved by the AI
     // SDK's gateway, over the global fetch, to a Vercel host — see
@@ -264,7 +353,7 @@ export async function runChat(
     model: resolved.adapter.model(resolved.config, resolved.modelId),
     system: buildSystemPrompt(deps, documents),
     messages: toModelMessages(params),
-    tools: buildTools(params, deps, sink),
+    tools: buildTools(params, deps, sink, approver),
     stopWhen: stepCountIs(deps.maxSteps),
     abortSignal: sink.signal,
     // The default handler prints the error; this layer reports it as an event

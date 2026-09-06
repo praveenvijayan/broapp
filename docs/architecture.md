@@ -39,6 +39,10 @@ does not call `createAi` carries none of it. See [the AI layer](ai.md).
 This split is why the interesting security properties are not Broapp's to get
 wrong. It is also why Broapp is small.
 
+Autoapp builds a fifth thing on top of these four — an application its owner can
+reshape while using it — and it is where the execution gate every call now
+passes comes from; see [the Autoapp design](autoapp/design.md).
+
 ## The constraint that decides the packaging
 
 Brobridge's route table is exactly three entries: `/`, `/ws`, `/rpc`. There is

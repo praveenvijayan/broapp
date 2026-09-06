@@ -17,12 +17,28 @@
  */
 import type { Infer, Schema } from './schema.ts';
 
+/**
+ * What an operation or stream does to the world.
+ *
+ * `read` changes nothing. `write` changes data inside the application's data
+ * directory. `external` reaches outside it: the network, other files, a
+ * spawned process, mail. The gate decides from this and from who is asking
+ * whether a call runs, waits for a person, or is refused. A route that does
+ * not say is treated as `write`, which asks a person before an agent may
+ * run it and lets the owner's own click through.
+ */
+export type Effect = 'read' | 'write' | 'external';
+
+/** The three strings an `effect` may be, for validation at definition time. */
+const EFFECTS: readonly Effect[] = ['read', 'write', 'external'];
+
 /** One unary operation: JSON in, JSON out. */
 export interface OperationSpec<I = unknown, O = unknown> {
   readonly input: Schema<I>;
   readonly output: Schema<O>;
   /** Shown in generated documentation and in the developer panel. */
   readonly summary?: string;
+  readonly effect?: Effect;
 }
 
 /**
@@ -37,6 +53,12 @@ export interface StreamSpec<P = unknown, E = unknown> {
   readonly params: Schema<P>;
   readonly event: Schema<E>;
   readonly summary?: string;
+  readonly effect?: Effect;
+}
+
+/** The effect a route declares, or the conservative default. */
+export function effectOf(spec: { readonly effect?: Effect }): Effect {
+  return spec.effect ?? 'write';
 }
 
 /** The operation and stream tables an application declares. */
@@ -120,6 +142,20 @@ export function defineContract<const C extends ContractShape>(shape: C): Contrac
     if (!ROUTE_PATTERN.test(route)) {
       throw new TypeError(
         `route ${JSON.stringify(route)} must be "group.member", where each half is a JavaScript identifier`,
+      );
+    }
+  }
+  // An `effect` that is not one of the three words would silently become the
+  // conservative default at the gate, which reads as a working declaration
+  // while meaning nothing. A typo is refused where it was written instead.
+  for (const [route, spec] of [
+    ...Object.entries(shape.operations),
+    ...Object.entries(shape.streams),
+  ] as readonly (readonly [string, { readonly effect?: unknown }])[]) {
+    const effect = spec.effect;
+    if (effect !== undefined && !(EFFECTS as readonly unknown[]).includes(effect)) {
+      throw new TypeError(
+        `route ${JSON.stringify(route)} declares effect ${JSON.stringify(effect)}, which must be "read", "write" or "external"`,
       );
     }
   }

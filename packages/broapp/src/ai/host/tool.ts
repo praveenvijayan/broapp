@@ -4,17 +4,72 @@
  * Kept apart from `create-ai.ts` so that `from-contract.ts` and `run.ts` can
  * share these without either importing the other's module graph.
  */
+import type { Envelope, Gate } from '../../host/gate.ts';
+import type { Effect } from '../../shared/contract.ts';
 import type { JsonSchema } from '../../shared/schema.ts';
-import type { ToolPermission } from '../shared/types.ts';
 
 /** One thing a model may do. */
 export interface AiTool {
   readonly description: string;
   /** JSON Schema for the input. Use `schema.toJsonSchema()` or write it by hand. */
   readonly inputSchema: JsonSchema;
-  /** `read` runs immediately; `confirm` asks the user first. */
-  readonly permission: ToolPermission;
-  execute(input: unknown, signal: AbortSignal): Promise<unknown>;
+  /** What running it does to the world. The gate decides from this and the channel. */
+  readonly effect: Effect;
+  /**
+   * Run it.
+   *
+   * The envelope comes from the run loop, which built it from what it knows
+   * rather than from what the model said. An implementation passes it on; it
+   * does not invent one.
+   */
+  execute(input: unknown, envelope: Envelope, signal: AbortSignal): Promise<unknown>;
+}
+
+/**
+ * The brand that says a tool's `execute` reaches the gate.
+ *
+ * A hand-written tool is ordinary host code: nothing about its type says
+ * whether it asked anybody before doing what it does. Rather than trust that
+ * every application remembers, `createAi` refuses a tool without this symbol,
+ * and the only way to get one is {@link guardedTool}, which does the asking.
+ */
+export const GUARDED: unique symbol = Symbol('broapp.guarded');
+
+/** An {@link AiTool} whose calls are known to pass the gate. */
+export interface GuardedTool extends AiTool {
+  readonly [GUARDED]: true;
+}
+
+/** What {@link guardedTool} needs to know about the thing it is wrapping. */
+export interface GuardedToolDefinition {
+  /** The tool's name, which is also the route in the gate's records. */
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: JsonSchema;
+  readonly effect: Effect;
+  run(input: unknown, signal: AbortSignal): Promise<unknown>;
+}
+
+/**
+ * Wrap a hand-written tool so its calls pass the gate.
+ *
+ * This is the supported way to give a model something an application's
+ * contract does not describe — a search over a third-party index, a shell
+ * command, a mail send. The wrapping is the whole point: the model's request
+ * arrives with the run loop's envelope, the gate decides, and only then does
+ * `run` happen.
+ */
+export function guardedTool(gate: Gate, tool: GuardedToolDefinition): GuardedTool {
+  return {
+    [GUARDED]: true,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    effect: tool.effect,
+    execute: (input, envelope) =>
+      gate.guard({ ...envelope, route: tool.name, effect: tool.effect, input }, (signal) =>
+        tool.run(input, signal),
+      ),
+  };
 }
 
 /** A record the model may be shown, named but not loaded. */
@@ -37,53 +92,4 @@ export interface AiContextProviders {
   search?(query: { text: string; limit: number }, signal: AbortSignal): Promise<ContextRef[]>;
   /** Full content for named refs. Unknown refs are skipped, not errors. */
   resolve?(refs: readonly string[], signal: AbortSignal): Promise<ContextDocument[]>;
-}
-
-/**
- * The table a waiting tool call and `ai.chatConfirm` meet in.
- *
- * One per `Ai`, because a confirmation belongs to a run, and a run belongs to
- * a stream that may be one of several open at once.
- */
-export interface Confirmations {
-  wait(runId: string, callId: string, timeoutMs: number, signal: AbortSignal): Promise<boolean>;
-  /** Called by `ai.chatConfirm`. Returns false when nobody is waiting. */
-  answer(runId: string, callId: string, approve: boolean): boolean;
-}
-
-/** Build the confirmation table. */
-export function createConfirmations(): Confirmations {
-  const waiting = new Map<string, (approved: boolean) => void>();
-  const key = (runId: string, callId: string): string => `${runId} ${callId}`;
-
-  return {
-    wait(runId, callId, timeoutMs, signal) {
-      const id = key(runId, callId);
-      return new Promise<boolean>((resolve) => {
-        let settled = false;
-        const finish = (approved: boolean): void => {
-          if (settled) return;
-          settled = true;
-          waiting.delete(id);
-          clearTimeout(timer);
-          signal.removeEventListener('abort', onAbort);
-          resolve(approved);
-        };
-        // A question nobody answers is a denial, not a hung stream: the user
-        // may have closed the tab, and the tool must not run unattended.
-        const timer = setTimeout(() => finish(false), timeoutMs);
-        const onAbort = (): void => finish(false);
-        signal.addEventListener('abort', onAbort, { once: true });
-        if (signal.aborted) finish(false);
-        else waiting.set(id, finish);
-      });
-    },
-
-    answer(runId, callId, approve) {
-      const resolve = waiting.get(key(runId, callId));
-      if (resolve === undefined) return false;
-      resolve(approve);
-      return true;
-    },
-  };
 }

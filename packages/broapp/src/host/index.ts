@@ -21,6 +21,26 @@ export type {
   StreamSink,
 } from './app.ts';
 
+export { argumentsHash, createGate, decide } from './gate.ts';
+export type {
+  Approver,
+  ApprovalQuestion,
+  Channel,
+  Decision,
+  Envelope,
+  ExecutionMode,
+  ExecutionRecord,
+  Gate,
+  GateOptions,
+  GuardRequest,
+  Outcome,
+  PolicyVerdict,
+  Recorder,
+} from './gate.ts';
+
+export { createPendingApprovals } from './approvals.ts';
+export type { AnswerResult, ApprovalAnswer, PendingApprovals } from './approvals.ts';
+
 export { startApp } from './runtime.ts';
 export type { LifecycleMode, RunningApp, ShutdownReason, StartAppOptions } from './runtime.ts';
 
