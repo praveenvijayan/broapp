@@ -123,7 +123,7 @@ export function createRegistry(options: RegistryOptions): Registry {
       // models is fetched *from* the provider, so telling a user to choose one
       // before they can see any is an instruction they cannot follow.
       const apiKey = await keyFor(settings, adapter.id);
-      if (adapter.needs.apiKey && (apiKey === null || apiKey === '')) {
+      if (adapter.needs.apiKey === 'required' && (apiKey === null || apiKey === '')) {
         throw publicError.unavailable(`An API key is required for ${adapter.label}.`);
       }
       const config = configFrom(settings, adapter, apiKey);

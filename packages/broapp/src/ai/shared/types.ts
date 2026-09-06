@@ -31,7 +31,10 @@ export interface ProviderInfo {
   label: string;
   /** True when requests stay on this machine with the current settings. */
   local: boolean;
-  needs: { apiKey: boolean; baseUrl: 'required' | 'optional' | 'none' };
+  needs: {
+    apiKey: 'required' | 'optional' | 'none';
+    baseUrl: 'required' | 'optional' | 'none';
+  };
   defaultBaseUrl: string | null;
 }
 

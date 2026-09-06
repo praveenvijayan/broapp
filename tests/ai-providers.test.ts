@@ -206,6 +206,22 @@ describe('the OpenAI-compatible adapter', () => {
     expect(() => openai().model(configWith(fetchImpl), 'gpt-4o')).toThrow(/API key/);
   });
 
+  test('a custom server offers a key but does not demand one', async () => {
+    const gateway = 'https://openrouter.ai/api/v1';
+    expect(customServer().needs.apiKey).toBe('optional');
+
+    // Without a key: builds and asks for models with no Authorization header.
+    const bare = stubFetch(() => json({ data: [{ id: 'z-ai/glm' }] }));
+    await customServer().models(configWith(bare, { baseUrl: gateway }), never);
+    expect(bare.seen[0]?.headers['authorization']).toBeUndefined();
+    expect(() => customServer().model(configWith(bare, { baseUrl: gateway }), 'z-ai/glm')).not.toThrow();
+
+    // With one: it goes out as a bearer token, which is what OpenRouter needs.
+    const keyed = stubFetch(() => json({ data: [] }));
+    await customServer().models(configWith(keyed, { baseUrl: gateway, apiKey: 'sk-or' }), never);
+    expect(keyed.seen[0]?.headers['authorization']).toBe('Bearer sk-or');
+  });
+
   test('builds a chat model when it has what it needs', () => {
     const fetchImpl = stubFetch(() => json({}));
     expect(typeof ollama().model(configWith(fetchImpl), 'llama3')).not.toBe('string');

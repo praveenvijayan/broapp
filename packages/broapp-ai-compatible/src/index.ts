@@ -20,7 +20,7 @@ import type { AdapterConfig, ProviderAdapter } from 'broapp/ai/host';
 export interface CompatibleOptions {
   readonly id: string;
   readonly label: string;
-  readonly needs: { apiKey: boolean; baseUrl: 'required' | 'optional' };
+  readonly needs: { apiKey: 'required' | 'optional' | 'none'; baseUrl: 'required' | 'optional' };
   readonly defaultBaseUrl: string | null;
   /** Sent as the OpenAI-compatible provider `name`. Default: `id`. */
   readonly name?: string;
@@ -126,7 +126,7 @@ export function openaiCompatible(options: CompatibleOptions): ProviderAdapter {
       if (options.needs.baseUrl === 'required' && baseURL === '') {
         throw new AdapterError('provider', 'A server URL is required.');
       }
-      if (options.needs.apiKey && (config.apiKey === null || config.apiKey === '')) {
+      if (options.needs.apiKey === 'required' && (config.apiKey === null || config.apiKey === '')) {
         throw new AdapterError('auth', `An API key is required for ${label}.`);
       }
       const provider = createOpenAICompatible({
@@ -149,7 +149,7 @@ export const ollama = (): ProviderAdapter =>
   openaiCompatible({
     id: 'ollama',
     label: 'Ollama (local)',
-    needs: { apiKey: false, baseUrl: 'optional' },
+    needs: { apiKey: 'none', baseUrl: 'optional' },
     defaultBaseUrl: 'http://127.0.0.1:11434/v1',
   });
 
@@ -158,15 +158,22 @@ export const openai = (): ProviderAdapter =>
   openaiCompatible({
     id: 'openai',
     label: 'OpenAI',
-    needs: { apiKey: true, baseUrl: 'optional' },
+    needs: { apiKey: 'required', baseUrl: 'optional' },
     defaultBaseUrl: 'https://api.openai.com/v1',
   });
 
-/** Any other server speaking the same API. The user supplies the address. */
+/**
+ * Any other server speaking the same API. The user supplies the address.
+ *
+ * The key is optional rather than absent: a llama.cpp server on this machine
+ * wants none, while a hosted gateway such as OpenRouter answers `GET /models`
+ * without one and then rejects every chat request. Offering the field lets
+ * both work.
+ */
 export const customServer = (): ProviderAdapter =>
   openaiCompatible({
     id: 'openai-compatible',
     label: 'OpenAI-compatible server',
-    needs: { apiKey: false, baseUrl: 'required' },
+    needs: { apiKey: 'optional', baseUrl: 'required' },
     defaultBaseUrl: null,
   });

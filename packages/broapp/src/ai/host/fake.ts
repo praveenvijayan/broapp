@@ -140,7 +140,7 @@ export function createFakeAdapter(options: FakeAdapterOptions = {}): FakeAdapter
   const adapter: FakeAdapter = {
     id,
     label: 'Fake provider',
-    needs: { apiKey: options.needsKey === true, baseUrl: 'none' },
+    needs: { apiKey: options.needsKey === true ? 'required' : 'none', baseUrl: 'none' },
     defaultBaseUrl: null,
     // Nothing leaves the process, so this is true whatever the configuration.
     local: () => true,

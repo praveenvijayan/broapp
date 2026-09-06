@@ -137,7 +137,7 @@ export function anthropic(): ProviderAdapter {
   return {
     id: 'anthropic',
     label: 'Anthropic',
-    needs: { apiKey: true, baseUrl: 'optional' },
+    needs: { apiKey: 'required', baseUrl: 'optional' },
     defaultBaseUrl: DEFAULT_BASE_URL,
 
     // False for the real service, and true for a proxy on this machine — which

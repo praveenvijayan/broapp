@@ -34,7 +34,7 @@ const providerInfo = s.object({
   label: s.string(),
   local: s.boolean(),
   needs: s.object({
-    apiKey: s.boolean(),
+    apiKey: s.enum(['required', 'optional', 'none']),
     baseUrl: s.enum(['required', 'optional', 'none']),
   }),
   defaultBaseUrl: s.nullable(s.string()),

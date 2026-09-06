@@ -88,7 +88,7 @@ describe('the AI layer on a bridge', () => {
           id: 'fake',
           label: 'Fake provider',
           local: true,
-          needs: { apiKey: false, baseUrl: 'none' },
+          needs: { apiKey: 'none', baseUrl: 'none' },
           defaultBaseUrl: null,
         },
       ],

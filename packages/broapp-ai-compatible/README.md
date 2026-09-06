@@ -25,7 +25,7 @@ const ai = createAi({
 | --- | --- | --- | --- |
 | `ollama()` | `ollama` | `http://127.0.0.1:11434/v1` | nothing |
 | `openai()` | `openai` | `https://api.openai.com/v1` | API key |
-| `customServer()` | `openai-compatible` | none | server URL |
+| `customServer()` | `openai-compatible` | none | server URL; API key optional (OpenRouter wants one, a local server usually not) |
 | `openaiCompatible({...})` | yours | yours | yours |
 
 Whether a provider counts as local is decided from the server URL at the time

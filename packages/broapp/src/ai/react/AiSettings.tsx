@@ -101,11 +101,17 @@ export function AiSettings(): React.ReactElement {
             </div>
           )}
 
-          {!provider.needs.apiKey ? null : (
+          {provider.needs.apiKey === 'none' ? null : (
             <div className="form__row">
               <label className="form__label" htmlFor="ai-key">
-                API key
+                API key{provider.needs.apiKey === 'optional' ? ' (optional)' : ''}
               </label>
+              {provider.needs.apiKey === 'optional' ? (
+                <p className="form__hint">
+                  Needed for a hosted service such as OpenRouter. Leave empty for a server on this
+                  computer that does not ask for one.
+                </p>
+              ) : null}
               <div className="ai-settings__key">
                 <input
                   className="input"

@@ -50,7 +50,10 @@ export interface ProviderAdapter {
   /** Stable id, stored in settings: `'anthropic'`, `'ollama'`, `'fake'`. */
   readonly id: string;
   readonly label: string;
-  readonly needs: { readonly apiKey: boolean; readonly baseUrl: 'required' | 'optional' | 'none' };
+  readonly needs: {
+    readonly apiKey: 'required' | 'optional' | 'none';
+    readonly baseUrl: 'required' | 'optional' | 'none';
+  };
   readonly defaultBaseUrl: string | null;
   /** Whether requests stay on this machine under this config. */
   local(config: AdapterConfig): boolean;

@@ -167,7 +167,7 @@ configuration works, and builds a model:
 interface ProviderAdapter {
   readonly id: string;
   readonly label: string;
-  readonly needs: { apiKey: boolean; baseUrl: 'required' | 'optional' | 'none' };
+  readonly needs: { apiKey: 'required' | 'optional' | 'none'; baseUrl: 'required' | 'optional' | 'none' };
   readonly defaultBaseUrl: string | null;
   local(config: AdapterConfig): boolean;
   models(config: AdapterConfig, signal: AbortSignal): Promise<BroappModel[]>;
@@ -175,6 +175,12 @@ interface ProviderAdapter {
   model(config: AdapterConfig, modelId: string): LanguageModel;
 }
 ```
+
+`needs.apiKey` drives the settings panel: `'required'` shows the key field and
+blocks chat until a key is saved, `'optional'` shows it marked optional and
+sends a bearer token only when one is set, `'none'` hides it. The generic
+OpenAI-compatible adapter is `'optional'` because the same address field
+serves a keyless local server and a hosted gateway such as OpenRouter.
 
 Two rules for an adapter. Take `fetch` from `config`, never from the global —
 that is what lets a test prove no request left the machine. And report failures
