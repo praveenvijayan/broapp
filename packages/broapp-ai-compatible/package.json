@@ -1,0 +1,51 @@
+{
+  "name": "broapp-ai-compatible",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OpenAI-compatible provider for a Broapp application's AI layer: OpenAI, Ollama, LM Studio, vLLM and anything speaking the same API",
+  "license": "MIT",
+  "homepage": "https://github.com/praveenvijayan/broapp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/praveenvijayan/broapp.git",
+    "directory": "packages/broapp-ai-compatible"
+  },
+  "bugs": {
+    "url": "https://github.com/praveenvijayan/broapp/issues"
+  },
+  "keywords": [
+    "broapp",
+    "ai",
+    "openai",
+    "ollama",
+    "lm-studio",
+    "local-first"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.44",
+    "ai": "7.0.93"
+  },
+  "peerDependencies": {
+    "broapp": ">=0.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "broapp": "workspace:*",
+    "typescript": "^5.7.2"
+  }
+}

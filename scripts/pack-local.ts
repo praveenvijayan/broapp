@@ -20,7 +20,10 @@ export interface Packed {
   readonly tarball: string;
 }
 
-/** Pack `broapp` and `create-broapp` into `outDir`. Returns absolute tarball paths. */
+/** Every package that is published. Order matters only for readable output. */
+const PUBLISHED = ['broapp', 'create-broapp', 'broapp-ai-anthropic', 'broapp-ai-compatible'];
+
+/** Pack every publishable package into `outDir`. Returns absolute tarball paths. */
 export async function packLocal(outDir: string = join(root, '.broapp-tmp', 'packs')): Promise<Packed[]> {
   await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
@@ -35,7 +38,7 @@ export async function packLocal(outDir: string = join(root, '.broapp-tmp', 'pack
   if ((await stage.exited) !== 0) throw new Error('staging the template failed');
 
   const packed: Packed[] = [];
-  for (const name of ['broapp', 'create-broapp']) {
+  for (const name of PUBLISHED) {
     const packageDir = join(root, 'packages', name);
     const child = Bun.spawn(['bun', 'pm', 'pack', '--destination', outDir], {
       cwd: packageDir,

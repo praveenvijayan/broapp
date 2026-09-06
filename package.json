@@ -29,6 +29,8 @@
     "@types/ws": "^8.18.1",
     "ai": "7.0.93",
     "broapp": "workspace:*",
+    "broapp-ai-anthropic": "workspace:*",
+    "broapp-ai-compatible": "workspace:*",
     "brobridge": "^0.2.1",
     "typescript": "^5.7.2",
     "ws": "^8.21.3"
