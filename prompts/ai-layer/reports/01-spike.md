@@ -17,7 +17,7 @@ Bun 1.4.0, macOS arm64. Nothing outside `.broapp-tmp/` and this report changed.
 | JSON schema / tool | `jsonSchema<OBJECT>(schema, { validate? }): Schema<OBJECT>`; `tool(...)` (five overloads), plus `dynamicTool(...)` | `provider-utils:849,2139` |
 | Step limit | `stepCountIs` is an alias of `isStepCount(n): StopCondition`, passed as `stopWhen` | `ai:1800,9744` |
 | Model type | `type LanguageModel = GlobalProviderModelId \| LanguageModelV4 \| V3 \| V2` | `ai:112` |
-| Test doubles | `ai/test` exists, exports `MockLanguageModelV4` (and `V3`); `simulateReadableStream({ chunks, initialDelayInMs, chunkDelayInMs })` lives in **`ai`**, not `ai/test` | `ai/package.json:38`, `ai:7803` |
+| Test doubles | `ai/test` exists, exports `MockLanguageModelV4` (and `V3`); `simulateReadableStream({ chunks, initialDelayInMs, chunkDelayInMs })` is exported from both `ai` and `ai/test` (reviewer correction) | `ai/package.json:38`, `ai:7803` |
 | Anthropic | `createAnthropic({ apiKey?, baseURL?, headers?, fetch? })`; provider callable — `anthropic('claude-opus-5')`, also `.languageModel/.chat/.messages` | `anthropic:1243,1268,1305` |
 | Compatible | `createOpenAICompatible({ baseURL, name, apiKey?, headers?, queryParams?, fetch?, includeUsage? })` — `baseURL` and `name` required; callable, also `.chatModel` | `openai-compatible:310,322,384` |
 

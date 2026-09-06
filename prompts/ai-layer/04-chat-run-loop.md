@@ -181,7 +181,9 @@ Map parts to events:
 | finish (final) | `{ type: 'usage', inputTokens, outputTokens }` then `{ type: 'done' }` |
 | error | `{ type: 'error', code: 'provider', message: <safe message> }` then return |
 | tool call / tool result parts | ignore here (already emitted from `execute`) |
-| anything else (step start/finish, reasoning, source…) | ignore |
+| `tool-error` | should not occur because `execute` never throws; if it does, emit `{ type: 'tool-result', callId, tool, output: { error: 'The tool failed.' } }` and log |
+| `abort` | return (the browser cancelled) |
+| anything else (`text-start`, `text-end`, `finish-step`, `start`, reasoning, source…) | ignore |
 
 Token counts: use the usage object the finish part carries; if a field is
 missing use `0`.
@@ -261,6 +263,10 @@ providers return fixed documents.
     code `unavailable`.
 13. **isBusy.** While a stream with `chunkDelayMs: 50` is running,
     `ai.activeStreams` is 1; after `done` it is 0.
+14. **Never a string model.** The fake adapter counts `model()` calls;
+    after one chat turn the count is 1. Also grep `run.ts` in the test and
+    assert it contains no `model: '` or `model: "` literal — the gateway
+    trap from report 01 must stay closed.
 
 ## Verify
 

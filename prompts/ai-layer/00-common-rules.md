@@ -88,3 +88,19 @@ Same for `@ai-sdk/anthropic` and `@ai-sdk/openai-compatible`: open their
 - Never ask the user a question mid-task. Decide, record, continue.
 - Never stub a feature with a `TODO` and call the prompt done. If a part
   cannot be finished, finish everything else, then say so in the report.
+
+## 6. Facts established by the spike (report 01)
+
+- `bun build --compile --bytecode` (Broapp's default) rejects top-level
+  `await`. Every host entry point and every module under `src/ai/host`
+  keeps `await` inside functions. `examples/notes/src/host/main.ts` already
+  does this with `main().then(...)`; copy that shape.
+- A **string** model id (`'anthropic/claude-opus-5'`) routes through the
+  Vercel AI Gateway with the global `fetch`. The layer passes a provider
+  **instance** to `streamText` always. `ProviderAdapter.model()` is the
+  only place a model is made.
+- `ai/test` exports `MockLanguageModelV4`; `simulateReadableStream` is
+  exported from both `ai` and `ai/test`. `stepCountIs` is an alias of
+  `isStepCount`. `jsonSchema` and `tool` are re-exported by `ai`.
+- The three packages add about 6.9 MB to a compiled binary. Applications
+  that do not import `broapp/ai/host` pay nothing; keep it that way.
