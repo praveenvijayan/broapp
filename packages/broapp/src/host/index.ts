@@ -6,6 +6,11 @@
  * the import would fail loudly — which is the intended outcome.
  */
 export { createHostApp } from './app.ts';
+/**
+ * Not for applications: it skips the check that refuses the reserved `ai`
+ * route group. Only `broapp/ai/host` should use it.
+ */
+export { createReservedHostApp } from './app.ts';
 export type {
   CallContext,
   HostApp,

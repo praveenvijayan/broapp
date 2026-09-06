@@ -124,6 +124,16 @@ export function fromTransportError(error: unknown): BroappError {
   return new BroappError('internal', INTERNAL_ERROR_MESSAGE, error);
 }
 
+/**
+ * True when an error already carries a message written for the browser.
+ *
+ * Anything else is a host-side failure whose message may name a path, a query
+ * or a token, and must be reduced before it leaves the host.
+ */
+export function isPublicBridgeError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith(MARKER);
+}
+
 /** Convenience constructors, so a handler reads as prose. */
 export const publicError = {
   invalidInput: (message: string): PublicError => new PublicError('invalid_input', message),

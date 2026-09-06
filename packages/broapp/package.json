@@ -38,6 +38,7 @@
   "exports": {
     ".": "./src/shared/index.ts",
     "./shared": "./src/shared/index.ts",
+    "./ai": "./src/ai/shared/index.ts",
     "./host": "./src/host/index.ts",
     "./client": "./src/client/index.ts",
     "./react": "./src/react/index.ts",

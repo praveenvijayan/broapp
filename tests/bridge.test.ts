@@ -321,3 +321,33 @@ describe('multiple tabs', () => {
     await second.close();
   });
 });
+
+describe('invoke', () => {
+  test('runs an operation without a bridge', async () => {
+    // The AI layer calls operations this way, so it has to go through the same
+    // validation the browser's calls do rather than reaching the handler raw.
+    expect(await buildApp().invoke('demo.echo', { text: 'a' })).toEqual({ text: 'A' });
+  });
+
+  test('rejects invalid input the same way a browser call would', async () => {
+    const failed = buildApp().invoke('demo.echo', { text: '' });
+    // `PublicError.toBridgeError` prefixes the code, which is what the browser
+    // sees too; an in-host caller must not get a softer error.
+    await expect(failed).rejects.toThrow(/invalid_input/);
+    await expect(failed).rejects.toThrow(/text/);
+  });
+
+  test('an unexpected failure does not leak its message', async () => {
+    const failed = buildApp().invoke('demo.boom', undefined);
+    await expect(failed).rejects.toThrow();
+    try {
+      await failed;
+    } catch (cause) {
+      expect(String(cause instanceof Error ? cause.message : cause)).not.toContain('secret-token');
+    }
+  });
+
+  test('a stream is not invokable', () => {
+    expect(() => buildApp().invoke('demo.ticks' as never, {})).toThrow(TypeError);
+  });
+});

@@ -5,7 +5,13 @@
  * description and the types derived from it. That is what makes it safe for
  * the browser bundle to follow.
  */
-export { defineContract, splitRoute } from './contract.ts';
+export {
+  assertNoReservedRoutes,
+  defineContract,
+  mergeContracts,
+  RESERVED_GROUPS,
+  splitRoute,
+} from './contract.ts';
 export type {
   AnyContract,
   Contract,
@@ -22,7 +28,7 @@ export type {
 } from './contract.ts';
 
 export { s, ValidationError } from './schema.ts';
-export type { Infer, Issue, Result, Schema } from './schema.ts';
+export type { Infer, InferObject, Issue, JsonSchema, Result, Schema } from './schema.ts';
 
 export {
   BroappError,

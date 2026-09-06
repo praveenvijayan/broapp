@@ -180,6 +180,22 @@ describe('the host/browser boundary', () => {
       expect(html).not.toContain(symbol);
     }
   });
+
+  test('a browser bundle may import the AI contract', async () => {
+    // `broapp/ai` is shared code: it describes the AI routes and nothing about
+    // how a provider is reached, so the browser has to be able to follow it.
+    // The engine lives behind `broapp/ai/host`, which the browser never sees.
+    await write(
+      'ai-shared.ts',
+      `import { aiContract } from 'broapp/ai';
+       document.title = aiContract.routes.streams.join(',');`,
+    );
+    const html = await build('ai-shared.ts', 'dist/ai-shared.html');
+    expect(html).toContain('ai.chat');
+    for (const symbol of ['node:fs', '@ai-sdk/', 'streamText']) {
+      expect(html).not.toContain(symbol);
+    }
+  });
 });
 
 describe('targets', () => {

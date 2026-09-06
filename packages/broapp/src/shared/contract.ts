@@ -94,10 +94,15 @@ export type StreamEvent<C extends AnyContract, K extends StreamName<C>> = Infer<
 
 /**
  * A route name is `group.member`. Brobridge resolves a unary call by splitting
- * on the first `.` and looking the group up in its service registry, so both
- * halves must be present and neither may itself contain a dot.
+ * on the first `.` and looking the group up in its service registry, so the
+ * group must be present and must not itself contain a dot.
+ *
+ * The member may. Brobridge looks the remainder up as one own property of the
+ * service object, so `ai.settings.get` is the method named `"settings.get"` on
+ * the service `"ai"`. Broapp's AI contract uses that to group its routes by
+ * subject without inventing a second dispatch rule.
  */
-const ROUTE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$/;
+const ROUTE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$/;
 
 /** Split `"system.greet"` into its Brobridge service and method names. */
 export function splitRoute(route: string): { group: string; member: string } {
@@ -131,4 +136,57 @@ export function defineContract<const C extends ContractShape>(shape: C): Contrac
     streams: shape.streams,
     routes: { operations, streams },
   };
+}
+
+/**
+ * Combine two contracts into one. Used in the browser so one client can
+ * speak an application's contract and Broapp's AI contract over one
+ * connection. Throws if any route name appears in both.
+ */
+export function mergeContracts<A extends AnyContract, B extends AnyContract>(
+  a: A,
+  b: B,
+): Contract<{
+  operations: ShapeOf<A>['operations'] & ShapeOf<B>['operations'];
+  streams: ShapeOf<A>['streams'] & ShapeOf<B>['streams'];
+}> {
+  // A clash is checked across all four tables, not table by table: a name that
+  // is an operation on one side and a stream on the other is just as
+  // unresolvable as a duplicate operation, because Brobridge dispatches on the
+  // route name alone.
+  const names = new Set<string>([...a.routes.operations, ...a.routes.streams]);
+  for (const route of [...b.routes.operations, ...b.routes.streams]) {
+    if (names.has(route)) throw new TypeError(`route ${JSON.stringify(route)} is declared by both contracts`);
+  }
+  const operations = { ...a.operations, ...b.operations };
+  const streams = { ...a.streams, ...b.streams };
+  return {
+    operations,
+    streams,
+    routes: { operations: Object.keys(operations), streams: Object.keys(streams) },
+  } as Contract<{
+    operations: ShapeOf<A>['operations'] & ShapeOf<B>['operations'];
+    streams: ShapeOf<A>['streams'] & ShapeOf<B>['streams'];
+  }>;
+}
+
+/** The route group Broapp reserves for its AI layer. */
+export const RESERVED_GROUPS: readonly string[] = ['ai'];
+
+/**
+ * Throws if a contract declares a route in a reserved group.
+ *
+ * This is not checked in `defineContract`, because Broapp's own AI contract is
+ * built with `defineContract` and has to be allowed the group. It is checked
+ * where an *application* contract enters the host instead.
+ */
+export function assertNoReservedRoutes(contract: AnyContract): void {
+  for (const route of [...contract.routes.operations, ...contract.routes.streams]) {
+    const { group } = splitRoute(route);
+    if (RESERVED_GROUPS.includes(group)) {
+      throw new TypeError(
+        `route ${JSON.stringify(route)} uses the group ${JSON.stringify(group)}, which is reserved for Broapp's AI layer`,
+      );
+    }
+  }
 }

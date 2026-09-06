@@ -49,6 +49,15 @@ export type Result<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly issues: readonly Issue[] };
 
+/**
+ * A JSON Schema document, as a plain object.
+ *
+ * Broapp emits a draft 2020-12 subset — enough for a language model provider
+ * to describe a tool's arguments, and nothing more. It is deliberately not a
+ * typed tree: every consumer so far hands it straight to a provider as JSON.
+ */
+export type JsonSchema = Record<string, unknown>;
+
 /** A runtime schema for one JSON value. */
 export interface Schema<T> {
   /** Discriminates a Broapp schema from a foreign one at runtime. */
@@ -57,6 +66,8 @@ export interface Schema<T> {
   check(value: unknown, path?: IssuePath): Result<T>;
   /** Validate, or throw {@link ValidationError}. */
   parse(value: unknown): T;
+  /** A JSON Schema (draft 2020-12 subset) describing what `parse` accepts. */
+  toJsonSchema(): JsonSchema;
   /** Phantom marker; never present at runtime. */
   readonly _type?: T;
 }
@@ -64,7 +75,28 @@ export interface Schema<T> {
 /** The TypeScript type a schema accepts. */
 export type Infer<S> = S extends Schema<infer T> ? T : never;
 
-function schema<T>(kind: string, check: (value: unknown, path: IssuePath) => Result<T>): Schema<T> {
+/** Collapse an intersection back into one object type, keeping `?` modifiers. */
+type Flatten<T> = { [K in keyof T]: T[K] };
+
+/**
+ * What an object schema accepts.
+ *
+ * A field wrapped in `s.optional` may be left out entirely, so its key is
+ * optional here rather than merely admitting `undefined`. Without this an
+ * `s.optional` field would still have to be spelled out at every construction
+ * site, which is the opposite of what the wrapper says.
+ */
+export type InferObject<F> = Flatten<
+  { [K in keyof F as undefined extends Infer<F[K]> ? never : K]: Infer<F[K]> } & {
+    [K in keyof F as undefined extends Infer<F[K]> ? K : never]?: Infer<F[K]>;
+  }
+>;
+
+function schema<T>(
+  kind: string,
+  check: (value: unknown, path: IssuePath) => Result<T>,
+  toJsonSchema: () => JsonSchema,
+): Schema<T> {
   const self: Schema<T> = {
     kind,
     check: (value, path = []) => check(value, path),
@@ -73,8 +105,23 @@ function schema<T>(kind: string, check: (value: unknown, path: IssuePath) => Res
       if (outcome.ok) return outcome.value;
       throw new ValidationError(outcome.issues);
     },
+    toJsonSchema,
   };
   return self;
+}
+
+/**
+ * Assemble a JSON Schema object, dropping every keyword whose option was not
+ * given. An explicit `minLength: undefined` disappears from `JSON.stringify`
+ * but is still a key at runtime, and a provider that enumerates keywords would
+ * see it — so the key is never created in the first place.
+ */
+function keywords(entries: Record<string, unknown>): JsonSchema {
+  const out: JsonSchema = {};
+  for (const [key, value] of Object.entries(entries)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
 }
 
 function fail<T = never>(path: IssuePath, message: string): Result<T> {
@@ -118,7 +165,15 @@ export const s = {
         if (!anchored.test(value)) return fail(path, 'does not match the required format');
       }
       return { ok: true, value };
-    });
+    },
+      () =>
+        keywords({
+          type: 'string',
+          minLength: options.min,
+          maxLength: options.max,
+          pattern: options.pattern?.source,
+        }),
+    );
   },
 
   number(options: NumberOptions = {}): Schema<number> {
@@ -134,30 +189,46 @@ export const s = {
         return fail(path, `expected <= ${String(options.max)}`);
       }
       return { ok: true, value };
-    });
+    },
+      () =>
+        keywords({
+          type: options.int === true ? 'integer' : 'number',
+          minimum: options.min,
+          maximum: options.max,
+        }),
+    );
   },
 
   boolean(): Schema<boolean> {
-    return schema('boolean', (value, path) =>
-      typeof value === 'boolean' ? { ok: true, value } : fail(path, 'expected a boolean'),
+    return schema(
+      'boolean',
+      (value, path) =>
+        typeof value === 'boolean' ? { ok: true, value } : fail(path, 'expected a boolean'),
+      () => ({ type: 'boolean' }),
     );
   },
 
   literal<const T extends string | number | boolean>(expected: T): Schema<T> {
-    return schema('literal', (value, path) =>
-      value === expected
-        ? { ok: true, value: expected }
-        : fail(path, `expected ${JSON.stringify(expected)}`),
+    return schema(
+      'literal',
+      (value, path) =>
+        value === expected
+          ? { ok: true, value: expected }
+          : fail(path, `expected ${JSON.stringify(expected)}`),
+      () => ({ const: expected }),
     );
   },
 
   /** A closed set of string values. */
   enum<const T extends readonly string[]>(values: T): Schema<T[number]> {
     const allowed = new Set<string>(values);
-    return schema('enum', (value, path) =>
-      typeof value === 'string' && allowed.has(value)
-        ? { ok: true, value: value as T[number] }
-        : fail(path, `expected one of ${values.map((v) => JSON.stringify(v)).join(', ')}`),
+    return schema(
+      'enum',
+      (value, path) =>
+        typeof value === 'string' && allowed.has(value)
+          ? { ok: true, value: value as T[number] }
+          : fail(path, `expected one of ${values.map((v) => JSON.stringify(v)).join(', ')}`),
+      () => ({ type: 'string', enum: [...values] }),
     );
   },
 
@@ -178,7 +249,15 @@ export const s = {
         else issues.push(...outcome.issues);
       }
       return issues.length > 0 ? { ok: false, issues } : { ok: true, value: out };
-    });
+    },
+      () =>
+        keywords({
+          type: 'array',
+          items: item.toJsonSchema(),
+          minItems: options.min,
+          maxItems: options.max,
+        }),
+    );
   },
 
   /**
@@ -188,9 +267,7 @@ export const s = {
    * handler contains only what the schema named, so a property smuggled in by
    * a caller cannot reach application code by accident.
    */
-  object<F extends Record<string, Schema<unknown>>>(
-    fields: F,
-  ): Schema<{ [K in keyof F]: Infer<F[K]> }> {
+  object<F extends Record<string, Schema<unknown>>>(fields: F): Schema<InferObject<F>> {
     const entries = Object.entries(fields);
     return schema('object', (value, path) => {
       if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -208,30 +285,50 @@ export const s = {
       }
       return issues.length > 0
         ? { ok: false, issues }
-        : { ok: true, value: out as { [K in keyof F]: Infer<F[K]> } };
-    });
+        : { ok: true, value: out as InferObject<F> };
+    },
+      () => ({
+        type: 'object',
+        properties: Object.fromEntries(entries.map(([key, field]) => [key, field.toJsonSchema()])),
+        // An optional field is one the object may leave out, so optionality is
+        // expressed here rather than inside the field's own schema.
+        required: entries.filter(([, field]) => field.kind !== 'optional').map(([key]) => key),
+        additionalProperties: false,
+      }),
+    );
   },
 
   /** A value that may be absent or `undefined`. */
   optional<T>(inner: Schema<T>): Schema<T | undefined> {
-    return schema<T | undefined>('optional', (value, path) =>
-      value === undefined ? { ok: true, value: undefined } : inner.check(value, path),
+    return schema<T | undefined>(
+      'optional',
+      (value, path) => (value === undefined ? { ok: true, value: undefined } : inner.check(value, path)),
+      // JSON Schema has no "optional" keyword; the enclosing object omits the
+      // key from `required` instead.
+      () => inner.toJsonSchema(),
     );
   },
 
   /** A value that may be `null`. */
   nullable<T>(inner: Schema<T>): Schema<T | null> {
-    return schema<T | null>('nullable', (value, path) =>
-      value === null ? { ok: true, value: null } : inner.check(value, path),
+    return schema<T | null>(
+      'nullable',
+      (value, path) => (value === null ? { ok: true, value: null } : inner.check(value, path)),
+      () => ({ anyOf: [inner.toJsonSchema(), { type: 'null' }] }),
     );
   },
 
   /** Nothing at all. The input type of an operation that takes no argument. */
   void(): Schema<void> {
-    return schema('void', (value, path) =>
-      value === undefined || value === null
-        ? { ok: true, value: undefined }
-        : fail(path, 'expected no value'),
+    return schema(
+      'void',
+      (value, path) =>
+        value === undefined || value === null
+          ? { ok: true, value: undefined }
+          : fail(path, 'expected no value'),
+      // A provider that asks for a tool's arguments wants an object, and an
+      // operation that takes nothing takes an empty one.
+      () => ({ type: 'object', properties: {}, additionalProperties: false }),
     );
   },
 
@@ -243,6 +340,6 @@ export const s = {
    * data is untrusted.
    */
   unknown(): Schema<unknown> {
-    return schema('unknown', (value) => ({ ok: true, value }));
+    return schema('unknown', (value) => ({ ok: true, value }), () => ({}));
   },
 } as const;

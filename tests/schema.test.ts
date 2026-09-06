@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { s, ValidationError, defineContract } from 'broapp/shared';
+import { s, ValidationError, defineContract, splitRoute } from 'broapp/shared';
 
 describe('schema', () => {
   test('accepts a valid object and drops unknown keys', () => {
@@ -56,6 +56,124 @@ describe('schema', () => {
   });
 });
 
+describe('toJsonSchema', () => {
+  test('string, with and without bounds', () => {
+    expect(s.string().toJsonSchema()).toEqual({ type: 'string' });
+    expect(s.string({ min: 1, max: 20, pattern: /[a-z]+/ }).toJsonSchema()).toEqual({
+      type: 'string',
+      minLength: 1,
+      maxLength: 20,
+      pattern: '[a-z]+',
+    });
+  });
+
+  test('number becomes integer when int is set', () => {
+    expect(s.number({ min: 0, max: 9 }).toJsonSchema()).toEqual({
+      type: 'number',
+      minimum: 0,
+      maximum: 9,
+    });
+    expect(s.number({ int: true }).toJsonSchema()).toEqual({ type: 'integer' });
+  });
+
+  test('boolean', () => {
+    expect(s.boolean().toJsonSchema()).toEqual({ type: 'boolean' });
+  });
+
+  test('literal becomes const', () => {
+    expect(s.literal('text').toJsonSchema()).toEqual({ const: 'text' });
+  });
+
+  test('enum lists its values', () => {
+    expect(s.enum(['read', 'confirm']).toJsonSchema()).toEqual({
+      type: 'string',
+      enum: ['read', 'confirm'],
+    });
+  });
+
+  test('array carries its item schema and bounds', () => {
+    expect(s.array(s.string(), { min: 1, max: 50 }).toJsonSchema()).toEqual({
+      type: 'array',
+      items: { type: 'string' },
+      minItems: 1,
+      maxItems: 50,
+    });
+  });
+
+  test('object lists required keys and closes itself', () => {
+    expect(s.object({ name: s.string(), age: s.optional(s.number()) }).toJsonSchema()).toEqual({
+      type: 'object',
+      properties: { name: { type: 'string' }, age: { type: 'number' } },
+      required: ['name'],
+      additionalProperties: false,
+    });
+  });
+
+  test('an object with no required keys still has the array', () => {
+    expect(s.object({ maybe: s.optional(s.string()) }).toJsonSchema()).toMatchObject({
+      required: [],
+    });
+  });
+
+  test('optional defers to its inner schema', () => {
+    expect(s.optional(s.string({ max: 4 })).toJsonSchema()).toEqual({
+      type: 'string',
+      maxLength: 4,
+    });
+  });
+
+  test('nullable becomes anyOf with null', () => {
+    expect(s.nullable(s.string()).toJsonSchema()).toEqual({
+      anyOf: [{ type: 'string' }, { type: 'null' }],
+    });
+  });
+
+  test('void is an empty closed object, which is what a provider wants', () => {
+    expect(s.void().toJsonSchema()).toEqual({
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    });
+  });
+
+  test('unknown constrains nothing', () => {
+    expect(s.unknown().toJsonSchema()).toEqual({});
+  });
+
+  test('a nested object describes optional, nullable and array fields', () => {
+    const schema = s.object({
+      id: s.string({ min: 1 }),
+      tags: s.array(s.string(), { max: 3 }),
+      note: s.optional(s.string()),
+      parent: s.nullable(s.string()),
+      meta: s.object({ count: s.number({ int: true, min: 0 }) }),
+    });
+    expect(schema.toJsonSchema()).toEqual({
+      type: 'object',
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        tags: { type: 'array', items: { type: 'string' }, maxItems: 3 },
+        note: { type: 'string' },
+        parent: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        meta: {
+          type: 'object',
+          properties: { count: { type: 'integer', minimum: 0 } },
+          required: ['count'],
+          additionalProperties: false,
+        },
+      },
+      required: ['id', 'tags', 'parent', 'meta'],
+      additionalProperties: false,
+    });
+  });
+
+  test('an unset bound leaves no key behind at all', () => {
+    // `{ minLength: undefined }` would stringify the same but is still a key,
+    // and a provider that enumerates keywords would find it.
+    expect(JSON.stringify(s.string().toJsonSchema())).toBe('{"type":"string"}');
+  });
+});
+
 describe('defineContract', () => {
   const spec = { input: s.void(), output: s.void() };
 
@@ -63,8 +181,17 @@ describe('defineContract', () => {
     expect(() => defineContract({ operations: { greet: spec }, streams: {} })).toThrow(/group\.member/);
   });
 
-  test('rejects a route with two dots, which Brobridge cannot resolve', () => {
-    expect(() => defineContract({ operations: { 'a.b.c': spec }, streams: {} })).toThrow();
+  test('accepts a dotted member, which Brobridge resolves as one method name', () => {
+    // Brobridge splits a route on its *first* dot and looks the remainder up
+    // as a single own property, so `a.b.c` is the method "b.c" on service "a".
+    // Broapp's AI contract relies on this for routes like `ai.settings.get`.
+    const contract = defineContract({ operations: { 'a.b.c': spec }, streams: {} });
+    expect(contract.routes.operations).toEqual(['a.b.c']);
+    expect(splitRoute('a.b.c')).toEqual({ group: 'a', member: 'b.c' });
+  });
+
+  test('still rejects a route with no group at all', () => {
+    expect(() => defineContract({ operations: { 'a.': spec }, streams: {} })).toThrow();
   });
 
   test('rejects a name used as both an operation and a stream', () => {

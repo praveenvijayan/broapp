@@ -23,8 +23,8 @@ import type {
   StreamName,
   StreamParams,
 } from '../shared/contract.ts';
-import { splitRoute } from '../shared/contract.ts';
-import { PublicError } from '../shared/errors.ts';
+import { assertNoReservedRoutes, splitRoute } from '../shared/contract.ts';
+import { INTERNAL_ERROR_MESSAGE, isPublicBridgeError, PublicError } from '../shared/errors.ts';
 import { encodeEvent } from '../shared/ndjson.ts';
 import { ValidationError } from '../shared/schema.ts';
 
@@ -97,14 +97,46 @@ export interface HostApp<C extends AnyContract> {
    * a developer is present to see it.
    */
   mount(bridge: Bridge): void;
+  /**
+   * Run one operation directly, without the bridge. Input is validated and
+   * output is checked exactly as for a call from the browser, and the same
+   * error boundary applies. This is how the AI layer lets a model call an
+   * application's operations as tools.
+   *
+   * A route that is a stream, or one no handler implements, is a programming
+   * error rather than a call failure, so it throws `TypeError` at the call
+   * site instead of rejecting.
+   */
+  invoke<K extends OperationName<C>>(name: K, input: unknown): Promise<OperationOutput<C, K>>;
   /** Abort every stream this app currently has open. Called during shutdown. */
   abortAll(reason: string): void;
   /** How many streams are running right now. */
   readonly activeStreams: number;
 }
 
-/** Build the host side of a contract. */
+/**
+ * Build the host side of an application's contract.
+ *
+ * The reserved-group check lives here rather than in `defineContract` because
+ * Broapp's own AI contract is built with `defineContract` and legitimately
+ * uses the group. An application that declares `ai.*` would collide with the
+ * AI layer on the same bridge, so it is refused while a developer is watching.
+ */
 export function createHostApp<C extends AnyContract>(
+  contract: C,
+  options: HostAppOptions = {},
+): HostApp<C> {
+  assertNoReservedRoutes(contract);
+  return createReservedHostApp(contract, options);
+}
+
+/**
+ * Build a host app without the reserved-group check.
+ *
+ * Not for applications. `broapp/ai/host` uses it to mount the AI contract,
+ * which is the one contract allowed to own the `ai` group.
+ */
+export function createReservedHostApp<C extends AnyContract>(
   contract: C,
   options: HostAppOptions = {},
 ): HostApp<C> {
@@ -117,6 +149,40 @@ export function createHostApp<C extends AnyContract>(
     const table = kind === 'operation' ? contract.operations : contract.streams;
     if (!Object.prototype.hasOwnProperty.call(table, name)) {
       throw new TypeError(`${kind} ${JSON.stringify(name)} is not declared in the contract`);
+    }
+  }
+
+  /**
+   * One operation call, from the bridge or from {@link HostApp.invoke}.
+   *
+   * Both paths must validate the same way and fail the same way — an AI tool
+   * call is not more trusted than a browser call just because it originates
+   * inside the host — so there is one implementation and two callers.
+   */
+  async function runOperation(route: string, raw: unknown): Promise<unknown> {
+    const spec = contract.operations[route];
+    const handler = operations.get(route);
+    if (spec === undefined || handler === undefined) {
+      throw new TypeError(`operation ${JSON.stringify(route)} has no implementation`);
+    }
+    const context: CallContext = { route };
+    let input: unknown;
+    try {
+      input = spec.input.parse(raw);
+    } catch (cause) {
+      // A validation message names a field and a constraint from the contract
+      // the browser already has. It carries nothing the caller did not send,
+      // so it is safe to return and useful to see.
+      throw new PublicError(
+        'invalid_input',
+        cause instanceof ValidationError ? cause.message : 'invalid input',
+      ).toBridgeError();
+    }
+    try {
+      const output = await handler(input as never, context);
+      return spec.output.parse(output);
+    } catch (cause) {
+      throw wrap(cause, route, logger);
     }
   }
 
@@ -133,6 +199,28 @@ export function createHostApp<C extends AnyContract>(
       if (streams.has(name)) throw new TypeError(`stream ${JSON.stringify(name)} is already implemented`);
       streams.set(name, handler as StreamHandlerFor<C, never>);
       return app;
+    },
+
+    invoke(name, input) {
+      // Structural mistakes surface synchronously: a stream is not invokable
+      // and a missing handler is a bug, and neither should look like a failed
+      // call to whatever is awaiting the result.
+      if (Object.prototype.hasOwnProperty.call(contract.streams, name)) {
+        throw new TypeError(`route ${JSON.stringify(name)} is a stream, which cannot be invoked`);
+      }
+      if (!Object.prototype.hasOwnProperty.call(contract.operations, name)) {
+        throw new TypeError(`operation ${JSON.stringify(name)} is not declared in the contract`);
+      }
+      if (!operations.has(name)) {
+        throw new TypeError(`operation ${JSON.stringify(name)} has no implementation`);
+      }
+      return runOperation(name, input).catch((cause: unknown) => {
+        // On the bridge, Brobridge reduces an unexpected failure to a fixed
+        // sentence on the way out. `invoke` has no transport to do that, and
+        // its caller is the AI layer, which may put what it is given into a
+        // transcript — so the same reduction is applied here.
+        throw isPublicBridgeError(cause) ? cause : new Error(INTERNAL_ERROR_MESSAGE);
+      }) as Promise<never>;
     },
 
     get activeStreams() {
@@ -156,35 +244,11 @@ export function createHostApp<C extends AnyContract>(
       // dotted routes are collected back into groups here. This is the only
       // place the two namings meet.
       const groups = new Map<string, Record<string, unknown>>();
-      for (const [route, handler] of operations) {
+      for (const route of operations.keys()) {
         const { group, member } = splitRoute(route);
-        const spec = contract.operations[route];
-        if (spec === undefined) continue;
+        if (contract.operations[route] === undefined) continue;
         const service = groups.get(group) ?? {};
-        service[member] = async (raw: unknown): Promise<unknown> => {
-          const context: CallContext = { route };
-          let input: unknown;
-          try {
-            input = spec.input.parse(raw);
-          } catch (cause) {
-            // A validation message names a field and a constraint from the
-            // contract the browser already has. It carries nothing the caller
-            // did not send, so it is safe to return and useful to see.
-            throw new PublicError(
-              'invalid_input',
-              cause instanceof ValidationError ? cause.message : 'invalid input',
-            ).toBridgeError();
-          }
-          try {
-            const output = await (handler as OperationHandler<C, never>)(
-              input as never,
-              context,
-            );
-            return spec.output.parse(output);
-          } catch (cause) {
-            throw wrap(cause, route, logger);
-          }
-        };
+        service[member] = (raw: unknown): Promise<unknown> => runOperation(route, raw);
         groups.set(group, service);
       }
       for (const [group, service] of groups) bridge.expose(group, service);
