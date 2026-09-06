@@ -1,6 +1,6 @@
 ---
 name: broapp
-description: Build, extend, verify and ship a Broapp application - a local app made of a Bun host process, a React browser UI, and an authenticated loopback Brobridge connection, compiled to one executable. Use when the user asks for a local, offline, desktop-shaped, single-binary, or "runs on my machine with a browser UI" application, mentions Broapp, Brobridge, or `bun create broapp`, or wants to add operations, streams, SQLite persistence, or a release build to an existing Broapp project.
+description: Build, extend, verify and ship a Broapp application - a local app made of a Bun host process, a React browser UI, and an authenticated loopback Brobridge connection, compiled to one executable. Use when the user asks for a local, offline, desktop-shaped, single-binary, or "runs on my machine with a browser UI" application, mentions Broapp, Brobridge, or `bun create broapp`, or wants to add operations, streams, SQLite persistence, an AI assistant or chat panel backed by a local or remote model, or a release build to an existing Broapp project.
 license: MIT
 compatibility: Requires Bun 1.2 or newer on macOS, Linux or Windows. No other runtime. Network needed only for the first `bun install`.
 metadata:
