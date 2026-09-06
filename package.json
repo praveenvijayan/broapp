@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Broapp — a starter kit for local applications built on Bun, a browser UI, and Brobridge",
+  "description": "Broapp \u2014 a starter kit for local applications built on Bun, a browser UI, and Brobridge",
   "license": "MIT",
   "workspaces": [
     "packages/*",
@@ -27,6 +27,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.18.1",
+    "ai": "7.0.93",
     "broapp": "workspace:*",
     "brobridge": "^0.2.1",
     "typescript": "^5.7.2",

@@ -13,23 +13,23 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ?
   ? true
   : false;
 
-const settingsMatch: Equal<OperationOutput<AiContract, 'ai.settings.get'>, AiSettings> = true;
+const settingsMatch: Equal<OperationOutput<AiContract, 'ai.settingsGet'>, AiSettings> = true;
 void settingsMatch;
 
 const settingsUpdateReturnsSettings: Equal<
-  OperationOutput<AiContract, 'ai.settings.update'>,
+  OperationOutput<AiContract, 'ai.settingsUpdate'>,
   AiSettings
 > = true;
 void settingsUpdateReturnsSettings;
 
 const modelMatch: Equal<
-  OperationOutput<AiContract, 'ai.models.list'>['models'][number],
+  OperationOutput<AiContract, 'ai.modelsList'>['models'][number],
   BroappModel
 > = true;
 void modelMatch;
 
 const providerMatch: Equal<
-  OperationOutput<AiContract, 'ai.providers.list'>['providers'][number],
+  OperationOutput<AiContract, 'ai.providersList'>['providers'][number],
   ProviderInfo
 > = true;
 void providerMatch;
@@ -39,5 +39,5 @@ void chatEventMatch;
 
 // The update route is the only one that takes a partial: every field optional,
 // so a browser can change one setting without restating the rest.
-const updateAcceptsNothing: OperationInput<AiContract, 'ai.settings.update'> = {};
+const updateAcceptsNothing: OperationInput<AiContract, 'ai.settingsUpdate'> = {};
 void updateAcceptsNothing;

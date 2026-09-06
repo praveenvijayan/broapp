@@ -181,17 +181,12 @@ describe('defineContract', () => {
     expect(() => defineContract({ operations: { greet: spec }, streams: {} })).toThrow(/group\.member/);
   });
 
-  test('accepts a dotted member, which Brobridge resolves as one method name', () => {
-    // Brobridge splits a route on its *first* dot and looks the remainder up
-    // as a single own property, so `a.b.c` is the method "b.c" on service "a".
-    // Broapp's AI contract relies on this for routes like `ai.settings.get`.
-    const contract = defineContract({ operations: { 'a.b.c': spec }, streams: {} });
-    expect(contract.routes.operations).toEqual(['a.b.c']);
-    expect(splitRoute('a.b.c')).toEqual({ group: 'a', member: 'b.c' });
-  });
-
-  test('still rejects a route with no group at all', () => {
-    expect(() => defineContract({ operations: { 'a.': spec }, streams: {} })).toThrow();
+  test('rejects a route with two dots, which Brobridge cannot resolve', () => {
+    // Brobridge splits a route at its *last* dot and refuses to expose a
+    // service whose name contains one, so `a.b.c` would look for the service
+    // "a.b", which can never have been registered.
+    expect(() => defineContract({ operations: { 'a.b.c': spec }, streams: {} })).toThrow();
+    expect(splitRoute('a.b')).toEqual({ group: 'a', member: 'b' });
   });
 
   test('rejects a name used as both an operation and a stream', () => {

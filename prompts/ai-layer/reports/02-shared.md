@@ -22,15 +22,14 @@ files. `bun run check` exit 0.
 
 ## Conflicts with the repository, and what I changed
 
-1. **Route names with two dots were rejected.** `ROUTE_PATTERN` allowed one
-   dot, so `ai.settings.get` could not be declared. Brobridge has no such
-   restriction: `brobridge/dist/services.js:119` splits at the *first* dot and
-   looks the remainder up as one own property, so `ai.settings.get` is the
-   method `"settings.get"` on service `"ai"`. Routes must not be renamed, so
-   the pattern now allows further `.segment` parts. The test asserting the old
-   behaviour claimed "Brobridge cannot resolve" it, which is false; it now
-   asserts the true behaviour, including
-   `splitRoute('a.b.c') === { group: 'a', member: 'b.c' }`.
+1. **Route names with two dots were rejected.** `ROUTE_PATTERN` allows one dot,
+   so `ai.settings.get` could not be declared. I relaxed the pattern here on a
+   misreading of Brobridge and **reverted it in prompt 03**: `services.js:116`
+   splits a route at its *last* dot, and `expose` refuses a service name
+   containing a dot, so a two-dot operation can never resolve. The repository
+   was right. The AI routes were renamed to single-dot names in prompt 03 —
+   see `reports/03-host.md` for the mapping. Everything else in this report
+   still stands.
 2. **`invoke` leaked internal error messages.** `wrap()` deliberately rethrows
    a non-`PublicError` unchanged because Brobridge reduces it at the transport.
    `invoke` has no transport, so the raw message — in the test, a path

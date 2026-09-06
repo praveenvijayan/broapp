@@ -39,6 +39,7 @@
     ".": "./src/shared/index.ts",
     "./shared": "./src/shared/index.ts",
     "./ai": "./src/ai/shared/index.ts",
+    "./ai/host": "./src/ai/host/index.ts",
     "./host": "./src/host/index.ts",
     "./client": "./src/client/index.ts",
     "./react": "./src/react/index.ts",
@@ -51,10 +52,14 @@
     "brobridge": "^0.2.1"
   },
   "peerDependencies": {
-    "react": ">=18"
+    "react": ">=18",
+    "ai": "7.0.93"
   },
   "peerDependenciesMeta": {
     "react": {
+      "optional": true
+    },
+    "ai": {
       "optional": true
     }
   },

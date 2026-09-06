@@ -19,12 +19,12 @@ describe('aiContract', () => {
 
   test('declares exactly the routes the layer implements', () => {
     expect(aiContract.routes.operations).toEqual([
-      'ai.settings.get',
-      'ai.settings.update',
-      'ai.providers.list',
-      'ai.models.list',
-      'ai.connection.test',
-      'ai.chat.confirm',
+      'ai.settingsGet',
+      'ai.settingsUpdate',
+      'ai.providersList',
+      'ai.modelsList',
+      'ai.connectionTest',
+      'ai.chatConfirm',
     ]);
     expect(aiContract.routes.streams).toEqual(['ai.chat']);
   });
@@ -60,8 +60,8 @@ describe('aiContract', () => {
     expect(() => chat.event.parse({ type: 'nope' })).toThrow(/type/);
   });
 
-  test('ai.settings.update accepts a partial change', () => {
-    const update = aiContract.operations['ai.settings.update'];
+  test('ai.settingsUpdate accepts a partial change', () => {
+    const update = aiContract.operations['ai.settingsUpdate'];
     expect(update.input.parse({ remember: false })).toEqual({ remember: false });
     expect(update.input.parse({ apiKey: null })).toEqual({ apiKey: null });
   });

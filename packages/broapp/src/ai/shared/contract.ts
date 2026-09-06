@@ -81,12 +81,12 @@ const chatEvent = s.object({
 /** Broapp's AI routes. Applications may not declare the `ai` group themselves. */
 export const aiContract = defineContract({
   operations: {
-    'ai.settings.get': {
+    'ai.settingsGet': {
       input: s.void(),
       output: settings,
       summary: 'The current AI settings. Never includes the API key itself.',
     },
-    'ai.settings.update': {
+    'ai.settingsUpdate': {
       input: s.object({
         provider: s.optional(s.string({ max: 64 })),
         modelId: s.optional(s.string({ max: 200 })),
@@ -99,22 +99,22 @@ export const aiContract = defineContract({
       output: settings,
       summary: 'Change one or more settings and return the result.',
     },
-    'ai.providers.list': {
+    'ai.providersList': {
       input: s.void(),
       output: s.object({ providers: s.array(providerInfo, { max: 50 }) }),
       summary: 'The providers compiled into this application.',
     },
-    'ai.models.list': {
+    'ai.modelsList': {
       input: s.void(),
       output: s.object({ models: s.array(model, { max: 1000 }) }),
       summary: 'The models the configured provider offers.',
     },
-    'ai.connection.test': {
+    'ai.connectionTest': {
       input: s.void(),
       output: s.object({ ok: s.boolean(), message: s.string(), latencyMs: s.number() }),
       summary: 'Try the configured provider once and report what happened.',
     },
-    'ai.chat.confirm': {
+    'ai.chatConfirm': {
       input: s.object({ runId, callId: s.string({ max: 200 }), approve: s.boolean() }),
       output: s.object({ accepted: s.boolean() }),
       summary: 'Answer a confirm event. `accepted` is false when no run is waiting on that call.',

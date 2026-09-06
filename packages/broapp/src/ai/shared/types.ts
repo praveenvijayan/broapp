@@ -3,7 +3,7 @@
  *
  * Everything here is shared code: it names what the AI layer exchanges over
  * the bridge and nothing about how a provider is reached. No file in this
- * directory may import `ai` or `@ai-sdk/*` — the browser bundle follows these
+ * directory may import the AI SDK packages — the browser bundle follows these
  * imports, and the page's CSP forbids it from talking to a provider anyway.
  *
  * The fields are not marked `readonly`. These interfaces must be *identical*

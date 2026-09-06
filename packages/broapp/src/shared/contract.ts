@@ -94,15 +94,11 @@ export type StreamEvent<C extends AnyContract, K extends StreamName<C>> = Infer<
 
 /**
  * A route name is `group.member`. Brobridge resolves a unary call by splitting
- * on the first `.` and looking the group up in its service registry, so the
- * group must be present and must not itself contain a dot.
- *
- * The member may. Brobridge looks the remainder up as one own property of the
- * service object, so `ai.settings.get` is the method named `"settings.get"` on
- * the service `"ai"`. Broapp's AI contract uses that to group its routes by
- * subject without inventing a second dispatch rule.
+ * on the *last* `.` and looking the group up in its service registry, and it
+ * refuses to expose a service whose name contains a dot — so both halves must
+ * be present and neither may itself contain one.
  */
-const ROUTE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$/;
+const ROUTE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Split `"system.greet"` into its Brobridge service and method names. */
 export function splitRoute(route: string): { group: string; member: string } {

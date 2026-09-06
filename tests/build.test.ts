@@ -181,6 +181,13 @@ describe('the host/browser boundary', () => {
     }
   });
 
+  test('a browser bundle that imports the AI host fails the build', async () => {
+    // `broapp/ai/host` pulls in the AI SDK and node:fs. A page that could
+    // reach a provider directly would defeat the CSP, so this must not build.
+    await write('ai-leak.ts', `import { createAi } from 'broapp/ai/host';\nconsole.log(createAi);`);
+    await expect(build('ai-leak.ts', 'dist/ai-leak.html')).rejects.toThrow();
+  });
+
   test('a browser bundle may import the AI contract', async () => {
     // `broapp/ai` is shared code: it describes the AI routes and nothing about
     // how a provider is reached, so the browser has to be able to follow it.
