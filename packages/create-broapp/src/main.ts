@@ -14,7 +14,7 @@ import { ask, confirm, isInteractive } from './prompt.ts';
 import { isUsableDestination, scaffold, type TemplateValues } from './scaffold.ts';
 import { checkAppName, checkDestination, suggestName } from './validate.ts';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 const USAGE = `create-broapp ${VERSION} — scaffold a local application built on Bun and Brobridge
 

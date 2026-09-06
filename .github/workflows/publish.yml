@@ -9,7 +9,7 @@ on:
         description: Which package to publish
         required: true
         type: choice
-        options: [broapp, create-broapp, both]
+        options: [broapp, broapp-ai-anthropic, broapp-ai-compatible, create-broapp, all]
       dry_run:
         description: Run npm publish --dry-run instead of publishing
         required: true
@@ -44,15 +44,31 @@ jobs:
       - name: Stage the template into the generator
         run: bun run scripts/stage-template.ts
 
+      # Order matters: the provider packages and the generator depend on the
+      # published broapp, so it goes first and create-broapp last.
       - name: Publish broapp
-        if: inputs.package == 'broapp' || inputs.package == 'both'
+        if: inputs.package == 'broapp' || inputs.package == 'all'
         working-directory: packages/broapp
         run: npm publish --provenance --access public ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Publish broapp-ai-anthropic
+        if: inputs.package == 'broapp-ai-anthropic' || inputs.package == 'all'
+        working-directory: packages/broapp-ai-anthropic
+        run: npm publish --provenance --access public ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish broapp-ai-compatible
+        if: inputs.package == 'broapp-ai-compatible' || inputs.package == 'all'
+        working-directory: packages/broapp-ai-compatible
+        run: npm publish --provenance --access public ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish create-broapp
-        if: inputs.package == 'create-broapp' || inputs.package == 'both'
+        if: inputs.package == 'create-broapp' || inputs.package == 'all'
         working-directory: packages/create-broapp
         run: npm publish --provenance --access public ${{ inputs.dry_run && '--dry-run' || '' }}
         env:

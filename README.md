@@ -147,8 +147,9 @@ development time or afterwards.
 
 ## Status
 
-Version 0.1.0. The packages are **not yet published to npm**, so
-`bun create broapp` does not work until they are — see
+Version 0.2.0 in this repository. `broapp` and `create-broapp` 0.1.0 are on
+npm, so `bun create broapp` works today; 0.2.0 and the two AI provider
+packages are prepared and await publication — see
 [docs/publishing.md](docs/publishing.md) for what a maintainer has to do.
 
 ## Licence

@@ -1,6 +1,6 @@
 {
   "name": "@broapp/workspace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Broapp \u2014 a starter kit for local applications built on Bun, a browser UI, and Brobridge",

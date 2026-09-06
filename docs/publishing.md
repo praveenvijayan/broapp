@@ -5,11 +5,14 @@ what a maintainer has to do, and what they have to decide.
 
 ## Status
 
-Both packages are on npm as of 2026-09-05, at version 0.1.0:
 [broapp](https://www.npmjs.com/package/broapp) and
-[create-broapp](https://www.npmjs.com/package/create-broapp). Each was
-published with provenance from the `Publish to npm` workflow, so
-`bun create broapp my-app` works. To generate from an unreleased checkout
+[create-broapp](https://www.npmjs.com/package/create-broapp) are on npm as of
+2026-09-05, at version 0.1.0, each published with provenance from the
+`Publish to npm` workflow, so `bun create broapp my-app` works. Version 0.2.0
+adds the AI layer and two new packages,
+[broapp-ai-anthropic](https://www.npmjs.com/package/broapp-ai-anthropic) and
+[broapp-ai-compatible](https://www.npmjs.com/package/broapp-ai-compatible),
+which are prepared in this repository and not yet published. To generate from an unreleased checkout
 instead, see [troubleshooting.md](troubleshooting.md).
 
 ## Before publishing
@@ -30,14 +33,22 @@ These are the things a person has to do. None of them happen from a push.
 
 **Bump the version.** The names are claimed; a version that already exists
 cannot be published again, and cannot be republished after an unpublish. Raise
-the version in both `package.json` files before running the workflow.
+the version in all four `package.json` files, in `VERSION` in
+`packages/create-broapp/src/main.ts`, and in `skills/broapp/SKILL.md` before
+running the workflow. The provider packages declare a `broapp` peer range;
+raise it whenever they start needing something newer.
 
-**Publish `broapp` first, then `create-broapp`.** Never the other way round.
+**Publish `broapp` first, the provider packages second, `create-broapp` last.**
+The providers import `broapp/ai/host` and the generator's default range points
+at the `broapp` it was released with, so nothing may reference a `broapp` that
+is not on npm yet.
 
 ```bash
 bun run scripts/stage-template.ts     # the generator ships the template
-cd packages/broapp        && npm publish --provenance --access public
-cd ../create-broapp       && npm publish --provenance --access public
+cd packages/broapp               && npm publish --provenance --access public
+cd ../broapp-ai-anthropic        && npm publish --provenance --access public
+cd ../broapp-ai-compatible       && npm publish --provenance --access public
+cd ../create-broapp              && npm publish --provenance --access public
 ```
 
 Or use the **Publish to npm** workflow, which runs the checks first, requires a
