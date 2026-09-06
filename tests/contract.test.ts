@@ -39,6 +39,26 @@ describe('mergeContracts', () => {
   });
 });
 
+describe('what the provider speaks', () => {
+  test('an application contract plus the AI contract is one route table', () => {
+    // This is what `<BroappProvider extensions={[aiContract]}>` builds. A React
+    // render test would need a DOM this repository does not set up, so the
+    // merge itself is tested here and the panels are exercised by hand in the
+    // notes example.
+    const app = defineContract({
+      operations: { 'notes.list': spec },
+      streams: { 'notes.watch': streamSpec },
+    });
+    const merged = mergeContracts(app, aiContract);
+    expect(merged.routes.operations).toContain('notes.list');
+    expect(merged.routes.operations).toContain('ai.settingsGet');
+    expect(merged.routes.streams).toEqual(['notes.watch', 'ai.chat']);
+    // The specs come through by reference, so a client built from the merged
+    // contract validates exactly what each side declared.
+    expect(merged.streams['ai.chat']).toBe(aiContract.streams['ai.chat'] as never);
+  });
+});
+
 describe('the reserved ai group', () => {
   test('an application that declares an ai route is refused at startup', () => {
     const app = defineContract({ operations: { 'ai.chat': spec }, streams: {} });

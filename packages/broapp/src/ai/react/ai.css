@@ -1,0 +1,152 @@
+/*
+ * Styles for the AI panels.
+ *
+ * Ordinary CSS, no framework, no web font, no `@import` and no `url()`: a
+ * Broapp page loads nothing from off-origin, and `broapp build` fails the
+ * build if it finds anything that would. The custom properties are the ones an
+ * application already defines for its own interface, so these panels take on
+ * its colours rather than imposing their own; the fallbacks are there so the
+ * components are still legible in an application that defines none.
+ */
+
+.ai-settings__key {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.ai-settings__key .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ai-settings__remember {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.75rem;
+  font-weight: 400;
+}
+
+/*
+ * Always visible once a provider is chosen. "Where do my notes go" is not a
+ * question a user should have to open a menu to answer.
+ */
+.ai-settings__notice {
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border, #e3e2df);
+  border-radius: var(--radius, 10px);
+  color: var(--text-muted, #6b6862);
+  font-size: 0.9rem;
+}
+
+.ai-chat__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 24rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+}
+
+.ai-chat__message {
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius, 10px);
+  max-width: 90%;
+}
+
+.ai-chat__message--user {
+  align-self: flex-end;
+  background: var(--accent, #1f5f4f);
+  color: var(--accent-contrast, #ffffff);
+}
+
+.ai-chat__message--assistant {
+  align-self: flex-start;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e3e2df);
+  color: var(--text, #1b1a18);
+}
+
+/*
+ * A `<pre>` rather than a markdown renderer. The text was written by a model
+ * that has just been shown documents from this machine; turning parts of it
+ * into markup would be a way for a document to reach the page.
+ */
+.ai-chat__text {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-chat__tool {
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-muted, #6b6862);
+}
+
+.ai-chat__json {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem;
+  border-radius: var(--radius, 10px);
+  background: var(--bg, #fbfbfa);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-chat__confirm {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.4rem;
+  padding: 0.5rem;
+  border: 1px solid var(--pending, #8a6a12);
+  border-radius: var(--radius, 10px);
+  color: var(--text, #1b1a18);
+}
+
+.ai-chat__typing {
+  display: inline-block;
+  margin-left: 0.25rem;
+  color: var(--text-muted, #6b6862);
+  animation: ai-chat-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ai-chat-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-chat__typing {
+    animation: none;
+  }
+}
+
+.ai-chat__usage {
+  margin: 0.5rem 0 0;
+}
+
+.ai-chat__composer {
+  margin-top: 0.75rem;
+}
+
+.ai-chat__input {
+  width: 100%;
+  resize: vertical;
+}
+
+.ai-chat__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}

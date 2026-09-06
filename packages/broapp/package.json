@@ -40,6 +40,8 @@
     "./shared": "./src/shared/index.ts",
     "./ai": "./src/ai/shared/index.ts",
     "./ai/host": "./src/ai/host/index.ts",
+    "./ai/react": "./src/ai/react/index.tsx",
+    "./ai/react/ai.css": "./src/ai/react/ai.css",
     "./host": "./src/host/index.ts",
     "./client": "./src/client/index.ts",
     "./react": "./src/react/index.ts",

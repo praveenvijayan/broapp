@@ -23,6 +23,7 @@ import type {
   StreamName,
   StreamParams,
 } from '../shared/contract.ts';
+import { mergeContracts } from '../shared/contract.ts';
 import { BroappError } from '../shared/errors.ts';
 import type { BridgeState, BroappClient, CreateClientOptions, Subscription } from '../client/client.ts';
 import { createClient } from '../client/client.ts';
@@ -72,6 +73,14 @@ interface ContextValue<C extends AnyContract> {
    */
   readonly ready: Promise<BroappClient<C>>;
   readonly status: ConnectionStatus;
+  /**
+   * The contract actually spoken, application plus extensions.
+   *
+   * Components below the provider read routes from here rather than from the
+   * contract they were handed, because an extension's routes exist only after
+   * the merge.
+   */
+  readonly contract: AnyContract;
 }
 
 const BroappContext = React.createContext<ContextValue<AnyContract> | null>(null);
@@ -79,6 +88,8 @@ const BroappContext = React.createContext<ContextValue<AnyContract> | null>(null
 /** Props for {@link BroappProvider}. */
 export interface BroappProviderProps<C extends AnyContract> {
   readonly contract: C;
+  /** Extra contracts to speak over the same connection, e.g. Broapp's `aiContract`. */
+  readonly extensions?: readonly AnyContract[];
   readonly options?: CreateClientOptions;
   /**
    * How long the host retains a protocol session after a disconnect. Must
@@ -106,10 +117,22 @@ function toStatus(state: BridgeState, since: number, now: number, ttlMs: number)
 /** Owns the connection for everything below it. */
 export function BroappProvider<C extends AnyContract>({
   contract,
+  extensions,
   options,
   sessionTtlMs = 60_000,
   children,
 }: BroappProviderProps<C>): React.ReactElement {
+  // Merged once and kept. Both contracts are module-level constants, and a
+  // second merge would build a second client and drop the connection.
+  const mergedRef = React.useRef<AnyContract | null>(null);
+  if (mergedRef.current === null) {
+    mergedRef.current = (extensions ?? []).reduce<AnyContract>(
+      (left, right) => mergeContracts(left, right),
+      contract,
+    );
+  }
+  const merged = mergedRef.current as C;
+
   const [client, setClient] = React.useState<BroappClient<C> | null>(null);
   const [status, setStatus] = React.useState<ConnectionStatus>({ phase: 'connecting' });
   // Created before the effect runs, so the very first render already has
@@ -143,7 +166,7 @@ export function BroappProvider<C extends AnyContract>({
     // transport event.
     let tick: ReturnType<typeof setInterval> | undefined;
 
-    void createClient(contract, options).then(
+    void createClient(merged, options).then(
       (next) => {
         if (!live) {
           void next.close();
@@ -191,8 +214,8 @@ export function BroappProvider<C extends AnyContract>({
   }, []);
 
   const value = React.useMemo<ContextValue<C>>(
-    () => ({ client, ready, status }),
-    [client, ready, status],
+    () => ({ client, ready, status, contract: merged }),
+    [client, ready, status, merged],
   );
   return (
     <BroappContext.Provider value={value as ContextValue<AnyContract>}>
@@ -210,6 +233,17 @@ function useContextValue<C extends AnyContract>(): ContextValue<C> {
 /** The connection status, for a status indicator. */
 export function useConnection(): ConnectionStatus {
   return useContextValue().status;
+}
+
+/**
+ * The contract actually spoken over this connection, extensions included.
+ *
+ * An extension's own hooks use it to check that they were installed — asking
+ * for a route that is not there fails at the first call otherwise, which is
+ * later and further from the mistake.
+ */
+export function useBroappContract(): AnyContract {
+  return useContextValue().contract;
 }
 
 /** The client, or `null` until the first connection settles. */

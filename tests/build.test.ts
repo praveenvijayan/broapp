@@ -203,6 +203,23 @@ describe('the host/browser boundary', () => {
       expect(html).not.toContain(symbol);
     }
   });
+
+  test('a browser bundle may import the AI React layer', async () => {
+    // The panels are shared code: they speak the contract over the existing
+    // connection and know nothing about how a provider is reached.
+    await write(
+      'ai-react.ts',
+      `import { AiChat, AiSettings, aiContract } from 'broapp/ai/react';
+       document.title = [typeof AiChat, typeof AiSettings, aiContract.routes.streams[0]].join(',');`,
+    );
+    const html = await build('ai-react.ts', 'dist/ai-react.html');
+    for (const symbol of ['node:fs', '@ai-sdk/', 'streamText', 'createAi']) {
+      expect(html).not.toContain(symbol);
+    }
+    // The same off-origin rule the rest of the page is held to.
+    expect(html).not.toMatch(/<script[^>]+src=/);
+    expect(html).not.toMatch(/<link[^>]+href=/);
+  });
 });
 
 describe('targets', () => {

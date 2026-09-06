@@ -2,6 +2,7 @@
 export {
   BroappProvider,
   useBroapp,
+  useBroappContract,
   useBroappReady,
   useConnection,
   useOperation,
