@@ -111,6 +111,12 @@ The validator is about 250 lines with no dependencies, so a generated project
 installs and runs without a network. If you outgrow it, `defineContract` accepts
 anything with a `parse` method — Zod, Valibot and ArkType drop in unchanged.
 
+Every `s.*` schema can also describe itself as JSON Schema through
+`toJsonSchema()`. The [AI layer](ai.md) uses that to offer an operation to a
+model as a tool, so an operation declared with `s.*` needs nothing extra. One
+declared with a foreign validator has no `toJsonSchema`, so `fromContract`
+refuses it; write that tool by hand with an explicit `inputSchema`.
+
 ## Long-running work
 
 An operation that takes seconds should be a stream instead, so it can report

@@ -22,10 +22,18 @@ Full documentation lives in the
 | `broapp/client` | The framework-agnostic browser client. |
 | `broapp/react` | `BroappProvider`, `useOperation`, `useStream`, `useConnection`. |
 | `broapp/build` | `buildPage`, `buildBinary`, `defineConfig`. |
+| `broapp/ai` | The AI contract and its types. Safe for both sides. |
+| `broapp/ai/host` | `createAi`, `fromContract`, the secret stores, `createFakeAdapter`. Host only. |
+| `broapp/ai/react` | `AiProvider`, `useAiChat`, `useAiSettings`, `useAiModels`, `<AiSettings/>`, `<AiChat/>`. |
 
-Never import `broapp/host` from browser code: it pulls in `node:fs` and
-`Bun.spawn`, and a browser bundle that reaches it fails the build — which is the
-intended outcome.
+Never import `broapp/host` or `broapp/ai/host` from browser code: they pull in
+`node:fs`, `Bun.spawn` and the AI SDK, and a browser bundle that reaches either
+fails the build — which is the intended outcome.
+
+The AI layer is optional. `broapp/ai/host` needs the `ai` peer dependency and
+at least one provider package (`broapp-ai-anthropic`, `broapp-ai-compatible`);
+an application that never imports it carries none of that. See
+[docs/ai.md](https://github.com/praveenvijayan/broapp/blob/main/docs/ai.md).
 
 ## The command
 
@@ -39,7 +47,8 @@ broapp build --all-targets    Every supported target
 ## Requirements
 
 Bun 1.2 or newer. Peer dependency on React 18 or newer, and only if you use
-`broapp/react`.
+`broapp/react`. Peer dependency on `ai@7.0.93`, and only if you use
+`broapp/ai/host`.
 
 ## Licence
 

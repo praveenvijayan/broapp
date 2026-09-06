@@ -65,6 +65,15 @@ Streams work the same way, with `app.stream(...)` and `useStream(...)`. A stream
 handler receives a `sink` with an `emit` and an `AbortSignal`; check the signal
 in any long loop, or cancellation will not reach it.
 
+## Adding AI
+
+This application does not include the AI layer. Adding it is four touches
+(two host files, the provider in `main.tsx`, the panels in `App.tsx`) and two
+dependencies, and the result is off until a user picks a provider in
+Settings. The walkthrough is in the Broapp documentation under
+[the AI layer](https://github.com/praveenvijayan/broapp/blob/main/docs/ai.md).
+It adds about 7 MB to the executable.
+
 ## Command-line flags
 
 ```

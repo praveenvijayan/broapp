@@ -97,7 +97,8 @@ const rename = useOperation<AppContract, 'notes.rename'>('notes.rename');
   Broapp preserves its defaults; neither has been independently audited, and
   this project does not claim otherwise.
 - **It does not make small binaries.** A compiled application is around 60 MB,
-  because it contains the Bun runtime. See [packaging](docs/packaging.md).
+  because it contains the Bun runtime, plus about 7 MB if it turns on the AI
+  layer. See [packaging](docs/packaging.md).
 - **It has no hot module replacement.** Achieving it would mean serving the
   application from an unauthenticated origin. `broapp dev` rebuilds and restarts
   instead, and [says why](docs/development.md).

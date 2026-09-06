@@ -35,6 +35,10 @@ runtime; your application code is a rounding error beside it. It does not
 meaningfully depend on how large your UI is, and it is not going to get much
 smaller.
 
+An application that turns on the [AI layer](ai.md) adds about **7 MB** for the
+AI SDK and its provider adapters. One that never imports `broapp/ai/host` adds
+nothing.
+
 If that is disqualifying, this is not the right architecture — see
 [comparison.md](comparison.md).
 

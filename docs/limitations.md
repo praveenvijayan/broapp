@@ -33,7 +33,13 @@ browser tab. See [comparison.md](comparison.md).
 ## Things that are true and worth knowing
 
 **Binaries are around 60 MB.** That is the Bun runtime. It does not depend much
-on your code and it is not going to shrink.
+on your code and it is not going to shrink. Turning on the AI layer adds about
+7 MB; leaving it off adds nothing.
+
+**AI is opt-in, host-only, and off until the user configures a provider.** An
+application decides whether to include it, and the user decides whether to use
+a local server or a remote one. What a remote provider sees, and what the layer
+does not yet do, is in [ai.md](ai.md).
 
 **Cross-compiled binaries are untested by definition.** The build produces them;
 running them is a separate act. Anything native — `bun:sqlite` included — is

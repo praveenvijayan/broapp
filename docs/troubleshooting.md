@@ -157,6 +157,52 @@ Either the host stopped emitting, or the consumer stopped reading and
 backpressure stalled the producer. `emit` resolving slowly is the signal for the
 second.
 
+## AI
+
+### "AI is not set up yet. Open Settings to choose a provider."
+
+Exactly that. The application ships with no provider selected. Every AI route
+except settings and the provider list answers this until the user picks a
+provider and a model. In your own code it is `registry.resolve()` throwing
+`unavailable`.
+
+### "An API key is required for Anthropic." right after saving a key
+
+The key is stored per provider. Check that the provider selected when you
+saved is the one selected now — switching providers does not carry a key
+across. `ai.settingsGet` reports `hasKey` and a `keyHint` for the current
+provider.
+
+### "Anthropic rejected the API key." / "Could not reach …"
+
+The first is a 401 or 403 from the provider and means the key itself. The
+second is a failed connection: for Ollama, confirm it is running and that the
+server URL is `http://127.0.0.1:11434/v1` (with the `/v1`); for a remote
+provider, confirm the machine is online. Test connection in the settings panel
+lists models, which costs no tokens.
+
+### The panel says data is sent to a provider, but I am using Ollama
+
+`local` is computed from the server URL, not the provider name. A URL whose
+host is not `127.0.0.1`, `localhost` or `::1` counts as remote, and so does
+an OpenAI-compatible server on another machine, even on your own network.
+
+### The key disappeared after a restart
+
+"Remember key on this computer" was off, so the key lived in memory for that
+run only. Turn it on to keep it in the application's data folder.
+
+### A tool ran without asking
+
+Only tools registered with `permission: 'read'` run without confirmation. Check
+which list the route is in when you call `fromContract`. `confirm` tools emit a
+`confirm` event and wait for `ai.chatConfirm` — [ai.md](ai.md).
+
+### Usage shows 0 tokens on an OpenAI-compatible server
+
+The server did not report usage in its stream. Broapp asks for it
+(`includeUsage`), but not every server honours that.
+
 ## Tests
 
 ### `Cannot find module '@brobridgejs/client'` in a test
