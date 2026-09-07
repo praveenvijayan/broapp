@@ -13,6 +13,7 @@
  */
 import { spawn } from 'bun';
 import type { Subprocess } from 'bun';
+import { join } from 'node:path';
 
 import type { HostLogger } from 'broapp/host';
 import { INTERNAL_ERROR_MESSAGE, PublicError } from 'broapp/shared';
@@ -60,7 +61,11 @@ export interface ChildHandle {
 
 /** Options for {@link createSupervisor}. */
 export interface SupervisorOptions {
-  /** The binary to spawn. Defaults to this process's own executable. */
+  /**
+   * The binary to spawn. Defaults to this launcher, run again — which is
+   * `process.execPath` when the launcher is compiled, and Bun running the
+   * launcher's entry module when it is not. See {@link selfCommand}.
+   */
   readonly execPath?: string;
   readonly helloTimeoutMs?: number;
   readonly readyTimeoutMs?: number;
@@ -136,6 +141,35 @@ function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promis
 }
 
 /**
+ * Bun names a compiled binary's own modules under a virtual root. This is the
+ * one signal that says whether the launcher running now is a single file or a
+ * tree of sources; `process.execPath` alone does not, since either way it is a
+ * path to something that runs.
+ */
+const COMPILED_ROOT = /^(\/\$bunfs\/|[A-Za-z]:\\~BUN\\)/;
+
+/** Whether this launcher is running from a compiled binary. */
+export function isCompiled(): boolean {
+  return COMPILED_ROOT.test(import.meta.path);
+}
+
+/**
+ * How to run this launcher again, so it can be the child.
+ *
+ * A compiled launcher is one file and spawning `process.execPath` is spawning
+ * it. Run from source — `bun src/launcher/main.ts`, or the `broapp-autoapp` bin
+ * that `bun install` links straight to that file — `process.execPath` is Bun
+ * itself, and Bun handed `--child <releaseDir> …` reads the release directory
+ * as the script to run and stops with "Script not found". So from source the
+ * entry module goes in between. It is named from this file's own location
+ * rather than from `Bun.main`, so a program that imports the launcher as a
+ * library still spawns the launcher and not itself.
+ */
+export function selfCommand(): readonly string[] {
+  return isCompiled() ? [process.execPath] : [process.execPath, join(import.meta.dir, 'main.ts')];
+}
+
+/**
  * The environment a child is given.
  *
  * Deliberately not `process.env`. This is tidiness rather than containment: the
@@ -169,7 +203,7 @@ interface Channel {
 /** Build the supervisor. */
 export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
   const logger: HostLogger = options.logger ?? console;
-  const execPath = options.execPath ?? process.execPath;
+  const command = options.execPath === undefined ? selfCommand() : [options.execPath];
   const helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
   const readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
   const live = new Set<ChildHandle>();
@@ -191,7 +225,7 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
     let gone: Error | null = null;
 
     const child = spawn({
-      cmd: [execPath, ...args],
+      cmd: [...command, ...args],
       env: childEnv(dataDir),
       // Piped rather than inherited: a child that outlives its parent would
       // otherwise hold the launcher's own stderr open, and anything waiting on
