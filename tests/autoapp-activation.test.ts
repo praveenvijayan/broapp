@@ -8,7 +8,16 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { builtinModules } from 'node:module';
 import { join } from 'node:path';
 
 import {
@@ -742,6 +751,93 @@ describe.skipIf(!available)('recovery', () => {
 });
 
 describe.skipIf(!available)('serving', () => {
+  test('a release serves with its whole source workspace deleted', async () => {
+    const where = makeWorld();
+    const releaseId = await build(where);
+    grantAll(where, releaseId);
+    const app = where.root.app('items');
+    mkdirSync(app.data, { recursive: true });
+
+    // The guarantee that is actually true about a release: `Bun.build` inlines
+    // every dependency into `host.js`, so the release directory carries what it
+    // needs and resolves nothing at runtime. Deleting the workspace outright is
+    // the strongest form of that check and subsumes removing its
+    // `node_modules` — which this fixture does not have, because it resolves
+    // through the repository's own. A test that moved a directory that was
+    // never there would pass for the wrong reason.
+    rmSync(app.source, { recursive: true, force: true });
+    expect(existsSync(app.source)).toBe(false);
+
+    const child = await where.supervisor.start({
+      appId: 'items',
+      releaseDir: app.release(releaseId),
+      releaseId,
+      dataDir: app.data,
+      mode: 'live',
+    });
+    const client = await connectToChild(child.url);
+    expect(await client.call('items.add', { label: 'no workspace' })).toMatchObject({
+      label: 'no workspace',
+    });
+    expect(await client.call('items.list', null)).toMatchObject({ count: 1 });
+    await client.close();
+    await child.shutdown(5_000);
+  }, 120_000);
+
+  test('the host bundle imports nothing but the runtime’s own modules', async () => {
+    const where = makeWorld();
+    const releaseId = await build(where);
+    const bundle = await Bun.file(
+      join(where.root.app('items').release(releaseId), 'host.js'),
+    ).text();
+
+    // Every `import ... from "x"` left in the bundle, and every `require("x")`.
+    const specifiers = new Set<string>();
+    for (const match of bundle.matchAll(/(?:from|import)\s*["']([^"']+)["']/g)) {
+      if (match[1] !== undefined) specifiers.add(match[1]);
+    }
+    for (const match of bundle.matchAll(/require\(\s*["']([^"']+)["']\s*\)/g)) {
+      if (match[1] !== undefined) specifiers.add(match[1]);
+    }
+
+    // `bun:` and Node's own builtins — with or without the `node:` prefix, both
+    // of which the bundler emits — are the runtime the child already is.
+    // Anything else would be a dependency the release expects to find on disk
+    // at run time, which is exactly what must not survive the build.
+    const builtin = new Set(builtinModules);
+    const external = [...specifiers].filter(
+      (one) =>
+        !one.startsWith('bun:') &&
+        !builtin.has(one.startsWith('node:') ? one.slice('node:'.length) : one),
+    );
+    expect(external).toEqual([]);
+    // The check is only worth anything if the bundle really did inline the
+    // application's dependencies rather than emitting nothing at all.
+    expect(bundle.length).toBeGreaterThan(10_000);
+  }, 120_000);
+
+  test('a dependency that is not installed is a build problem naming it', async () => {
+    const where = makeWorld();
+    const app = where.root.app('items');
+
+    // Declared but never installed, and not resolvable from anywhere above the
+    // workspace either. The bundler would eventually fail on the import; this
+    // fails first, with a sentence a person can act on.
+    const path = join(app.source, 'package.json');
+    const manifest = JSON.parse(await Bun.file(path).text()) as {
+      dependencies?: Record<string, string>;
+    };
+    manifest.dependencies = { ...manifest.dependencies, 'left-pad-that-is-not-here': '^1.0.0' };
+    writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const result = await buildCandidate({ layout: where.root, appId: 'items' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const problem = result.problems.find((one) => one.message.includes('left-pad-that-is-not-here'));
+    expect(problem?.stage).toBe('host');
+    expect(problem?.message).toContain('re-import to add one');
+  }, 120_000);
+
   test('a stale current is refused with the sentence, not started', async () => {
     const where = makeWorld();
     const releaseId = await build(where);

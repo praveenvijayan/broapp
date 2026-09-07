@@ -16,7 +16,7 @@
  */
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { buildPage } from 'broapp/build';
 import type { HostLogger } from 'broapp/host';
@@ -85,6 +85,55 @@ const RELEASE_HOST = 'host.js';
 /** A one-sentence reason, without a stack. */
 function reason(cause: unknown): string {
   return String(cause instanceof Error ? cause.message : cause);
+}
+
+/** What a build says when a dependency is not installed. */
+const MISSING_DEPENDENCY =
+  'dependencies are installed when an application is imported; re-import to add one';
+
+/**
+ * Check that every declared dependency can be resolved from the workspace.
+ *
+ * A candidate build must not reach the network, and `Bun.build` would otherwise
+ * fail somewhere inside the bundler with a message about a module specifier,
+ * which says nothing about what a person should do. This says it before
+ * bundling starts and names the package.
+ *
+ * Resolution follows Node's rules, so a dependency may be satisfied by a
+ * `node_modules` above the workspace — which is how the examples in this
+ * repository build at all. That is deliberately allowed and deliberately
+ * reported: `vendored` is false when anything resolved from outside, and the
+ * offline guarantee documented in `docs/autoapp/packaging.md` is the one about
+ * the *built release*, which bundles what it needs and resolves nothing at
+ * runtime.
+ */
+function checkDependencies(sourceDir: string): {
+  problems: readonly BuildProblem[];
+  vendored: boolean;
+} {
+  let manifest: { dependencies?: Record<string, string> };
+  try {
+    manifest = JSON.parse(readFileSync(join(sourceDir, 'package.json'), 'utf8')) as typeof manifest;
+  } catch {
+    // An application without a `package.json` declares no dependencies. The
+    // bundler will say so if it imports something anyway.
+    return { problems: [], vendored: true };
+  }
+
+  const vendorDir = resolve(join(sourceDir, 'node_modules'));
+  const problems: BuildProblem[] = [];
+  let vendored = true;
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    let resolved: string;
+    try {
+      resolved = Bun.resolveSync(name, sourceDir);
+    } catch {
+      problems.push({ stage: 'host', message: `${name} is not installed. ${MISSING_DEPENDENCY}` });
+      continue;
+    }
+    if (!resolve(resolved).startsWith(`${vendorDir}/`)) vendored = false;
+  }
+  return { problems, vendored };
 }
 
 /** Read the version of an installed package, for the manifest's record. */
@@ -184,8 +233,12 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
       problems.push({ stage: 'page', message: reason(cause) });
     }
 
-    // 3. The host bundle. `bun:sqlite` is external because it is part of the
-    //    runtime the child already is, not something to bundle a copy of.
+    // 3. The host bundle. Dependencies are checked first, so a missing one is a
+    //    sentence about re-importing rather than a bundler error about a
+    //    module specifier.
+    //
+    //    `bun:sqlite` is external because it is part of the runtime the child
+    //    already is, not something to bundle a copy of.
     //
     //    This runs `Bun.build` in the launcher's own process. That bundles the
     //    application's modules; it does not *execute* them — the bundler reads
@@ -193,6 +246,9 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
     //    imports it. Report 02 established that a compiled launcher can also
     //    run the bundler through `BUN_BE_BUN=1`, which is the route to take if
     //    this ever needs to be isolated further.
+    const dependencies = checkDependencies(sourceDir);
+    problems.push(...dependencies.problems);
+
     const host = await Bun.build({
       entrypoints: [join(sourceDir, SOURCE.host)],
       outdir: work,

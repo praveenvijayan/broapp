@@ -184,6 +184,13 @@ async function openLauncher(
     dataDir,
     store,
     providers: [anthropic(), ollama(), openai(), customServer()],
+    // The offline tier tests need a launcher whose AI layer cannot reach the
+    // network, and severing an interface in CI is not something a test may do.
+    // Honoured only under `NODE_ENV=test`, read through `Bun.env` because
+    // `--minify` folds `process.env.NODE_ENV` into the binary at build time.
+    ...(Bun.env['NODE_ENV'] === 'test' && Bun.env['AUTOAPP_TEST_NO_NETWORK'] === '1'
+      ? { fetch: noNetwork }
+      : {}),
   });
 
   const running = await startApp({
@@ -206,6 +213,17 @@ async function openLauncher(
   return await running.done;
 }
 
+/**
+ * A `fetch` that refuses, for the offline tier tests.
+ *
+ * The AI layer takes its `fetch` as an option precisely so a test can decide
+ * what the network is. Nothing else in the launcher makes a request.
+ */
+const noNetwork = Object.assign(
+  () => Promise.reject(new Error('the network is unavailable')),
+  { preconnect: () => undefined },
+) as unknown as typeof fetch;
+
 /** `import <sourceDir> --as <appId>` — the developer's way in. */
 async function importApp(
   root: Layout,
@@ -225,6 +243,29 @@ async function importApp(
     // `release` across would be slow and would import somebody else's build.
     filter: (from) => !/(^|[\\/])(node_modules|dist|release|\.git)([\\/]|$)/.test(from),
   });
+
+  // The one moment dependencies may be fetched. Everything after this — every
+  // candidate build, every activation — resolves what is already on disk, which
+  // is what makes editing an application offline mean anything.
+  //
+  // `BUN_BE_BUN=1` turns this compiled binary back into the plain `bun` CLI;
+  // report 02 verified that. It is best effort: an application whose
+  // `package.json` uses the `workspace:*` protocol cannot be installed outside
+  // its monorepo, and the examples in this repository are exactly that. A
+  // dependency that is genuinely missing is caught by the build, which names
+  // the package and says to re-import.
+  const installed = Bun.spawnSync({
+    cmd: [process.execPath, 'install', '--production', '--frozen-lockfile'],
+    cwd: app.source,
+    env: { ...process.env, BUN_BE_BUN: '1' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  console.log(
+    installed.exitCode === 0
+      ? 'installed the application’s dependencies'
+      : `could not install dependencies here (${new TextDecoder().decode(installed.stderr).trim().split('\n').pop() ?? 'no reason given'}); the build will say if one is missing`,
+  );
 
   // Git is optional. A candidate workspace is more useful with history, and the
   // launcher has to work on a machine without it.

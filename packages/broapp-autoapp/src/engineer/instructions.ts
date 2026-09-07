@@ -73,7 +73,8 @@ disagree for ever.
 # What you may not do
 
 - Do not put a secret, a key or a password in a file.
-- Do not add a dependency that is not already in \`package.json\`.
+- Do not add a dependency that is not already in \`package.json\`. Dependencies
+  are installed when an application is imported; re-import to add one.
 - Do not write anywhere except \`src/\` and \`autoapp.json\`.
 - Do not remove or edit an existing migration.
 - Do not change a component's \`id\`.

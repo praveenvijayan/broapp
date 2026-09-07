@@ -64,10 +64,18 @@ const SHUTDOWN_DEADLINE_MS = 10_000;
  * real machine cannot make an activation abandon somebody's data halfway
  * through. Recovery is the thing being tested and it can only be tested by
  * actually stopping partway.
+ *
+ * Read through `Bun.env` rather than `process.env`, and that is not a style
+ * choice. `bun build --minify` — which is how the launcher is compiled —
+ * constant-folds `process.env.NODE_ENV` to whatever it was when the *binary*
+ * was built, so in a compiled launcher the guard was frozen shut and the hook
+ * could never fire. `Bun.env` is read at run time. Found by
+ * `scripts/autoapp-smoke.ts`, which is the only thing that exercises this path
+ * through the real binary.
  */
 function crashPoint(): string | null {
-  if (process.env['NODE_ENV'] !== 'test') return null;
-  return process.env['AUTOAPP_TEST_CRASH_AT'] ?? null;
+  if (Bun.env['NODE_ENV'] !== 'test') return null;
+  return Bun.env['AUTOAPP_TEST_CRASH_AT'] ?? null;
 }
 
 /** Thrown by the crash hook. Never caught by the recovery paths below. */

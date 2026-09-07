@@ -73,6 +73,28 @@ jobs:
       # package that works from the monorepo and not from npm.
       - run: bun run scripts/release-dry-run.ts
 
+  autoapp:
+    name: Autoapp — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd packages/broapp-autoapp build:launcher
+      - run: bun test tests/autoapp-spike.test.ts tests/autoapp-activation.test.ts tests/autoapp-mcp.test.ts
+      # Drives the compiled binary end to end — import, serve, the control
+      # connection, build, activate, a crash past the switch, and recovery.
+      # This is the step that catches a packaging fault the module tests
+      # cannot see, because they never load the compiled artifact.
+      - run: bun run scripts/autoapp-smoke.ts
+      - run: bun test tests/autoapp-offline.test.ts
+
   cross-compile:
     name: Cross-compile every target
     runs-on: ubuntu-latest
