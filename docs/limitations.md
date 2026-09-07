@@ -30,6 +30,15 @@ browser tab. See [comparison.md](comparison.md).
 
 **No mobile.** Bun does not compile for iOS or Android.
 
+**No containment for an Autoapp application.** The optional
+[Autoapp](autoapp/design.md) launcher runs each application as its own child
+process — crash isolated, not permission isolated. A candidate release's host
+code is trusted local code with the files and the network of the person who
+started the launcher. The gate decides whether that code is *asked* to run; it
+does not constrain what it does once running. An OS sandbox and enforced
+capabilities are the first entries in
+[the Autoapp backlog](autoapp/backlog.md).
+
 ## Things that are true and worth knowing
 
 **Binaries are around 60 MB.** That is the Bun runtime. It does not depend much
