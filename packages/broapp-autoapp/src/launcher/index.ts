@@ -26,6 +26,11 @@ export type {
 
 export { connectToChild } from './client.ts';
 
+export { keepServing } from './keepalive.ts';
+export type { KeepServingOptions } from './keepalive.ts';
+export { startControl } from './control.ts';
+export type { Control, ControlFile, StartControlOptions } from './control.ts';
+
 export { buildCandidate } from './candidate.ts';
 export type {
   BuildCandidateParams,

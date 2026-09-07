@@ -15,6 +15,8 @@ import { spawn } from 'bun';
 import type { Subprocess } from 'bun';
 
 import type { HostLogger } from 'broapp/host';
+import { INTERNAL_ERROR_MESSAGE, PublicError } from 'broapp/shared';
+import type { PublicErrorCode } from 'broapp/shared';
 
 import { parseMessage } from '../ipc/codec.ts';
 import { IPC_VERSION, type Message } from '../ipc/messages.ts';
@@ -36,6 +38,20 @@ export interface ChildHandle {
   readonly url: string;
   readonly schemaVersion: number;
   health(): Promise<HealthReport>;
+  /**
+   * Forward one operation call into the application.
+   *
+   * The child runs it through its own gate on channel `mcp`, so a write asks
+   * the person in the application's tab and is refused when no tab is open. The
+   * launcher does not decide anything here; it carries the call.
+   */
+  invoke(params: {
+    route: string;
+    input: unknown;
+    client: string;
+    requestId: string;
+    timeoutMs: number;
+  }): Promise<unknown>;
   /** Stop admitting writes and wait for work to finish. `false` means the deadline passed first. */
   drain(deadlineMs: number): Promise<boolean>;
   shutdown(deadlineMs: number): Promise<{ exitCode: number | null; killed: boolean }>;
@@ -156,6 +172,7 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
     const inbox: Message[] = [];
     let arrived: () => void = () => undefined;
     let protocolFault: Error | null = null;
+    let gone: Error | null = null;
 
     const child = spawn({
       cmd: [execPath, ...args],
@@ -181,6 +198,23 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
         arrived();
       },
     });
+
+    // A child that has died will never answer, and a caller waiting on it would
+    // otherwise sit out its whole deadline — up to five minutes for an MCP call
+    // waiting on a person. Its exit wakes everybody waiting instead.
+    void child.exited.then(
+      (code) => {
+        gone = new PublicError(
+          'unavailable',
+          `the application stopped (exit code ${String(code)})`,
+        );
+        arrived();
+      },
+      () => {
+        gone = new PublicError('unavailable', 'the application stopped');
+        arrived();
+      },
+    );
 
     // Drained line by line rather than in one read at the end. The pipe must
     // not fill, and — the reason this is not `new Response(...).text()` — a
@@ -229,6 +263,13 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
               const fatal = inbox.find((message) => message.type === 'fatal');
               if (fatal !== undefined && fatal.type === 'fatal') {
                 reject(new Error(fatal.reason));
+                return;
+              }
+              // Checked after the inbox, so a reply that arrived just before
+              // the child exited is still delivered.
+              const dead: Error | null = gone;
+              if (dead !== null) {
+                reject(dead);
                 return;
               }
               arrived = check;
@@ -310,6 +351,20 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
             activeWork: reply.activeWork ?? 0,
             attached: reply.attached ?? false,
           };
+        },
+
+        async invoke({ route, input, client, requestId, timeoutMs }): Promise<unknown> {
+          const reply = await request(
+            { v: IPC_VERSION, id: nextId(), type: 'invoke', route, input, client, requestId },
+            timeoutMs,
+            `${route} to answer`,
+          );
+          if (reply.type !== 'invoke') throw new Error('the child answered invoke with something else');
+          if (reply.ok === true) return reply.output;
+          throw new PublicError(
+            (reply.code ?? 'internal') as PublicErrorCode,
+            reply.message ?? INTERNAL_ERROR_MESSAGE,
+          );
         },
 
         async drain(deadlineMs: number): Promise<boolean> {

@@ -37,7 +37,9 @@ import {
 
 import { activate } from './activate.ts';
 import { buildCandidate } from './candidate.ts';
+import { startControl, type Control } from './control.ts';
 import { openJournal, type Journal } from './journal.ts';
+import { keepServing } from './keepalive.ts';
 import { recover } from './recover.ts';
 import { createSupervisor, type Supervisor } from './supervisor.ts';
 import { createLauncherTab } from './tab.ts';
@@ -60,6 +62,7 @@ Usage:
   broapp-autoapp activate <appId> <releaseId>
   broapp-autoapp releases <appId>
   broapp-autoapp status <appId>
+  broapp-autoapp mcp <appId>            Serve one application over MCP, on stdio
 
 Environment:
   BROAPP_DATA_DIR  Override where the launcher keeps everything.
@@ -115,26 +118,31 @@ async function serve(
     console.error(`${appId} has no current release. Run "import" or "activate" first.`);
     return 1;
   }
-  const app = root.app(appId);
-  const child = await supervisor.start({
-    appId,
-    releaseDir: app.release(current),
-    releaseId: current,
-    dataDir: app.data,
-    mode: 'live',
-  });
+  // Opened here too, so `serve <appId>` — one application without the launcher
+  // tab — is still reachable over MCP.
+  let control: Control | null = startControl({ layout: root, supervisor });
+  process.on('exit', () => control?.stop());
 
-  // The launch URL carries a one-time token and is a credential until it is
-  // redeemed. Written to the terminal on purpose, because somebody whose
-  // browser did not open needs it — and to the terminal only.
   console.log(`${appId} ${current}`);
-  console.log(`Open this address if your browser does not: ${child.url}`);
-  if (open) {
-    void openBrowser(child.url).then((opened) => {
-      if (!opened) console.log('Could not open a browser automatically. Use the address above.');
-    });
-  }
-  return (await child.exited) ?? 0;
+  const code = await keepServing({
+    layout: root,
+    supervisor,
+    appId,
+    onStart: (child, restart) => {
+      if (restart > 0) console.log(`${appId} stopped and was started again; its address has changed.`);
+      // The launch URL carries a one-time token and is a credential until it is
+      // redeemed. Written to the terminal on purpose, because somebody whose
+      // browser did not open needs it — and to the terminal only.
+      console.log(`Open this address if your browser does not: ${child.url}`);
+      if (!open) return;
+      void openBrowser(child.url).then((opened) => {
+        if (!opened) console.log('Could not open a browser automatically. Use the address above.');
+      });
+    },
+  });
+  control.stop();
+  control = null;
+  return code;
 }
 
 /**
@@ -153,6 +161,10 @@ async function openLauncher(
   for (const recovered of await recover({ layout: root, journal, supervisor, start: false })) {
     console.log(`recovered: ${recovered.finding}`);
   }
+
+  // The door an MCP server comes in by. Only the launcher's own long-running
+  // commands open it, and it is removed when they stop.
+  const control = startControl({ layout: root, supervisor });
 
   const dataDir = join(root.root, 'launcher');
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -185,6 +197,7 @@ async function openLauncher(
     isBusy: () => tab.ai.activeStreams > 0,
     onShutdown: async () => {
       tab.ai.abortAll('the launcher is shutting down');
+      control.stop();
       // Applications the launcher started do not outlive it.
       await supervisor.stopAll(STOP_DEADLINE_MS);
       store.close();
@@ -347,6 +360,15 @@ async function main(): Promise<number> {
           );
         }
         return 0;
+      }
+
+      case 'mcp': {
+        const appId = positional(argv, 1);
+        if (appId === undefined) return usage('mcp <appId>');
+        // Imported lazily: the MCP SDK is a large dependency that `serve` has
+        // no use for, and this is the only command that needs it.
+        const { runMcp } = await import('../mcp/server.ts');
+        return await runMcp({ appId, controlPath: root.control });
       }
 
       case 'status': {

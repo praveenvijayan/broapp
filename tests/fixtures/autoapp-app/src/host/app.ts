@@ -48,6 +48,8 @@ export function start(context: AppStartContext): Promise<AppInstance> {
     contract: exportContract(contract),
     app,
     isAttached: () => attached(),
+    // The child's table, so an MCP call queues where the tab is looking.
+    ...(context.approvals === undefined ? {} : { approvals: context.approvals }),
     logger: context.logger,
   });
 
@@ -58,6 +60,9 @@ export function start(context: AppStartContext): Promise<AppInstance> {
       autoapp.mount(bridge);
       attached = () => bridge.sessions.some((session) => session.endpoint.state === 'open');
     },
+    // Handed over so the child runtime can forward an MCP call through the
+    // gate. The envelope is the child's, never the caller's.
+    invoke: (route, input, envelope) => app.invoke(route as never, input, envelope),
     isBusy: () => app.activeStreams > 0,
     shutdown: () => {
       app.abortAll('the application is shutting down');

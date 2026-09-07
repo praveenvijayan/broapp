@@ -53,6 +53,12 @@ export interface CreateAutoappHostOptions {
   readonly app: HostApp<AnyContract>;
   /** True while a tab is open to answer a question. */
   isAttached(): boolean;
+  /**
+   * The table questions wait in. Supplied by the child runtime so that MCP
+   * calls and workflow steps queue in the same place, and one
+   * `autoapp.approvalsAnswer` answers either. One is created when it is absent.
+   */
+  readonly approvals?: PendingApprovals;
   readonly logger?: HostLogger;
 }
 
@@ -92,7 +98,7 @@ export function attachedOnly(approvals: Approver, isAttached: () => boolean): Ap
 export function createAutoappHost(options: CreateAutoappHostOptions): AutoappHost {
   const logger: HostLogger = options.logger ?? console;
   const path = overridesPath(options.dataDir);
-  const approvals = createPendingApprovals(logger);
+  const approvals = options.approvals ?? createPendingApprovals(logger);
   const approver = attachedOnly(approvals, options.isAttached);
 
   /** What this person has changed, or nothing when they have changed nothing. */

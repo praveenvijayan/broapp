@@ -15,6 +15,7 @@
     "./host": "./src/host/index.ts",
     "./engineer": "./src/engineer/index.ts",
     "./launcher": "./src/launcher/index.ts",
+    "./mcp": "./src/mcp/index.ts",
     "./spec": "./src/spec/index.ts",
     "./workflows": "./src/workflows/index.ts",
     "./react": "./src/react/index.tsx",
@@ -22,6 +23,7 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "broapp": "workspace:*",
     "broapp-ai-anthropic": "workspace:*",
     "broapp-ai-compatible": "workspace:*"

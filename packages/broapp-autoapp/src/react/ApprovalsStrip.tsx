@@ -31,6 +31,27 @@ type Question = {
   argumentsHash: string;
 };
 
+/**
+ * Who is asking, in words rather than in an identifier.
+ *
+ * The channel matters more than the caller here: "an agent in another program"
+ * is a different thing to be asked by than "this application's own assistant",
+ * and a person deciding needs to know which.
+ */
+function who(question: Question): string {
+  const name = question.caller.replace(/^(ai|mcp|workflow):/, '');
+  switch (question.channel) {
+    case 'mcp':
+      return `${name} — an agent in another program, over MCP`;
+    case 'workflow':
+      return `a saved workflow`;
+    case 'ai':
+      return `this application’s assistant`;
+    default:
+      return question.caller;
+  }
+}
+
 export function ApprovalsStrip(): React.ReactElement | null {
   const list = useOperation<AutoappContract, 'autoapp.approvalsList'>('autoapp.approvalsList');
   const answer = useOperation<AutoappContract, 'autoapp.approvalsAnswer'>('autoapp.approvalsAnswer');
@@ -67,7 +88,7 @@ export function ApprovalsStrip(): React.ReactElement | null {
       {pending.map((question) => (
         <div className="autoapp-approvals__item" key={question.requestId}>
           <p className="autoapp-approvals__what">
-            <strong>{question.caller}</strong> wants to run <code>{question.route}</code> (
+            <strong>{who(question)}</strong> wants to run <code>{question.route}</code> (
             {question.effect}).
           </p>
           <pre className="autoapp-approvals__input">{JSON.stringify(question.input, null, 2)}</pre>

@@ -1,7 +1,7 @@
 /**
  * The messages a launcher and an application child exchange.
  *
- * There are seven and there will not quietly be an eighth: the set is small
+ * There are eight and there will not quietly be a ninth: the set is small
  * enough to reason about, and every one of them is about the child's lifecycle
  * rather than about the application's work. An application's operations never
  * travel this channel — the launcher supervises, it does not proxy.
@@ -73,6 +73,30 @@ export interface Migrate extends Base {
   readonly to?: number;
 }
 
+/**
+ * Launcher → child request, and child → launcher reply with the same type and `re`.
+ *
+ * One operation call, forwarded from an MCP client. The child runs it through
+ * its own `invoke` on channel `mcp`, which means through the gate — so a write
+ * asks the person in the application's tab, exactly as an AI tool call does.
+ *
+ * The control secret never appears here. The launcher authenticated the client;
+ * what crosses to the child is the call and the client's name, and the child has
+ * no way to authenticate anything and no need to.
+ */
+export interface Invoke extends Base {
+  readonly type: 'invoke';
+  readonly route?: string;
+  readonly input?: unknown;
+  /** The MCP client's own name, for the record and for the question. */
+  readonly client?: string;
+  readonly requestId?: string;
+  readonly ok?: boolean;
+  readonly output?: unknown;
+  readonly code?: string;
+  readonly message?: string;
+}
+
 /** Child → launcher: something unrecoverable; the child exits after sending. */
 export interface Fatal extends Base {
   readonly type: 'fatal';
@@ -81,7 +105,7 @@ export interface Fatal extends Base {
 }
 
 /** Anything that may legitimately cross the channel. */
-export type Message = Hello | Ready | Health | Drain | Shutdown | Fatal | Migrate;
+export type Message = Hello | Ready | Health | Drain | Shutdown | Fatal | Migrate | Invoke;
 
 /**
  * The most a single message may weigh.

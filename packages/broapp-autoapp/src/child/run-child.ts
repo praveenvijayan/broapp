@@ -17,13 +17,16 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { createGate, startApp } from 'broapp/host';
-import type { Gate, HostLogger, RunningApp } from 'broapp/host';
+import { createGate, createPendingApprovals, startApp } from 'broapp/host';
+import type { Approver, Gate, HostLogger, RunningApp } from 'broapp/host';
+import { fromTransportError } from 'broapp/shared';
 
 import { parseMessage } from '../ipc/codec.ts';
 import { IPC_VERSION, type Message } from '../ipc/messages.ts';
 import { layout, readRelease } from '../spec/index.ts';
 import { createRunStore, type RunStore } from '../host/run-store.ts';
+
+import { attachedOnly } from '../host/autoapp.ts';
 
 import { assertAppModule, type AppInstance } from './module.ts';
 
@@ -53,6 +56,8 @@ interface ChildState {
   instance: AppInstance | null;
   gate: Gate | null;
   store: RunStore | null;
+  /** Who to ask when a forwarded call needs approval. Null before the bridge exists. */
+  approver: Approver | null;
 }
 
 /** A logger that writes to stderr, which the launcher pipes and drains. */
@@ -155,12 +160,19 @@ export async function runChild(argv: readonly string[]): Promise<number> {
     pid: process.pid,
   });
 
+  // The table an MCP call's question waits in. The application's own Autoapp
+  // host has one of these for the `workflow` channel; this is the child
+  // runtime's, for the calls it forwards, and `autoapp.approvalsAnswer` in the
+  // tab answers both because both end up in the same strip.
+  const mcpApprovals = createPendingApprovals(logger);
+
   const child: ChildState = {
     state: 'starting',
     running: null,
     instance: null,
     gate: null,
     store: null,
+    approver: null,
   };
 
   let finish: (code: number) => void = () => undefined;
@@ -203,7 +215,13 @@ export async function runChild(argv: readonly string[]): Promise<number> {
     // the migrated data before anything is allowed to change it.
     if (paused === 'paused') gate.pause('the application is being checked');
 
-    const instance = await module.start({ dataDir, mode: executionMode, gate, logger });
+    const instance = await module.start({
+      dataDir,
+      mode: executionMode,
+      gate,
+      approvals: mcpApprovals,
+      logger,
+    });
     child.instance = instance;
 
     const running = await startApp({
@@ -225,6 +243,10 @@ export async function runChild(argv: readonly string[]): Promise<number> {
     });
     child.running = running;
     child.state = 'serving';
+    // An MCP call that needs approval asks the person in this application's own
+    // tab — and when no tab is open, it is refused at once rather than held
+    // until a deadline. A question nobody can see is not a question.
+    child.approver = attachedOnly(mcpApprovals, () => running.attached);
 
     post({
       v: IPC_VERSION,
@@ -310,6 +332,64 @@ export async function runChild(argv: readonly string[]): Promise<number> {
           () => finish(1),
         );
         break;
+
+      case 'invoke': {
+        // One MCP call, forwarded by the launcher. The envelope is built here,
+        // from what this runtime knows — the channel is `mcp` because that is
+        // the door the request came through, and nothing the client sent is
+        // consulted when it is filled in. That is what stops an external agent
+        // from claiming to be the person at the keyboard.
+        const requestId = message.requestId ?? crypto.randomUUID();
+        const instance = child.instance;
+        if (instance === undefined || instance === null) {
+          post({
+            v: IPC_VERSION,
+            id: nextId(),
+            re: message.id,
+            type: 'invoke',
+            ok: false,
+            code: 'unavailable',
+            message: 'the application is not serving yet',
+          });
+          break;
+        }
+        void instance
+          .invoke(message.route ?? '', message.input, {
+            requestId,
+            channel: 'mcp',
+            caller: `mcp:${message.client ?? 'unknown'}`,
+            approver: child.approver ?? undefined,
+          })
+          .then(
+            (output) => {
+              post({ v: IPC_VERSION, id: nextId(), re: message.id, type: 'invoke', ok: true, output });
+            },
+            (cause: unknown) => {
+              // The same boundary the bridge draws. `invoke` has already
+              // reduced anything unexpected to the marked bridge error.
+              const reduced = fromTransportError(cause);
+              // The gate refuses the same way whether a person declined or
+              // there was no person — it does not know which. This runtime
+              // does, and an agent told only "was not approved" would keep
+              // trying. Said here, at the reply, rather than inside the gate:
+              // the decision and its record are already made.
+              const detail =
+                reduced.code === 'rejected' && child.running?.attached !== true
+                  ? `${reduced.message}: no browser tab is open for this application, so nobody could be asked. Open it with \`broapp-autoapp serve\`.`
+                  : reduced.message;
+              post({
+                v: IPC_VERSION,
+                id: nextId(),
+                re: message.id,
+                type: 'invoke',
+                ok: false,
+                code: reduced.code,
+                message: detail,
+              });
+            },
+          );
+        break;
+      }
 
       case 'fatal':
         // A `fatal` arriving *from* the launcher is how it refuses a channel it

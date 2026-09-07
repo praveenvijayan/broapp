@@ -12,7 +12,7 @@
 import { IPC_VERSION, MAX_MESSAGE_BYTES, type Message } from './messages.ts';
 
 /** Every `type` a message may have. */
-const TYPES = ['hello', 'ready', 'health', 'drain', 'shutdown', 'fatal', 'migrate'] as const;
+const TYPES = ['hello', 'ready', 'health', 'drain', 'shutdown', 'fatal', 'migrate', 'invoke'] as const;
 
 /** The states a child may report. */
 const STATES = ['starting', 'serving', 'draining', 'stopping'] as const;
@@ -133,6 +133,21 @@ export function parseMessage(raw: unknown): Message {
       return { ...base, type: 'shutdown', deadlineMs: requireNumber(record, 'deadlineMs') };
     case 'fatal':
       return { ...base, type: 'fatal', reason: requireString(record, 'reason') };
+    case 'invoke': {
+      const ok = optionalBoolean(record, 'ok');
+      return {
+        ...base,
+        type: 'invoke',
+        ...(record['route'] === undefined ? {} : { route: requireString(record, 'route') }),
+        ...(record['input'] === undefined ? {} : { input: record['input'] }),
+        ...(record['client'] === undefined ? {} : { client: requireString(record, 'client') }),
+        ...(record['requestId'] === undefined ? {} : { requestId: requireString(record, 'requestId') }),
+        ...(ok === undefined ? {} : { ok }),
+        ...(record['output'] === undefined ? {} : { output: record['output'] }),
+        ...(record['code'] === undefined ? {} : { code: requireString(record, 'code') }),
+        ...(record['message'] === undefined ? {} : { message: requireString(record, 'message') }),
+      };
+    }
     case 'migrate': {
       const from = optionalNumber(record, 'from');
       const to = optionalNumber(record, 'to');

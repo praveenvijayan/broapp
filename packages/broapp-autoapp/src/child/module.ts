@@ -12,7 +12,7 @@
  * what a half-migrated copy must not be.
  */
 import type { Bridge } from 'brobridge';
-import type { Gate } from 'broapp/host';
+import type { Envelope, Gate, PendingApprovals } from 'broapp/host';
 
 /** What the child hands an application when it starts it. */
 export interface AppStartContext {
@@ -20,6 +20,17 @@ export interface AppStartContext {
   readonly mode: 'live' | 'preview';
   /** The one gate every call passes. Applications build their host app with it. */
   readonly gate: Gate;
+  /**
+   * Where a question waits for a person, shared by every channel that has to
+   * ask: the workflow runner inside the application, and the MCP calls the
+   * child runtime forwards from outside it.
+   *
+   * One table, because there is one approvals strip in the tab. An application
+   * that builds its own would have questions arriving somewhere nobody is
+   * looking. Absent when the application is running standalone, where the AI
+   * layer has its own and nothing else asks.
+   */
+  readonly approvals?: PendingApprovals;
   readonly logger: { warn(m: string): void; error(m: string): void };
 }
 
@@ -30,6 +41,15 @@ export interface AppInstance {
   shutdown(reason: string): void | Promise<void>;
   /** The database schema version the opened data is at. */
   readonly schemaVersion: number;
+  /**
+   * Run one operation from outside the browser, through the gate.
+   *
+   * This is the application's own `HostApp.invoke`, handed over so the child
+   * runtime can forward an MCP call into it. The envelope is built by the child,
+   * not by whatever asked — which is what stops an external agent from claiming
+   * to be the person at the keyboard.
+   */
+  invoke(route: string, input: unknown, envelope: Envelope): Promise<unknown>;
 }
 
 /** The two functions a release's `host.js` exports. */
