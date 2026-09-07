@@ -1,6 +1,9 @@
 # 09 — Packaging matrix and offline tiers
 
 CI run: <https://github.com/praveenvijayan/broapp/actions/runs/34106141643>
+(commit `65b4721`, the last one carrying code). The branch head, `c4976de`,
+which adds this report and prompt 10's backlog, is green in the same way:
+<https://github.com/praveenvijayan/broapp/actions/runs/34106899555>.
 
 `Autoapp — ubuntu-latest`, `— macos-latest` and `— windows-latest`: **success**,
 all three, as is every other job in the run. The branch is pushed; the run
