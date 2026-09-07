@@ -26,6 +26,7 @@ const PUBLISHED = [
   'create-broapp',
   'broapp-ai-anthropic',
   'broapp-ai-compatible',
+  'broapp-ai-elements',
   'broapp-autoapp',
 ];
 

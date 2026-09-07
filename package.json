@@ -23,6 +23,7 @@
     "smoke": "bun run scripts/smoke-binary.ts"
   },
   "devDependencies": {
+    "@ai-sdk/react": "4.0.96",
     "@brobridgejs/client": "^0.2.1",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@types/bun": "^1.2.0",
@@ -33,6 +34,7 @@
     "broapp": "workspace:*",
     "broapp-ai-anthropic": "workspace:*",
     "broapp-ai-compatible": "workspace:*",
+    "broapp-ai-elements": "workspace:*",
     "broapp-autoapp": "workspace:*",
     "brobridge": "^0.2.1",
     "react": "^19.0.0",

@@ -220,6 +220,32 @@ describe('the host/browser boundary', () => {
     expect(html).not.toMatch(/<script[^>]+src=/);
     expect(html).not.toMatch(/<link[^>]+href=/);
   });
+
+  test('a browser bundle may import the AI Elements transport', async () => {
+    // The transport is browser code that happens to speak the AI SDK's stream
+    // format: it reaches the host over the same Brobridge connection every
+    // other panel uses.
+    await write(
+      'ai-elements.ts',
+      `import { createBroappChatTransport, useBroappChat } from 'broapp-ai-elements';
+       document.title = [typeof createBroappChatTransport, typeof useBroappChat].join(',');`,
+    );
+    const html = await build('ai-elements.ts', 'dist/ai-elements.html');
+    // The bare string `@ai-sdk/` is deliberately not forbidden here:
+    // `@ai-sdk/react` and `@ai-sdk/provider-utils` belong in this bundle. What
+    // must not be in it is the engine and anything that reaches a provider.
+    for (const symbol of [
+      'node:fs',
+      'streamText',
+      'createAi',
+      '@ai-sdk/anthropic',
+      '@ai-sdk/openai-compatible',
+    ]) {
+      expect(html).not.toContain(symbol);
+    }
+    expect(html).not.toMatch(/<script[^>]+src=/);
+    expect(html).not.toMatch(/<link[^>]+href=/);
+  });
 });
 
 describe('targets', () => {

@@ -1,0 +1,58 @@
+{
+  "name": "broapp-ai-elements",
+  "version": "0.2.1",
+  "type": "module",
+  "description": "The AI SDK transport and AI Elements chat panel for a Broapp application",
+  "license": "MIT",
+  "homepage": "https://github.com/praveenvijayan/broapp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/praveenvijayan/broapp.git",
+    "directory": "packages/broapp-ai-elements"
+  },
+  "bugs": {
+    "url": "https://github.com/praveenvijayan/broapp/issues"
+  },
+  "keywords": [
+    "broapp",
+    "ai",
+    "ai-sdk",
+    "ai-elements",
+    "chat",
+    "local-first"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "styles.css",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@ai-sdk/react": "4.0.96",
+    "ai": "7.0.93"
+  },
+  "peerDependencies": {
+    "broapp": ">=0.2.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "broapp": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.2"
+  }
+}
