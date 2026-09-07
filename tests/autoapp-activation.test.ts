@@ -42,34 +42,17 @@ import {
   writeGrants,
   type Layout,
 } from 'broapp-autoapp/spec';
+import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
 
-const packageDir = join(import.meta.dir, '..', 'packages', 'broapp-autoapp');
-// `.exe` on Windows: `bun build --compile` adds the suffix the platform needs,
-// and a path without it does not exist there.
-const launcher = join(packageDir, 'dist', `broapp-autoapp${process.platform === 'win32' ? '.exe' : ''}`);
+/** The compiled binary every child in this file is started from. */
+const launcher = LAUNCHER;
 const fixture = join(import.meta.dir, 'fixtures', 'autoapp-app');
-
-/** Compile the launcher once. A missing compiler skips rather than fails. */
-async function compile(): Promise<string | null> {
-  const built = Bun.spawn({
-    cmd: ['bun', 'build', '--compile', '--bytecode', '--minify', 'src/launcher/main.ts', '--outfile', 'dist/broapp-autoapp'],
-    cwd: packageDir,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [code, , stderr] = await Promise.all([
-    built.exited,
-    new Response(built.stdout).text(),
-    new Response(built.stderr).text(),
-  ]);
-  return code === 0 ? null : stderr.trim();
-}
 
 // Compiled at module load, not in `beforeAll`: `describe.skipIf` is evaluated
 // when the tests are *registered*, which is before any hook has run. Deciding
 // there would skip the whole file every time, silently — which is the one thing
 // a skip must never do.
-const failure = await compile();
+const failure = await ensureLauncher();
 if (failure !== null) {
   console.warn(`[autoapp-activation] skipped: bun build --compile is unavailable\n${failure}`);
 }
@@ -215,7 +198,11 @@ describe.skipIf(!available)('buildCandidate', () => {
     const app = where.root.app('items');
     const path = join(app.source, 'src', 'shared', 'contract.ts');
     const source = await Bun.file(path).text();
-    writeFileSync(path, source.replace("      effect: 'external',\n", ''));
+    // Matched with a pattern rather than a literal: a Windows checkout stores
+    // the fixture with CRLF line endings, and a literal ending in `\n` silently
+    // fails to match — the file would be written back unchanged and the test
+    // would assert against a build that had nothing wrong with it.
+    writeFileSync(path, source.replace(/ *effect: 'external',\r?\n/, ''));
 
     const result = await buildCandidate({ layout: where.root, appId: 'items' });
     expect(result.ok).toBe(false);

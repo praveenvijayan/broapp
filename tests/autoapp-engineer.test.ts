@@ -55,31 +55,14 @@ import {
   snapshot,
   type CandidateStates,
 } from 'broapp-autoapp/engineer';
+import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
 import { harness, type Harness } from './harness.ts';
 
-const packageDir = join(import.meta.dir, '..', 'packages', 'broapp-autoapp');
-// `.exe` on Windows: `bun build --compile` adds the suffix the platform needs,
-// and a path without it does not exist there.
-const launcher = join(packageDir, 'dist', `broapp-autoapp${process.platform === 'win32' ? '.exe' : ''}`);
+/** The compiled binary every child in this file is started from. */
+const launcher = LAUNCHER;
 const fixture = join(import.meta.dir, 'fixtures', 'autoapp-app');
 
-/** Compile the launcher once. See `tests/autoapp-activation.test.ts` for why here. */
-async function compile(): Promise<string | null> {
-  const built = Bun.spawn({
-    cmd: ['bun', 'run', 'build:launcher'],
-    cwd: packageDir,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [code, , stderr] = await Promise.all([
-    built.exited,
-    new Response(built.stdout).text(),
-    new Response(built.stderr).text(),
-  ]);
-  return code === 0 ? null : stderr.trim();
-}
-
-const failure = await compile();
+const failure = await ensureLauncher();
 if (failure !== null) {
   console.warn(`[autoapp-engineer] skipped: the launcher would not build\n${failure}`);
 }
