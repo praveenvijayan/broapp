@@ -34,7 +34,14 @@ contract, and the confirmation step before a tool changes anything. It runs in
 the host process because the browser cannot reach a provider — the page's
 content-security policy allows `'self'` and loopback and nothing else — and
 because a key in a page is a key that has been published. An application that
-does not call `createAi` carries none of it. See [the AI layer](ai.md).
+does not call `createAi` carries none of it.
+
+Its browser half is a choice of two panels over the same routes: `AiChat` from
+`broapp/ai/react`, which adds no dependencies and renders text; and
+`BroappChat` from `broapp-ai-elements`, which puts the AI SDK's `useChat` and
+Vercel AI Elements over the same bridge for markdown, image attachments and
+tool cards. Neither reaches a provider — both speak `ai.chat` to the host. See
+[the AI layer](ai.md).
 
 This split is why the interesting security properties are not Broapp's to get
 wrong. It is also why Broapp is small.

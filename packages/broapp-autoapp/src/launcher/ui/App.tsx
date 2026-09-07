@@ -13,7 +13,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { AiChat, AiSettings } from 'broapp/ai/react';
+import { AiSettings } from 'broapp/ai/react';
+import { BroappChat } from 'broapp-ai-elements/ui';
 import { useConnection, useOperation } from 'broapp/react';
 import { announcePending, browserSurface } from 'broapp-autoapp/react';
 
@@ -138,7 +139,7 @@ export function App(): React.ReactElement {
           Ask for a change to {selected ?? 'an application'}. It will propose one, build it, and
           show you a preview running on a copy of your data before anything is replaced.
         </p>
-        <AiChat
+        <BroappChat
           refs={selected === null ? [] : [`app:${selected}`]}
           placeholder="Ask for a change…"
           onAwaiting={onAwaiting}

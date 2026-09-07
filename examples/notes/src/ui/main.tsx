@@ -15,7 +15,10 @@ import { autoappContract } from 'broapp-autoapp/react';
 import { contract } from '../shared/contract.ts';
 import { App } from './App.tsx';
 import './styles.css';
+// `ai.css` is still needed: `AiSettings` comes from `broapp/ai/react`, and
+// only the chat panel moved to AI Elements.
 import 'broapp/ai/react/ai.css';
+import 'broapp-ai-elements/styles.css';
 import 'broapp-autoapp/react/view.css';
 
 const container = document.getElementById('root');

@@ -14,7 +14,8 @@
  */
 import { useEffect, useState } from 'react';
 import { AutoappView } from 'broapp-autoapp/react';
-import { AiChat, AiSettings } from 'broapp/ai/react';
+import { AiSettings } from 'broapp/ai/react';
+import { BroappChat } from 'broapp-ai-elements/ui';
 
 import { ConnectionBadge } from './ConnectionBadge.tsx';
 
@@ -82,7 +83,7 @@ export function App(): React.ReactElement {
 
         {/* The note being looked at is what the model is shown. Everything else
             it needs it has to search for. */}
-        <AiChat
+        <BroappChat
           refs={refs}
           placeholder="Ask about your notes…"
           onToolResult={(call) => {

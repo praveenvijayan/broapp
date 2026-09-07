@@ -234,7 +234,8 @@ alternative instead.
     TLS; authentication is not a sandbox; the process has the user's
     permissions.
 11. **Do not give a model a tool that changes data without confirmation**,
-    and do not let the browser talk to an AI provider or hold a key. See
+    and do not let the browser talk to an AI provider or hold a key. If the
+    panel renders markdown, links and images stay off. See
     [references/ai-layer.md](references/ai-layer.md).
 
 ## Done checklist

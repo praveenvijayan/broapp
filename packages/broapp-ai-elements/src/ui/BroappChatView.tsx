@@ -272,13 +272,19 @@ export function BroappChatView({
   const busy = status === 'submitted' || status === 'streaming';
   // The loader stands in for the reply until the first word of it arrives.
   const writing = messages.at(-1)?.parts.some((part) => part.type === 'text') === true;
-  const shown = error ?? attachmentError;
+  // The attachment complaint wins: it is about what the person just did, and a
+  // turn's error is about something they have already read.
+  const shown = attachmentError ?? error;
 
   return (
     <div className="broapp-chat">
       <Conversation>
         <ConversationContent>
-          {messages.length === 0 ? <ConversationEmptyState title={emptyText} /> : null}
+          {messages.length === 0 ? (
+            // The caller's sentence is the whole empty state; the component's
+            // own second line would say the same thing twice.
+            <ConversationEmptyState description="" title={emptyText} />
+          ) : null}
           {messages.map((message) => (
             <Message from={message.role} key={message.id}>
               <MessageContent>

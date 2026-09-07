@@ -79,6 +79,41 @@ import 'broapp/ai/react/ai.css';
 The AI routes live in the reserved route group `ai`. An application whose own
 contract declares an `ai.*` route is refused at startup.
 
+## The chat panel
+
+There are two, over the same routes and the same connection. Both take the same
+props, so swapping one for the other is a change of import.
+
+**`AiChat`, from `broapp/ai/react`.** No dependencies beyond React, no
+Tailwind, no build step. Assistant text is rendered as text, there are no
+attachments, and the tool cards are `<details>` elements. It is the right
+choice for an application that wants a chat panel and nothing else.
+
+```tsx
+import { AiChat } from 'broapp/ai/react';
+import 'broapp/ai/react/ai.css';
+```
+
+**`BroappChat`, from `broapp-ai-elements`.** The AI SDK's `useChat` over the
+same bridge, drawn with Vercel AI Elements: markdown, pasted and picked images,
+a conversation that sticks to the bottom, a Stop button, tool cards, and the
+approval card with its countdown. It brings the AI SDK, Radix and a generated
+stylesheet with it.
+
+```tsx
+import { BroappChat } from 'broapp-ai-elements/ui';
+import 'broapp-ai-elements/styles.css';
+```
+
+Rendering markdown means turning text a model wrote — after it has been shown
+documents from the user's own machine — into elements. So the renderer is
+narrowed rather than trusted: links and images are removed (their words are
+kept, their addresses are not), raw HTML is dropped rather than escaped, and
+`dangerouslySetInnerHTML` appears nowhere in the package. A document that tells
+the model to emit a link to somewhere else therefore produces text, not a way
+out of the page. The stylesheet is ordinary CSS with no `@import`, no `url()`
+and no web font, so `broapp build` inlines and hashes it like any other.
+
 ## How the model knows your application
 
 Four things reach the model, and nothing else.
@@ -234,6 +269,12 @@ that.
 interface, so `streamText` runs its actual loop — steps, tool calls, finish
 reasons — over chunks you wrote. No key, no network.
 
+The browser half is testable without a DOM too. `createBroappChatTransport`
+turns the `ai.chat` stream into `UIMessageChunk`s, and `readUIMessageStream`
+from `ai` folds those back into the message a panel would render — so a test
+asserts on parts and tool states rather than on markup. See
+`tests/ai-elements-transport.test.ts`.
+
 ```ts
 import { createAi, createFakeAdapter, fromContract } from 'broapp/ai/host';
 
@@ -259,10 +300,14 @@ cancellation.
 
 ## Limitations
 
-- **No markdown rendering.** Assistant text is rendered as text. The content was
-  written by a model that has just been shown documents from the user's machine,
-  and a renderer that turns part of it into markup is a route from a document
-  into the page.
+- **`AiChat` renders no markdown.** Assistant text is text there. `BroappChat`
+  renders markdown, with links, images and raw HTML removed — see "The chat
+  panel".
+- **No code highlighting, maths or diagrams** in that markdown. Each is a
+  streamdown plugin that either pulls a syntax highlighter and its grammars or
+  fetches and evaluates at runtime, which a page whose policy is
+  `default-src 'none'` cannot do — and which would cost more bundle than a
+  coloured keyword is worth. Fenced code renders as plain `<pre><code>`.
 - **No persisted conversations.** History lives in the browser tab and is gone
   when it closes.
 - **No OS keychain.** The key is a `0600` file. Keychain, Credential Manager and

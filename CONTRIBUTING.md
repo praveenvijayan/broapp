@@ -18,6 +18,7 @@ packages/broapp          Runtime and build tooling. The published dependency.
 packages/create-broapp   The generator.
 packages/broapp-ai-anthropic    Anthropic adapter for the AI layer.
 packages/broapp-ai-compatible   OpenAI-compatible adapter: OpenAI, Ollama, LM Studio, any /v1 server.
+packages/broapp-ai-elements     Optional chat panel built on the AI SDK and Vercel AI Elements.
 templates/react-ts       The canonical template.
 examples/*               Generated from the template by scripts/new-example.ts.
 tests/                   Cross-cutting tests, including a real bridge harness.

@@ -39,6 +39,12 @@ An application that turns on the [AI layer](ai.md) adds about **7 MB** for the
 AI SDK and its provider adapters. One that never imports `broapp/ai/host` adds
 nothing.
 
+Swapping the plain chat panel for `broapp-ai-elements`'s `BroappChat` cost the
+notes example **2.5 MB** — 69.9 MiB to 72.4 MiB — of which the inline page grew
+from 293 KiB to 1148 KiB. That is the AI SDK's browser half, Radix, the icons
+and the generated stylesheet, all inlined into the one document the binary
+serves.
+
 If that is disqualifying, this is not the right architecture — see
 [comparison.md](comparison.md).
 

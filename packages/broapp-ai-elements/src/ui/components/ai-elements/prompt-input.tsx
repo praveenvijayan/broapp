@@ -79,6 +79,27 @@ import {
 // Helpers
 // ============================================================================
 
+// LOCAL: attachments are read into `data:` URLs rather than object URLs.
+//
+// `URL.createObjectURL` produces a `blob:` URL, and a Broapp page's policy is
+// `img-src 'self' data:` with `connect-src 'self' ws://127.0.0.1:*`. A blob:
+// preview will not load, and the blob-to-data conversion this file does on
+// submit is a `fetch` of that blob: URL, which the policy also refuses — so
+// the turn would be sent with an unreadable URL. Reading the File itself needs
+// neither.
+const readAsDataUrl = (file: File): Promise<string> =>
+  // oxlint-disable-next-line eslint-plugin-promise(avoid-new)
+  new Promise((resolve) => {
+    const reader = new FileReader();
+    // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
+    reader.onloadend = () =>
+      resolve(typeof reader.result === "string" ? reader.result : "");
+    // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
+// END LOCAL
+
 const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
   try {
     const response = await fetch(url);
@@ -268,16 +289,17 @@ export const PromptInputProvider = ({
       return;
     }
 
-    setAttachmentFiles((prev) => [
-      ...prev,
-      ...incoming.map((file) => ({
+    // LOCAL: data URLs, read asynchronously. See readAsDataUrl.
+    void Promise.all(
+      incoming.map(async (file) => ({
         filename: file.name,
         id: nanoid(),
         mediaType: file.type,
         type: "file" as const,
-        url: URL.createObjectURL(file),
-      })),
-    ]);
+        url: await readAsDataUrl(file),
+      }))
+    ).then((entries) => setAttachmentFiles((prev) => [...prev, ...entries]));
+    // END LOCAL
   }, []);
 
   const remove = useCallback((id: string) => {
@@ -598,31 +620,33 @@ export const PromptInput = ({
         return;
       }
 
-      setItems((prev) => {
-        const capacity =
-          typeof maxFiles === "number"
-            ? Math.max(0, maxFiles - prev.length)
-            : undefined;
-        const capped =
-          typeof capacity === "number" ? sized.slice(0, capacity) : sized;
-        if (typeof capacity === "number" && sized.length > capacity) {
-          onError?.({
-            code: "max_files",
-            message: "Too many files. Some were not added.",
-          });
-        }
-        const next: (FileUIPart & { id: string })[] = [];
-        for (const file of capped) {
-          next.push({
-            filename: file.name,
-            id: nanoid(),
-            mediaType: file.type,
-            type: "file",
-            url: URL.createObjectURL(file),
-          });
-        }
-        return [...prev, ...next];
+      // LOCAL: data URLs, read before the state update. See readAsDataUrl.
+      void Promise.all(
+        sized.map(async (file) => ({
+          filename: file.name,
+          id: nanoid(),
+          mediaType: file.type,
+          type: "file" as const,
+          url: await readAsDataUrl(file),
+        }))
+      ).then((entries) => {
+        setItems((prev) => {
+          const capacity =
+            typeof maxFiles === "number"
+              ? Math.max(0, maxFiles - prev.length)
+              : undefined;
+          const capped =
+            typeof capacity === "number" ? entries.slice(0, capacity) : entries;
+          if (typeof capacity === "number" && entries.length > capacity) {
+            onError?.({
+              code: "max_files",
+              message: "Too many files. Some were not added.",
+            });
+          }
+          return [...prev, ...capped];
+        });
       });
+      // END LOCAL
     },
     [matchesAccept, maxFiles, maxFileSize, onError]
   );

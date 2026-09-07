@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-import { IMAGE_LIMITS, splitDataUrl } from 'broapp-ai-elements';
+import { IMAGE_LIMITS, intrinsicSize, prepareImage, splitDataUrl } from 'broapp-ai-elements';
 
 /** A one-pixel PNG, as `PromptInput` would hand it over. */
 const PNG =
@@ -52,6 +52,54 @@ describe('splitDataUrl', () => {
     // the host is told about. A part claiming otherwise cannot smuggle an SVG
     // past the contract by calling itself a PNG.
     expect(splitDataUrl('data:image/jpeg;base64,AAAA', 'shot.png').mediaType).toBe('image/jpeg');
+  });
+});
+
+/** The base64 payload of a data URL, as bytes. */
+function bytes(dataUrl: string): Uint8Array {
+  const binary = atob(dataUrl.slice(dataUrl.indexOf(',') + 1));
+  const out = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) out[index] = binary.charCodeAt(index);
+  return out;
+}
+
+describe('intrinsicSize', () => {
+  test('reads a PNG header', () => {
+    expect(intrinsicSize(bytes(PNG))).toEqual({ width: 1, height: 1 });
+  });
+
+  test('reads a GIF header', () => {
+    // GIF89a, 3×2 logical screen.
+    const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 3, 0, 2, 0, 0]);
+    expect(intrinsicSize(gif)).toEqual({ width: 3, height: 2 });
+  });
+
+  test('says nothing rather than guessing at an unknown header', () => {
+    expect(intrinsicSize(new Uint8Array([1, 2, 3, 4]))).toBeNull();
+  });
+});
+
+describe('prepareImage', () => {
+  test('sends a small image exactly as it arrived', async () => {
+    // No canvas and no decoder are needed for this path, which is the one a
+    // pasted screenshot takes almost every time.
+    const prepared = await prepareImage({
+      type: 'file',
+      mediaType: 'image/png',
+      filename: 'shot.png',
+      url: PNG,
+    });
+    expect(prepared).toEqual(splitDataUrl(PNG, 'shot.png'));
+  });
+
+  test('refuses an oversized image when the browser cannot decode', async () => {
+    // `bun test` has no `createImageBitmap`, which is the case this covers:
+    // downscaling is impossible, so the turn is refused with a sentence rather
+    // than sent over the contract's bound.
+    const huge = `data:image/png;base64,${'A'.repeat(2_000_004)}`;
+    await expect(
+      prepareImage({ type: 'file', mediaType: 'image/png', filename: 'big.png', url: huge }),
+    ).rejects.toThrow('That image is too large to send. Try a smaller one.');
   });
 });
 

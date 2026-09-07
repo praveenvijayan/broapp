@@ -87,6 +87,7 @@ try {
     broapp: `file:${tarball('broapp')}`,
     'broapp-ai-anthropic': `file:${tarball('broapp-ai-anthropic')}`,
     'broapp-ai-compatible': `file:${tarball('broapp-ai-compatible')}`,
+    'broapp-ai-elements': `file:${tarball('broapp-ai-elements')}`,
     'broapp-autoapp': `file:${tarball('broapp-autoapp')}`,
   };
 

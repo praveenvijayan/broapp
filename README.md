@@ -57,6 +57,7 @@ session cookie, the framing, resume — are
 | `packages/broapp` | Runtime and build tooling. Generated projects depend on it. |
 | `packages/broapp-ai-anthropic` | Anthropic provider for the AI layer. |
 | `packages/broapp-ai-compatible` | OpenAI, Ollama and any OpenAI-compatible server. |
+| `packages/broapp-ai-elements` | Optional chat panel: AI SDK `useChat` and Vercel AI Elements. |
 | `packages/broapp-autoapp` | Optional: the Autoapp launcher, renderer and engineer. |
 | `templates/react-ts` | The canonical template. React + TypeScript, ordinary CSS. |
 | `examples/dashboard` | Streaming system metrics; independent streams and reconnect. |

@@ -11,6 +11,8 @@ import { createRoot } from 'react-dom/client';
 import { BroappProvider } from 'broapp/react';
 import { aiContract, AiProvider } from 'broapp/ai/react';
 import 'broapp/ai/react/ai.css';
+// The chat panel is AI Elements now; `ai.css` still dresses `AiSettings`.
+import 'broapp-ai-elements/styles.css';
 
 import { launcherContract } from '../contract.ts';
 import { App } from './App.tsx';

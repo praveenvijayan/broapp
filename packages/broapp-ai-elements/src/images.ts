@@ -53,6 +53,81 @@ export function splitDataUrl(url: string, filename?: string): PreparedImage {
   return { name: filename ?? `image.${mediaType.slice('image/'.length)}`, mediaType, data };
 }
 
+/** The base64 payload as bytes, without going near `fetch`. */
+function bytesOf(data: string): Uint8Array {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+/**
+ * The image's pixel size, read from its header.
+ *
+ * Every format here writes its dimensions in the first few dozen bytes, and
+ * reading them costs nothing — where decoding the image costs a canvas, a
+ * decoder, and in some embedded browsers a failure. An image already small
+ * enough is then sent exactly as it arrived.
+ *
+ * `null` means "this header was not understood", which is treated as "small
+ * enough": the provider downscales for itself, and the contract's byte bound
+ * still applies.
+ */
+export function intrinsicSize(bytes: Uint8Array): { width: number; height: number } | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const at = (index: number): number => bytes[index] ?? 0;
+
+  // PNG: an 8-byte signature, then an IHDR chunk whose first two fields are
+  // the dimensions, big-endian.
+  if (bytes.length > 24 && at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4e && at(3) === 0x47) {
+    return { width: view.getUint32(16), height: view.getUint32(20) };
+  }
+
+  // GIF: "GIF87a"/"GIF89a", then the logical screen size, little-endian.
+  if (bytes.length > 10 && at(0) === 0x47 && at(1) === 0x49 && at(2) === 0x46) {
+    return { width: view.getUint16(6, true), height: view.getUint16(8, true) };
+  }
+
+  // JPEG: walk the markers to the start-of-frame, which carries the size.
+  if (bytes.length > 4 && at(0) === 0xff && at(1) === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < bytes.length) {
+      if (at(offset) !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const marker = at(offset + 1);
+      // SOF0…SOF15, minus the four markers in that range that are not frames.
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { height: view.getUint16(offset + 5), width: view.getUint16(offset + 7) };
+      }
+      offset += 2 + view.getUint16(offset + 2);
+    }
+    return null;
+  }
+
+  // WebP: "RIFF"…"WEBP", then one of three chunk layouts.
+  if (bytes.length > 30 && at(0) === 0x52 && at(8) === 0x57 && at(9) === 0x45) {
+    const chunk = String.fromCharCode(at(12), at(13), at(14), at(15));
+    if (chunk === 'VP8 ') {
+      return { width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff };
+    }
+    if (chunk === 'VP8L') {
+      const bits = view.getUint32(21, true);
+      return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+    }
+    if (chunk === 'VP8X') {
+      return {
+        width: (at(24) | (at(25) << 8) | (at(26) << 16)) + 1,
+        height: (at(27) | (at(28) << 8) | (at(29) << 16)) + 1,
+      };
+    }
+  }
+  return null;
+}
+
 /** A drawing surface, whichever one this browser has. */
 interface Surface {
   readonly canvas: OffscreenCanvas | HTMLCanvasElement;
@@ -111,24 +186,17 @@ async function toJpegBase64(view: Surface): Promise<string> {
  */
 export async function prepareImage(part: FileUIPart): Promise<PreparedImage> {
   const original = splitDataUrl(part.url, part.filename);
+  const size = intrinsicSize(bytesOf(original.data));
+  const edge = size === null ? 0 : Math.max(size.width, size.height);
+  // Nothing to do, and nothing to decode: the common case is a screenshot that
+  // is already small enough, and this is where it stays exactly as it arrived.
+  if (original.data.length <= IMAGE_LIMITS.maxBase64 && edge <= IMAGE_LIMITS.maxEdge) {
+    return original;
+  }
   if (typeof createImageBitmap !== 'function') {
-    // No decoder — a test runner, or a browser old enough not to have one.
-    // The contract's bound still holds, and every provider downscales for
-    // itself, so an image already inside the bound is sent as it arrived
-    // rather than refused for want of a canvas.
-    if (original.data.length <= IMAGE_LIMITS.maxBase64) return original;
     throw new Error('That image is too large to send. Try a smaller one.');
   }
-  if (original.data.length <= IMAGE_LIMITS.maxBase64) {
-    const bitmap = await bitmapOf(part.url);
-    try {
-      if (Math.max(bitmap.width, bitmap.height) <= IMAGE_LIMITS.maxEdge) return original;
-      return await redraw(bitmap, original.name, IMAGE_LIMITS.maxEdge);
-    } finally {
-      bitmap.close();
-    }
-  }
-  const bitmap = await bitmapOf(part.url);
+  const bitmap = await bitmapOf(original);
   try {
     return await redraw(bitmap, original.name, IMAGE_LIMITS.maxEdge);
   } finally {
@@ -136,10 +204,20 @@ export async function prepareImage(part: FileUIPart): Promise<PreparedImage> {
   }
 }
 
-/** Decode a data URL into pixels. */
-async function bitmapOf(url: string): Promise<ImageBitmap> {
-  const response = await fetch(url);
-  return createImageBitmap(await response.blob());
+/**
+ * Decode a data URL into pixels.
+ *
+ * Built by hand rather than with `fetch(url)`: a Broapp page's policy is
+ * `connect-src 'self' ws://127.0.0.1:*`, and a fetch of a `data:` URL is a
+ * connection as far as that policy is concerned.
+ */
+async function bitmapOf(image: PreparedImage): Promise<ImageBitmap> {
+  const binary = atob(image.data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return createImageBitmap(new Blob([bytes], { type: image.mediaType }));
 }
 
 /** Draw at `edge` or smaller, halving until the encoded result fits. */

@@ -54,9 +54,26 @@ import 'broapp/ai/react/ai.css';
 </BroappProvider>
 ```
 
-**4. The panels.** `<AiSettings />` wherever settings live, and
-`<AiChat refs={…} onToolResult={…} />` in the interface. Use `onToolResult`
-to refetch whatever a confirmed tool just changed.
+**4. The panels.** `<AiSettings />` wherever settings live, and a chat panel in
+the interface. Use `onToolResult` to refetch whatever a confirmed tool just
+changed.
+
+Two panels take the same props; pick one.
+
+```tsx
+// No extra dependencies, text only, no attachments.
+import { AiChat } from 'broapp/ai/react';
+import 'broapp/ai/react/ai.css';
+<AiChat refs={…} onToolResult={…} />
+
+// AI SDK `useChat` + Vercel AI Elements: markdown, pasted images, tool cards.
+import { BroappChat } from 'broapp-ai-elements/ui';
+import 'broapp-ai-elements/styles.css';
+<BroappChat refs={…} onToolResult={…} />
+```
+
+`AiSettings` always needs `ai.css`, whichever panel you chose. Add
+`broapp-ai-elements` to the project's dependencies if you use `BroappChat`.
 
 Add `broapp-ai-anthropic` and `broapp-ai-compatible` to the project's
 dependencies. Routes live in the reserved group `ai`; an application contract
@@ -98,6 +115,14 @@ rather than retry. Nobody answering is also a decline, after
 - **Never quote a provider's response body in a user-facing message.** It can
   echo the prompt back or carry a fragment of the key. Use `AdapterError` with
   words a user can act on, and attach the body as `cause`.
+- **Never enable links or images in `Response`.** The markdown a model writes
+  is written after it has been shown documents from the user's machine; an
+  address in it is a route out of the page. They are removed, and the words
+  around them are kept.
+- **Never use `addToolApprovalResponse` or `sendAutomaticallyWhen`.** They mark
+  a call answered in client state before the host has decided, and the SDK's
+  follow-up starts a second run. Answer through the transport's `confirm`,
+  which calls `ai.chatConfirm`, and wait for the stream to say what happened.
 
 ## Testing it
 

@@ -71,6 +71,7 @@
         "broapp": "workspace:*",
         "broapp-ai-anthropic": "workspace:*",
         "broapp-ai-compatible": "workspace:*",
+        "broapp-ai-elements": "workspace:*",
         "broapp-autoapp": "workspace:*",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
@@ -179,12 +180,14 @@
       },
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.30.0",
-        "broapp": "workspace:*",
-        "broapp-ai-anthropic": "workspace:*",
-        "broapp-ai-compatible": "workspace:*",
+        "broapp": "^0.2.1",
+        "broapp-ai-anthropic": "^0.2.1",
+        "broapp-ai-compatible": "^0.2.1",
+        "broapp-ai-elements": "^0.2.1",
       },
       "devDependencies": {
         "@types/react": "^19.0.0",
+        "broapp-ai-elements": "workspace:*",
         "react": "^19.0.0",
       },
       "peerDependencies": {

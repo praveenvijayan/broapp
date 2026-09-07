@@ -140,6 +140,19 @@ chosen; an application must not hide the notice. Whether a provider counts as
 local is decided by its address, so a loopback proxy that forwards elsewhere
 would be reported as local.
 
+**Rendered markdown is narrowed, not trusted.** `broapp-ai-elements` turns
+assistant text into React elements — never raw HTML, and never through
+`dangerouslySetInnerHTML`. Links and images are removed before rendering: their
+words survive, their addresses do not. A document the model was shown that asks
+it to emit a link therefore produces text and no way out of the page. The
+plain-text panel in `broapp/ai/react` renders no markup at all.
+
+**An image is sent to the provider with its message.** Attaching or pasting one
+into the chat panel sends it, once, with the turn it arrives on — so the answer
+to "does this leave my computer" is the one above: a local provider keeps it on
+the machine, a remote one is given it. Later turns carry a `[image: name]`
+placeholder rather than the picture again.
+
 **The API key is a file, not a vault.** It is written to
 `<dataDir>/ai/secrets.json` with mode `0600` — the posture of
 `~/.aws/credentials`, not of a keychain. That rules out another *user* on the

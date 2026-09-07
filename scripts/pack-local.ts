@@ -41,6 +41,10 @@ const PUBLISHED = [
  */
 const PREPARED: Record<string, readonly string[]> = {
   'broapp-autoapp': ['bun', 'run', 'build:page'],
+  // `styles.css` is committed and a test keeps it fresh, but a pack that
+  // shipped a stale one would be wrong in the one place nobody re-runs the
+  // tests: somebody else's install.
+  'broapp-ai-elements': ['bun', 'run', 'build:css'],
 };
 
 /** Pack every publishable package into `outDir`. Returns absolute tarball paths. */
