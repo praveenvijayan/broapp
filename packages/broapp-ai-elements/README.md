@@ -9,8 +9,9 @@ of hand-rolled code.
 import { useBroappChat } from 'broapp-ai-elements';
 ```
 
-```ts
-import { createBroappChatTransport } from 'broapp-ai-elements';
+```tsx
+import { BroappChat } from 'broapp-ai-elements/ui';
+import 'broapp-ai-elements/styles.css';
 ```
 
 The host does not change: see `docs/ai.md` for the AI layer itself, its

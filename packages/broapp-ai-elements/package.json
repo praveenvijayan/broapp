@@ -35,11 +35,22 @@
   ],
   "exports": {
     ".": "./src/index.ts",
+    "./ui": "./src/ui/index.tsx",
+    "./styles.css": "./styles.css",
     "./package.json": "./package.json"
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.96",
-    "ai": "7.0.93"
+    "ai": "7.0.93",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "cmdk": "1.1.1",
+    "lucide-react": "1.42.0",
+    "nanoid": "6.0.1",
+    "radix-ui": "1.6.7",
+    "streamdown": "2.6.0",
+    "tailwind-merge": "3.6.0",
+    "use-stick-to-bottom": "1.1.6"
   },
   "peerDependencies": {
     "broapp": ">=0.2.1",
@@ -47,12 +58,17 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "4.3.3",
     "@types/bun": "^1.2.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "broapp": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "tailwindcss": "4.3.3",
     "typescript": "^5.7.2"
+  },
+  "scripts": {
+    "build:css": "bun run scripts/build-css.ts"
   }
 }

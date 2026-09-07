@@ -246,6 +246,33 @@ describe('the host/browser boundary', () => {
     expect(html).not.toMatch(/<script[^>]+src=/);
     expect(html).not.toMatch(/<link[^>]+href=/);
   });
+
+  test('a browser bundle may import the AI Elements panel and its stylesheet', async () => {
+    // The panel is the transport plus vendored components. The stylesheet is
+    // committed source, imported like any other CSS, and `buildPage` inlines
+    // and hashes it.
+    await write(
+      'ai-panel.ts',
+      `import 'broapp-ai-elements/styles.css';
+       import { BroappChat } from 'broapp-ai-elements/ui';
+       document.title = typeof BroappChat;`,
+    );
+    const html = await build('ai-panel.ts', 'dist/ai-panel.html');
+    expect(html).toContain('.broapp-chat');
+    for (const symbol of [
+      'node:fs',
+      'streamText',
+      'createAi',
+      '@ai-sdk/anthropic',
+      '@ai-sdk/openai-compatible',
+      // shiki loads grammars at runtime; nothing in the panel may reach it.
+      'createHighlighter',
+    ]) {
+      expect(html).not.toContain(symbol);
+    }
+    expect(html).not.toMatch(/<script[^>]+src=/);
+    expect(html).not.toMatch(/<link[^>]+href=/);
+  });
 });
 
 describe('targets', () => {

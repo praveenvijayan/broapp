@@ -1,0 +1,150 @@
+/*
+ * The panel's stylesheet.
+ *
+ * Everything is scoped to `.broapp-chat`, and every colour is a shadcn token
+ * mapped onto the custom properties an application already defines for its own
+ * interface — so the panel takes on the application's colours instead of
+ * imposing its own. Each mapping carries a literal fallback, in light and in
+ * dark, because an application that defines none must still be legible.
+ *
+ * No preflight: this file styles one panel inside somebody else's page, and a
+ * reset that reached the rest of that page would be a bug. No `@import` of a
+ * package stylesheet, no `url()`, no web font: `broapp build` fails a page that
+ * loads anything off-origin, and that rule covers CSS.
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@source "./";
+@source "../../node_modules/streamdown/dist";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent-surface);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border-color);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+}
+
+@layer base {
+  .broapp-chat {
+    /*
+     * `--accent` and `--border` already mean something in a Broapp
+     * application — the brand colour and the hairline — so the shadcn tokens
+     * of the same name are read through `--accent-surface` and
+     * `--border-color`. Mapping them directly would make every hover state
+     * the brand colour.
+     */
+    --background: var(--bg, #ffffff);
+    --foreground: var(--text, #1a1a1a);
+    --card: var(--surface, #ffffff);
+    --card-foreground: var(--text, #1a1a1a);
+    --popover: var(--surface, #ffffff);
+    --popover-foreground: var(--text, #1a1a1a);
+    --primary: var(--accent, #2563eb);
+    --primary-foreground: var(--accent-contrast, #ffffff);
+    --secondary: var(--bg, #f3f4f6);
+    --secondary-foreground: var(--text, #1a1a1a);
+    --muted: var(--bg, #f3f4f6);
+    --muted-foreground: var(--text-muted, #666666);
+    --accent-surface: var(--bg, #f3f4f6);
+    --accent-foreground: var(--text, #1a1a1a);
+    --destructive: var(--bad, #b3261e);
+    --destructive-foreground: #ffffff;
+    --border-color: var(--border, #dddddd);
+    --input: var(--border, #dddddd);
+    --ring: var(--focus, var(--accent, #2563eb));
+    --radius: var(--radius, 8px);
+    --warning: var(--pending, #8a6a12);
+    --warning-bg: color-mix(in srgb, var(--pending, #8a6a12) 12%, transparent);
+
+    color: var(--foreground);
+    background: var(--background);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .broapp-chat {
+      --background: var(--bg, #16171a);
+      --foreground: var(--text, #eceef1);
+      --card: var(--surface, #1e2024);
+      --card-foreground: var(--text, #eceef1);
+      --popover: var(--surface, #1e2024);
+      --popover-foreground: var(--text, #eceef1);
+      --primary: var(--accent, #6fd3b4);
+      --primary-foreground: var(--accent-contrast, #10231e);
+      --secondary: var(--surface, #1e2024);
+      --secondary-foreground: var(--text, #eceef1);
+      --muted: var(--surface, #1e2024);
+      --muted-foreground: var(--text-muted, #a2a7b0);
+      --accent-surface: var(--surface, #1e2024);
+      --accent-foreground: var(--text, #eceef1);
+      --destructive: var(--bad, #f08a76);
+      --destructive-foreground: #16171a;
+      --border-color: var(--border, #32353b);
+      --input: var(--border, #32353b);
+      --ring: var(--focus, var(--accent, #6fd3b4));
+      --warning: var(--pending, #e0b95a);
+    }
+  }
+
+  /* Motion is decoration here; a person who asked for less must get less. */
+  @media (prefers-reduced-motion: reduce) {
+    .broapp-chat *,
+    .broapp-chat *::before,
+    .broapp-chat *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}
+
+@layer components {
+  /* Plain text, when markdown is turned off. */
+  .broapp-chat__text {
+    margin: 0;
+    font: inherit;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .broapp-chat__confirm {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+  }
+
+  /* Under a minute left. Amber rather than red: nothing has gone wrong yet. */
+  .broapp-chat__confirm--urgent {
+    color: var(--warning);
+    border-color: var(--warning);
+    background: var(--warning-bg);
+  }
+
+  .broapp-chat__image {
+    max-height: 160px;
+    width: auto;
+    border-radius: var(--radius);
+  }
+}
