@@ -55,6 +55,56 @@ describe('aiContract', () => {
     });
   });
 
+  test('ai.chat accepts up to four images', () => {
+    const file = { name: 'shot.png', mediaType: 'image/png', data: 'AAAA' };
+    const params = {
+      runId: 'run-12345678',
+      message: 'what is this?',
+      refs: [],
+      history: [],
+      files: [file, file, file, file],
+    };
+    expect(chat.params.parse(params)).toEqual(params);
+  });
+
+  test('ai.chat refuses a fifth image', () => {
+    const file = { name: 'shot.png', mediaType: 'image/png', data: 'AAAA' };
+    expect(() =>
+      chat.params.parse({
+        runId: 'run-12345678',
+        message: 'hi',
+        refs: [],
+        history: [],
+        files: [file, file, file, file, file],
+      }),
+    ).toThrow(/files/);
+  });
+
+  test('ai.chat refuses a media type that is not a bitmap image', () => {
+    expect(() =>
+      chat.params.parse({
+        runId: 'run-12345678',
+        message: 'hi',
+        refs: [],
+        history: [],
+        // SVG is a document that can carry script, not a picture.
+        files: [{ name: 'logo.svg', mediaType: 'image/svg+xml', data: 'AAAA' }],
+      }),
+    ).toThrow(/mediaType/);
+  });
+
+  test('ai.chat refuses an image over two million characters', () => {
+    expect(() =>
+      chat.params.parse({
+        runId: 'run-12345678',
+        message: 'hi',
+        refs: [],
+        history: [],
+        files: [{ name: 'big.png', mediaType: 'image/png', data: 'A'.repeat(2_000_001) }],
+      }),
+    ).toThrow(/data/);
+  });
+
   test('a chat event needs a known type', () => {
     expect(chat.event.parse({ type: 'text', text: 'x' })).toEqual({ type: 'text', text: 'x' });
     expect(() => chat.event.parse({ type: 'nope' })).toThrow(/type/);

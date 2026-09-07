@@ -29,6 +29,7 @@ export type {
   AiSettings as AiSettingsValue,
   BroappModel,
   ChatEvent,
+  ChatFile,
   ChatTurn,
   ProviderInfo,
   ToolPermission,

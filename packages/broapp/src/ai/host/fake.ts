@@ -48,6 +48,13 @@ export interface FakeAdapterOptions {
   readonly script?: readonly FakeStep[];
   /** Delay between chunks, so a cancel test can catch a stream mid-flight. */
   readonly chunkDelayMs?: number;
+  /**
+   * Whether the default model says it can read images. Default `false`.
+   *
+   * The default stays `false` so a test that does not mention images keeps
+   * proving that a turn with images is refused by a model that cannot see.
+   */
+  readonly vision?: boolean;
 }
 
 /** A fake adapter, plus what the test wants to know about it afterwards. */
@@ -60,12 +67,12 @@ export interface FakeAdapter extends ProviderAdapter {
   readonly aborted: number;
 }
 
-function defaultModel(providerId: string): BroappModel {
+function defaultModel(providerId: string, vision: boolean): BroappModel {
   return {
     provider: providerId,
     modelId: 'fake-1',
     label: 'Fake 1',
-    capabilities: { tools: true, vision: false, structuredOutput: true },
+    capabilities: { tools: true, vision, structuredOutput: true },
   };
 }
 
@@ -127,7 +134,7 @@ function chunksFor(step: FakeStep, callIndex: number): StreamPart[] {
 /** Build an adapter that needs no provider. */
 export function createFakeAdapter(options: FakeAdapterOptions = {}): FakeAdapter {
   const id = options.id ?? 'fake';
-  const models = options.models ?? [defaultModel(id)];
+  const models = options.models ?? [defaultModel(id, options.vision === true)];
   const script = options.script ?? [{ kind: 'text', chunks: ['fake reply'] } as const];
   const steps = flatten(script);
   const delay = options.chunkDelayMs ?? 0;

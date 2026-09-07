@@ -64,6 +64,8 @@ interface Started {
 interface StartOptions {
   readonly script?: readonly FakeStep[];
   readonly chunkDelayMs?: number;
+  /** Whether the fake model says it can read images. Default `false`. */
+  readonly vision?: boolean;
   /** Leave the provider unset, to test the "not set up" path. */
   readonly skipSetup?: boolean;
 }
@@ -88,6 +90,7 @@ async function start(options: StartOptions = {}): Promise<Started> {
   const adapter = createFakeAdapter({
     ...(options.script === undefined ? {} : { script: options.script }),
     ...(options.chunkDelayMs === undefined ? {} : { chunkDelayMs: options.chunkDelayMs }),
+    ...(options.vision === undefined ? {} : { vision: options.vision }),
   });
 
   const ai = createAi({
@@ -135,6 +138,15 @@ afterEach(async () => {
 /** A user message with one text part, as `useChat` would build it. */
 function user(text: string, id = 'm-user'): BroappUIMessage {
   return { id, role: 'user', parts: [{ type: 'text', text }] };
+}
+
+/** A one-pixel PNG, as AI Elements' `PromptInput` hands one over. */
+const PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+/** One image part on a user message. */
+function imagePart(filename: string): BroappUIMessage['parts'][number] {
+  return { type: 'file', mediaType: 'image/png', filename, url: PNG };
 }
 
 /** An assistant message with one text part. */
@@ -452,25 +464,37 @@ describe('ending a turn', () => {
     await wired.client.close();
   });
 
-  test('an attachment is refused rather than dropped', async () => {
-    const started = await start({ script: [{ kind: 'text', chunks: ['hi'] }] });
+  test('a fifth image is refused before anything is sent', async () => {
+    const started = await start({ script: [{ kind: 'text', chunks: ['hi'] }], vision: true });
     const wired = await wire(started);
-    const withFile: BroappUIMessage = {
+    const parts: BroappUIMessage['parts'] = [{ type: 'text', text: 'what are these?' }];
+    for (let index = 0; index < 5; index += 1) parts.push(imagePart(`shot-${String(index)}.png`));
+    const seen = await chunks(await send(wired.transport, [{ id: 'm1', role: 'user', parts }]));
+
+    expect(seen).toEqual([{ type: 'error', errorText: 'Up to four images per message.' }]);
+    expect(started.adapter.modelCalls).toBe(0);
+    expect(wired.transport.active).toBe(false);
+    await wired.client.close();
+  });
+
+  test('an image that cannot be read stops the turn', async () => {
+    const started = await start({ script: [{ kind: 'text', chunks: ['hi'] }], vision: true });
+    const wired = await wire(started);
+    const message: BroappUIMessage = {
       id: 'm1',
       role: 'user',
       parts: [
         { type: 'text', text: 'what is this?' },
-        { type: 'file', mediaType: 'image/png', filename: 'shot.png', url: 'data:image/png;base64,AA' },
+        { type: 'file', mediaType: 'image/svg+xml', filename: 'logo.svg', url: 'data:image/svg+xml;base64,PHN2Zy8+' },
       ],
     };
-    const seen = await chunks(await send(wired.transport, [withFile]));
+    const seen = await chunks(await send(wired.transport, [message]));
 
-    expect(seen).toEqual([
-      { type: 'error', errorText: 'This version cannot send attachments yet.' },
-    ]);
-    // Nothing was subscribed: the model was never asked.
+    expect(seen.at(-1)).toEqual({
+      type: 'error',
+      errorText: 'Only PNG, JPEG, GIF and WebP images can be sent.',
+    });
     expect(started.adapter.modelCalls).toBe(0);
-    expect(wired.transport.active).toBe(false);
     await wired.client.close();
   });
 
@@ -510,6 +534,88 @@ describe('ending a turn', () => {
     expect(message.parts.filter((part) => part.type === 'text')).toEqual([
       { type: 'text', text: 'Hello', state: 'done' },
     ]);
+    await wired.client.close();
+  });
+});
+
+describe('images', () => {
+  test('an image reaches the model as a file part', async () => {
+    const started = await start({ script: [{ kind: 'text', chunks: ['a dot'] }], vision: true });
+    const wired = await wire(started);
+    const message: BroappUIMessage = {
+      id: 'm1',
+      role: 'user',
+      parts: [{ type: 'text', text: 'what is this?' }, imagePart('shot.png')],
+    };
+    await chunks(await send(wired.transport, [message]));
+
+    const prompt = JSON.stringify(started.adapter.calls[0]);
+    expect(prompt).toContain('"type":"file"');
+    expect(prompt).toContain('image/png');
+    expect(prompt).toContain('shot.png');
+    await wired.client.close();
+  });
+
+  test('a model that cannot see refuses the turn', async () => {
+    // `vision` defaults to false, which is what the fake model has always said.
+    const started = await start({ script: [{ kind: 'text', chunks: ['a dot'] }] });
+    const wired = await wire(started);
+    const message: BroappUIMessage = {
+      id: 'm1',
+      role: 'user',
+      parts: [{ type: 'text', text: 'what is this?' }, imagePart('shot.png')],
+    };
+    const seen = await chunks(await send(wired.transport, [message]));
+
+    expect(seen.find((chunk) => chunk.type === 'error')?.errorText).toBe(
+      'The chosen model cannot read images. Pick one that can in Settings.',
+    );
+    expect(started.adapter.modelCalls).toBe(0);
+    await wired.client.close();
+  });
+
+  test('a later turn carries a placeholder, not the image again', async () => {
+    const started = await start({ script: [{ kind: 'text', chunks: ['ok'] }], vision: true });
+    const wired = await wire(started);
+    const first: BroappUIMessage = {
+      id: 'm1',
+      role: 'user',
+      parts: [{ type: 'text', text: 'what is this?' }, imagePart('shot.png')],
+    };
+    await chunks(
+      await send(wired.transport, [first, assistant('a dot', 'm2'), user('and now?', 'm3')]),
+    );
+
+    const prompt = JSON.stringify(started.adapter.calls[0]);
+    expect(prompt).toContain('[image: shot.png]');
+    // The history turn is a string: the picture was sent once, with the
+    // message it arrived on.
+    expect(prompt).not.toContain('"type":"file"');
+    await wired.client.close();
+  });
+
+  test('two large images travel through the bridge intact', async () => {
+    const started = await start({ script: [{ kind: 'text', chunks: ['seen'] }], vision: true });
+    const wired = await wire(started);
+    // 1,900,000 base64 characters each: under the contract's per-file bound,
+    // and together well past anything a single frame would carry by accident.
+    const big = (name: string): BroappUIMessage['parts'][number] => ({
+      type: 'file',
+      mediaType: 'image/png',
+      filename: name,
+      url: `data:image/png;base64,${'A'.repeat(1_900_000)}`,
+    });
+    const message: BroappUIMessage = {
+      id: 'm1',
+      role: 'user',
+      parts: [{ type: 'text', text: 'what are these?' }, big('one.png'), big('two.png')],
+    };
+    const seen = await chunks(await send(wired.transport, [message]));
+
+    expect(seen.some((chunk) => chunk.type === 'error')).toBe(false);
+    const prompt = JSON.stringify(started.adapter.calls[0]);
+    expect(prompt).toContain('one.png');
+    expect(prompt).toContain('two.png');
     await wired.client.close();
   });
 });

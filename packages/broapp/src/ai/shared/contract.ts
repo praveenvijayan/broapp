@@ -56,6 +56,19 @@ const chatTurn = s.object({
 });
 
 /**
+ * One image on a turn. `data` is base64 without the `data:` prefix.
+ *
+ * The bounds are the browser's contract as much as the host's: the panel
+ * downscales before it sends, and four images of two million characters still
+ * fit inside one Brobridge frame with room to spare.
+ */
+const chatFile = s.object({
+  name: s.string({ max: 200 }),
+  mediaType: s.string({ pattern: /image\/(png|jpeg|gif|webp)/ }),
+  data: s.string({ min: 1, max: 2_000_000 }),
+});
+
+/**
  * One stream event, flat because the validator has no unions.
  *
  * `input` and `output` are `unknown`: they carry whatever an application's own
@@ -131,6 +144,9 @@ export const aiContract = defineContract({
         message: s.string({ min: 1, max: 20_000 }),
         refs: s.array(s.string({ max: 200 }), { max: 50 }),
         history: s.array(chatTurn, { max: 100 }),
+        // Images travel with the turn they arrive on. History keeps a
+        // placeholder instead, because a transcript of base64 would not fit.
+        files: s.optional(s.array(chatFile, { max: 4 })),
       }),
       event: chatEvent,
       summary: 'One chat turn. Emits text, tool calls, confirmations and usage.',

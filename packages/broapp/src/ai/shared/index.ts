@@ -10,6 +10,7 @@ export type {
   AiSettings,
   BroappModel,
   ChatEvent,
+  ChatFile,
   ChatTurn,
   ProviderInfo,
   ToolPermission,

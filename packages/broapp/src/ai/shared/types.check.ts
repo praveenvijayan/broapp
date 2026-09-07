@@ -5,9 +5,14 @@
  * without changing the matching interface in `types.ts` fails `tsc` instead of
  * failing later, in the browser, as a shape that is almost right.
  */
-import type { OperationInput, OperationOutput, StreamEvent } from '../../shared/contract.ts';
+import type {
+  OperationInput,
+  OperationOutput,
+  StreamEvent,
+  StreamParams,
+} from '../../shared/contract.ts';
 import type { AiContract } from './contract.ts';
-import type { AiSettings, BroappModel, ChatEvent, ProviderInfo } from './types.ts';
+import type { AiSettings, BroappModel, ChatEvent, ChatFile, ProviderInfo } from './types.ts';
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
@@ -36,6 +41,12 @@ void providerMatch;
 
 const chatEventMatch: Equal<StreamEvent<AiContract, 'ai.chat'>, ChatEvent> = true;
 void chatEventMatch;
+
+const chatFileMatch: Equal<
+  NonNullable<StreamParams<AiContract, 'ai.chat'>['files']>[number],
+  ChatFile
+> = true;
+void chatFileMatch;
 
 // The update route is the only one that takes a partial: every field optional,
 // so a browser can change one setting without restating the rest.

@@ -215,6 +215,10 @@ intercept. A test asserts this layer never does it.
 | Local (Ollama, LM Studio, a loopback address) | Nothing leaves the computer. |
 | Remote (Anthropic, OpenAI, any other address) | The message, the conversation history, the full text of every resolved document, search snippets, the tool descriptions, and each tool call's input and output. |
 
+An image pasted onto or attached to a message is sent to the provider with that
+message, once: it travels with the turn it arrives on, and later turns carry a
+`[image: name]` placeholder in its place.
+
 `<AiSettings/>` shows this as a notice, always visible once a provider is
 chosen, and worded for the provider selected. **Do not hide it.** "Where do my
 notes go" is not a question a user should have to open a menu to answer, and it
@@ -263,7 +267,11 @@ cancellation.
   when it closes.
 - **No OS keychain.** The key is a `0600` file. Keychain, Credential Manager and
   Secret Service are a later addition.
-- **No images.** Text in, text out, whatever the model can do.
+- **Images are bounded.** Up to four per message, downscaled in the browser to
+  1568 px on the longest edge and about 1.5 MB each, and sent only with the
+  message they arrive on. A model whose `capabilities.vision` is false refuses
+  the turn. `broapp/ai/react`'s `AiChat` does not send images at all; the
+  attachment path is `broapp-ai-elements`.
 - **One turn at a time.** Sending while a turn is running is ignored.
 - **`ai.modelsList` needs a configured provider**, so a settings panel cannot
   preview another provider's models before switching to it.

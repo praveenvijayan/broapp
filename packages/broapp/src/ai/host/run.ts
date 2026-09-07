@@ -20,11 +20,12 @@ import type { HostLogger, StreamSink } from '../../host/app.ts';
 import type { PendingApprovals } from '../../host/approvals.ts';
 import type { ApprovalQuestion, Approver } from '../../host/gate.ts';
 import type { Effect } from '../../shared/contract.ts';
-import { fromTransportError, isPublicError } from '../../shared/errors.ts';
+import { fromTransportError, isPublicError, publicError } from '../../shared/errors.ts';
 import type { ToolPermission } from '../shared/types.ts';
 import type { ChatEvent, StreamChatParams } from './run-types.ts';
 
 import { AdapterError } from './adapter.ts';
+import type { AdapterConfig, ProviderAdapter } from './adapter.ts';
 import type { Registry } from './registry.ts';
 import type { AiContextProviders, AiTool, ContextDocument } from './tool.ts';
 
@@ -182,14 +183,70 @@ async function assembleContext(
   return fitToBudget(documents, deps.contextBudgetChars);
 }
 
-/** A message the model may see, without whatever a caller invented. */
+/**
+ * A message the model may see, without whatever a caller invented.
+ *
+ * Images ride on the message they arrived with and nowhere else. History turns
+ * are strings by contract, so an earlier turn's picture is already a
+ * `[image: name]` line the browser put there — the alternative, resending
+ * every image on every turn, would cost the user the same upload again on each
+ * question.
+ */
 function toModelMessages(params: StreamChatParams): ModelMessage[] {
   const messages: ModelMessage[] = params.history.map((turn) => ({
     role: turn.role,
     content: turn.content,
   }));
-  messages.push({ role: 'user', content: params.message });
+  const files = params.files ?? [];
+  if (files.length === 0) {
+    messages.push({ role: 'user', content: params.message });
+    return messages;
+  }
+  messages.push({
+    role: 'user',
+    content: [
+      { type: 'text', text: params.message },
+      // `data` is a base64 string, which `FilePart` accepts as `DataContent`.
+      ...files.map((file) => ({
+        type: 'file' as const,
+        mediaType: file.mediaType,
+        data: file.data,
+        filename: file.name,
+      })),
+    ],
+  });
   return messages;
+}
+
+/** Base64 characters allowed across every image on one message. */
+const MAX_FILE_CHARS_PER_TURN = 6_000_000;
+
+/**
+ * Whether the model chosen in Settings can read an image.
+ *
+ * The capability is on the adapter's model list, which is fetched from the
+ * provider — so this asks for that list once per turn, and only when the turn
+ * actually carries an image. A model the list does not mention is assumed to
+ * see: a custom server's list is often incomplete, and a provider that cannot
+ * read the image will say so far more precisely than a guess here would.
+ */
+async function modelCanSee(
+  resolved: { adapter: ProviderAdapter; config: AdapterConfig; modelId: string },
+  signal: AbortSignal,
+  logger: HostLogger,
+): Promise<boolean> {
+  try {
+    const models = await resolved.adapter.models(resolved.config, signal);
+    const found = models.find((model) => model.modelId === resolved.modelId);
+    return found === undefined ? true : found.capabilities.vision;
+  } catch (cause) {
+    // A listing that failed says nothing about the model. Refusing here would
+    // turn a provider hiccup into "your model cannot see", which is a lie.
+    logger.warn(
+      `[broapp] ai could not list models to check vision: ${String(cause instanceof Error ? cause.message : cause)}`,
+    );
+    return true;
+  }
 }
 
 /**
@@ -388,6 +445,22 @@ async function runTurn(
   // Throws a PublicError when nothing is configured. `runStream` in host/app.ts
   // turns that into the right thing on the wire, so it is not caught here.
   const resolved = await deps.registry.resolve();
+
+  // Both checks come before anything is emitted, so a turn that cannot carry
+  // its images fails as a whole rather than half-answering.
+  const files = params.files ?? [];
+  if (files.length > 0) {
+    const characters = files.reduce((total, file) => total + file.data.length, 0);
+    if (characters > MAX_FILE_CHARS_PER_TURN) {
+      throw publicError.invalidInput('Images on one message are limited to about 4 MB together.');
+    }
+    if (!(await modelCanSee(resolved, sink.signal, deps.logger))) {
+      throw publicError.rejected(
+        'The chosen model cannot read images. Pick one that can in Settings.',
+      );
+    }
+  }
+
   const documents = await assembleContext(params, deps, sink.signal);
 
   // One approver per run. The request identifier the gate will use is

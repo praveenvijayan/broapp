@@ -14,5 +14,8 @@ export type {
   BroappUIMessage,
 } from './transport.ts';
 
+export { IMAGE_LIMITS, prepareImage, splitDataUrl } from './images.ts';
+export type { PreparedImage } from './images.ts';
+
 export { useBroappChat } from './use-broapp-chat.ts';
 export type { BroappChatHook, BroappChatOptions } from './use-broapp-chat.ts';

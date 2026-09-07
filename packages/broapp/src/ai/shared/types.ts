@@ -62,6 +62,22 @@ export interface ChatTurn {
 }
 
 /**
+ * One image sent with a chat turn.
+ *
+ * `data` is base64 with no `data:` prefix, at most 2,000,000 characters, and
+ * `mediaType` is one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`.
+ * At most four travel with one message, and they travel only with the message
+ * they arrive on: a later turn's `history` keeps the line
+ * `[image: <name>]` in place of the image itself, because a transcript of
+ * base64 would not fit inside the contract's bound on a turn.
+ */
+export interface ChatFile {
+  name: string;
+  mediaType: string;
+  data: string;
+}
+
+/**
  * One event on the `ai.chat` stream. Flat on purpose: the `s` validator has
  * no unions, so the discriminant is `type` and the other fields are
  * optional. Which fields are present for which type:

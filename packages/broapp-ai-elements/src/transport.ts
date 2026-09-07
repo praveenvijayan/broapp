@@ -11,11 +11,13 @@
  * deliberately unused: they mark a call answered in client state before the
  * host has decided, and their follow-up would start a second run.
  */
-import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
-import type { ChatEvent, ChatTurn } from 'broapp/ai';
+import type { ChatTransport, FileUIPart, UIMessage, UIMessageChunk } from 'ai';
+import type { ChatEvent, ChatFile, ChatTurn } from 'broapp/ai';
 // Types only. The forbidden direction is `broapp` importing the AI SDK, not a
 // package beside it importing `broapp`'s own types.
 import type { AiClient, ToolCallState } from 'broapp/ai/react';
+
+import { IMAGE_LIMITS, prepareImage } from './images.ts';
 
 /** Per-message metadata this transport writes. */
 export interface BroappMessageMetadata {
@@ -70,9 +72,9 @@ function textOf(message: BroappUIMessage): string {
     .join('\n\n');
 }
 
-/** Whether the message carries anything the host cannot take yet. */
-function hasFile(message: BroappUIMessage): boolean {
-  return message.parts.some((part) => part.type === 'file');
+/** The attachments on a message, in the order they were added. */
+function filesOf(message: BroappUIMessage): FileUIPart[] {
+  return message.parts.filter((part) => part.type === 'file');
 }
 
 /**
@@ -159,12 +161,9 @@ export function createBroappChatTransport(
       if (message === '') {
         return Promise.resolve(only({ type: 'error', errorText: 'Nothing to send.' }));
       }
-      if (hasFile(last)) {
-        // Refused rather than dropped: sending the words and silently losing
-        // the picture answers a question nobody asked.
-        return Promise.resolve(
-          only({ type: 'error', errorText: 'This version cannot send attachments yet.' }),
-        );
+      const attachments = filesOf(last);
+      if (attachments.length > IMAGE_LIMITS.maxFiles) {
+        return Promise.resolve(only({ type: 'error', errorText: 'Up to four images per message.' }));
       }
 
       const history = toHistory(messages.slice(0, -1));
@@ -373,12 +372,32 @@ export function createBroappChatTransport(
           abortSignal?.addEventListener('abort', stop, { once: true });
           emit({ type: 'start', messageId: `${id}-assistant` });
 
+          let files: ChatFile[];
+          try {
+            // Prepared before anything is subscribed: an image that cannot be
+            // read must not leave a half-sent turn behind.
+            files = await Promise.all(attachments.map((part) => prepareImage(part)));
+          } catch (cause) {
+            emit({
+              type: 'error',
+              errorText: cause instanceof Error ? cause.message : 'That image could not be sent.',
+            });
+            finish();
+            return;
+          }
+
           try {
             const client = await options.client();
             if (closed) return;
             const opened = await client.subscribe(
               'ai.chat',
-              { runId: id, message, refs, history },
+              {
+                runId: id,
+                message,
+                refs,
+                history,
+                ...(files.length === 0 ? {} : { files }),
+              },
               {
                 onEvent: apply,
                 onDone: () => {
