@@ -13,6 +13,7 @@
     "./shared": "./src/shared/index.ts",
     "./child": "./src/child/index.ts",
     "./host": "./src/host/index.ts",
+    "./engineer": "./src/engineer/index.ts",
     "./launcher": "./src/launcher/index.ts",
     "./spec": "./src/spec/index.ts",
     "./workflows": "./src/workflows/index.ts",
@@ -21,13 +22,19 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "broapp": "workspace:*"
+    "broapp": "workspace:*",
+    "broapp-ai-anthropic": "workspace:*",
+    "broapp-ai-compatible": "workspace:*"
   },
   "peerDependencies": {
+    "ai": "7.0.93",
     "react": ">=18"
   },
   "peerDependenciesMeta": {
     "react": {
+      "optional": true
+    },
+    "ai": {
       "optional": true
     }
   },
@@ -39,6 +46,7 @@
     "broapp-autoapp": "src/launcher/main.ts"
   },
   "scripts": {
-    "build:launcher": "bun build --compile --bytecode --minify src/launcher/main.ts --outfile dist/broapp-autoapp"
+    "build:page": "bun run scripts/build-page.ts",
+    "build:launcher": "bun run build:page && bun build --compile --bytecode --minify src/launcher/main.ts --outfile dist/broapp-autoapp"
   }
 }

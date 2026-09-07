@@ -31,7 +31,12 @@ import type { AiContextProviders, AiTool, ContextDocument } from './tool.ts';
 /** What the run loop needs from the `Ai` that owns it. */
 export interface RunDeps {
   readonly registry: Registry;
-  readonly app: { readonly name: string; readonly purpose: string; readonly terminology?: readonly string[] };
+  readonly app: {
+    readonly name: string;
+    readonly purpose: string;
+    readonly terminology?: readonly string[];
+    readonly instructions?: string;
+  };
   readonly context: AiContextProviders;
   readonly tools: Record<string, AiTool>;
   readonly contextBudgetChars: number;
@@ -127,6 +132,12 @@ export function buildSystemPrompt(deps: RunDeps, documents: readonly ContextDocu
     `You are the assistant built into "${deps.app.name}". ${deps.app.purpose}`,
   ];
   if (terms.length > 0) lines.push(`Terms used in this application: ${terms.join(', ')}`);
+  // Verbatim, and before the rules: an application that needs standing
+  // instructions needs them read as part of what it is, not as an afterthought
+  // among the documents.
+  if (deps.app.instructions !== undefined && deps.app.instructions !== '') {
+    lines.push('', deps.app.instructions);
+  }
   lines.push(
     '',
     '# Rules',

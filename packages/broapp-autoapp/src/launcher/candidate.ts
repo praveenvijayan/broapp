@@ -24,8 +24,10 @@ import type { HostLogger } from 'broapp/host';
 import { checkViewsAgainstContract, parseViews } from '../views/index.ts';
 import type { ViewsSpec } from '../views/types.ts';
 import {
+  canonicalJson,
   exportContract,
   parseSpec,
+  readRelease,
   releaseId as computeReleaseId,
   writeRelease,
   type AppSpec,
@@ -251,15 +253,48 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
       writeRelease(params.layout, spec, { page, host: hostBytes });
       return { ok: true, releaseId, spec, rebuilt: true };
     } catch (cause) {
-      if ((cause as { code?: string }).code === 'conflict') {
+      if ((cause as { code?: string }).code !== 'conflict') {
+        return { ok: false, problems: [{ stage: 'spec', message: reason(cause) }] };
+      }
+      // The identity already exists. Either nothing changed — a real no-op —
+      // or something changed that the identity does not cover.
+      //
+      // A release is named by its page, its host bundle and its contract.
+      // Acceptance examples, migrations metadata and capabilities are part of
+      // the specification but not of the name, so a change to only those hashes
+      // to the release it came from. Reporting that as a success would leave
+      // somebody looking at a stored release that does not contain their
+      // change; saying so is the honest outcome.
+      const stored = readRelease(params.layout, params.appId, releaseId);
+      // `createdAt` is when the build ran, not part of what was built, so an
+      // identical rebuild differs by it and by nothing else.
+      if (withoutBuildTime(stored) === withoutBuildTime(spec)) {
         params.logger?.warn(`[autoapp] release ${releaseId} was already built`);
         return { ok: true, releaseId, spec, rebuilt: false };
       }
-      return { ok: false, problems: [{ stage: 'spec', message: reason(cause) }] };
+      return {
+        ok: false,
+        problems: [
+          {
+            stage: 'spec',
+            message: `this change does not alter the page, the host bundle or the contract, so it hashes to release ${releaseId}, which already exists. Acceptance examples, migrations and capabilities are part of the specification but not of a release's identity; change something the identity covers, or edit the existing release's inputs.`,
+          },
+        ],
+      };
     }
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+/**
+ * A specification without the moment it was assembled.
+ *
+ * Two builds of the same sources differ in `createdAt` and nothing else, and
+ * that is not a difference anybody means.
+ */
+function withoutBuildTime(spec: AppSpec): string {
+  return canonicalJson({ ...spec, manifest: { ...spec.manifest, createdAt: 0 } });
 }
 
 /** A cheap shape test, for finding the view specification among a module's exports. */

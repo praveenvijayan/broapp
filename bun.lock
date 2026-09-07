@@ -129,17 +129,24 @@
     "packages/broapp-autoapp": {
       "name": "broapp-autoapp",
       "version": "0.1.0",
+      "bin": {
+        "broapp-autoapp": "src/launcher/main.ts",
+      },
       "dependencies": {
         "broapp": "workspace:*",
+        "broapp-ai-anthropic": "workspace:*",
+        "broapp-ai-compatible": "workspace:*",
       },
       "devDependencies": {
         "@types/react": "^19.0.0",
         "react": "^19.0.0",
       },
       "peerDependencies": {
+        "ai": "7.0.93",
         "react": ">=18",
       },
       "optionalPeers": [
+        "ai",
         "react",
       ],
     },

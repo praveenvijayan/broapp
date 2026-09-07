@@ -23,6 +23,10 @@ export interface AppLayout {
   readonly dataNext: string;
   dataPrev(timestamp: number): string;
   readonly snapshots: string;
+  /** Data copies a preview child runs against, one per release being looked at. */
+  preview(releaseId: string): string;
+  /** Previous contents of files an engineer changed, when git is not available. */
+  readonly sourceHistory: string;
   /** The pointer file naming the active release. */
   readonly current: string;
   readonly grants: string;
@@ -72,6 +76,15 @@ export function layout(root: string): Layout {
         dataNext: join(dir, 'data-next'),
         dataPrev: (timestamp: number) => join(dir, `data-prev-${String(timestamp)}`),
         snapshots: join(dir, 'snapshots'),
+        preview(releaseId: string): string {
+          if (!RELEASE_ID_PATTERN.test(releaseId)) {
+            throw new TypeError(
+              `release id ${JSON.stringify(releaseId)} must be 32 lowercase hex characters`,
+            );
+          }
+          return join(dir, 'previews', releaseId);
+        },
+        sourceHistory: join(dir, 'source-history'),
         current: join(dir, 'current'),
         grants: join(dir, 'grants.json'),
       };

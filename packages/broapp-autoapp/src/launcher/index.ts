@@ -5,6 +5,15 @@
  * reaches `node:fs`, `bun:sqlite` and `Bun.spawn`, and it is the thing that
  * runs applications rather than something an application runs.
  */
+export { createLauncherApp, createLauncherGate } from './app.ts';
+export type { CreateLauncherAppOptions, LauncherApp } from './app.ts';
+
+export { launcherContract } from './contract.ts';
+export type { LauncherContract } from './contract.ts';
+
+export { createLauncherTab } from './tab.ts';
+export type { CreateLauncherTabOptions, LauncherTab } from './tab.ts';
+
 export { createSupervisor } from './supervisor.ts';
 export type {
   ChildHandle,

@@ -23,12 +23,37 @@
     {
       "id": "list-works",
       "title": "The note list can be read",
-      "steps": [{ "route": "notes.list", "input": {} }]
+      "steps": [
+        {
+          "route": "notes.list",
+          "input": {}
+        }
+      ]
     },
     {
       "id": "status-works",
       "title": "The database reports itself healthy",
-      "steps": [{ "route": "notes.status", "input": null }]
+      "steps": [
+        {
+          "route": "notes.status",
+          "input": null
+        }
+      ]
+    },
+    {
+      "id": "list-empty-filter",
+      "title": "Filtering to done notes on an empty database returns nothing",
+      "steps": [
+        {
+          "route": "notes.list",
+          "input": {
+            "done": true
+          },
+          "expect": {
+            "notes": []
+          }
+        }
+      ]
     }
   ]
 }

@@ -35,6 +35,15 @@ export interface AiAppDescription {
   readonly name: string;
   readonly purpose: string;
   readonly terminology?: readonly string[];
+  /**
+   * Extra standing instructions, appended verbatim after the purpose.
+   *
+   * For an assistant whose job needs more than a sentence to describe — the
+   * shape of a workspace it edits, a sequence it has to follow, things it may
+   * not do. It is host-authored text, not anything a browser or a model
+   * supplied, and it goes in front of the documents rather than among them.
+   */
+  readonly instructions?: string;
 }
 
 /** Options for {@link createAi}. */

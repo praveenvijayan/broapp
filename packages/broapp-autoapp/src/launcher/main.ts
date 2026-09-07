@@ -11,10 +11,16 @@
  * underneath: a CLI over the supervisor, the builder and the activation
  * sequence.
  */
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import launcherPage from '../../dist/launcher-page.html' with { type: 'text' };
 
-import { openBrowser } from 'broapp/host';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+import { anthropic } from 'broapp-ai-anthropic';
+import { customServer, ollama, openai } from 'broapp-ai-compatible';
+import { createGate, ensureDataDir, openBrowser, startApp } from 'broapp/host';
+
+import { createRunStore } from '../host/run-store.ts';
 
 import { runChild, runMigrate } from '../child/run-child.ts';
 import {
@@ -34,10 +40,20 @@ import { buildCandidate } from './candidate.ts';
 import { openJournal, type Journal } from './journal.ts';
 import { recover } from './recover.ts';
 import { createSupervisor, type Supervisor } from './supervisor.ts';
+import { createLauncherTab } from './tab.ts';
+
+/**
+ * The launcher's own page, inlined into the binary.
+ *
+ * `@types/bun` declares every `*.html` import as `HTMLBundle` without looking at
+ * the import attribute. With `{ type: "text" }` the value really is a string.
+ */
+const page = launcherPage as unknown as string;
 
 const HELP = `broapp-autoapp
 
 Usage:
+  broapp-autoapp                        Open the launcher's own tab
   broapp-autoapp serve <appId> [--no-open]
   broapp-autoapp import <sourceDir> --as <appId> [--grant]
   broapp-autoapp build <appId>
@@ -121,6 +137,63 @@ async function serve(
   return (await child.exited) ?? 0;
 }
 
+/**
+ * The launcher's own tab.
+ *
+ * A Broapp application like any other, serving its own page on its own
+ * loopback bridge. Its data directory is the launcher's, which is where its AI
+ * settings and its own run history live — separate from every application's.
+ */
+async function openLauncher(
+  root: Layout,
+  journal: Journal,
+  supervisor: Supervisor,
+  open: boolean,
+): Promise<number> {
+  for (const recovered of await recover({ layout: root, journal, supervisor, start: false })) {
+    console.log(`recovered: ${recovered.finding}`);
+  }
+
+  const dataDir = join(root.root, 'launcher');
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  const store = createRunStore(dataDir);
+  store.markUnknownOnStart();
+
+  const tab = createLauncherTab({
+    layout: root,
+    supervisor,
+    journal,
+    // The launcher's own gate. Its tab's clicks are channel `user`; the
+    // engineer's tools arrive on channel `ai` through the same door.
+    gate: createGate({
+      appId: 'launcher',
+      releaseId: 'launcher',
+      recorder: store.recorder(),
+    }),
+    dataDir,
+    store,
+    providers: [anthropic(), ollama(), openai(), customServer()],
+  });
+
+  const running = await startApp({
+    page,
+    appName: 'Autoapp',
+    version: '0.1.0',
+    mode: 'background',
+    openBrowser: open,
+    register: (bridge) => tab.mount(bridge),
+    isBusy: () => tab.ai.activeStreams > 0,
+    onShutdown: async () => {
+      tab.ai.abortAll('the launcher is shutting down');
+      // Applications the launcher started do not outlive it.
+      await supervisor.stopAll(STOP_DEADLINE_MS);
+      store.close();
+    },
+  });
+
+  return await running.done;
+}
+
 /** `import <sourceDir> --as <appId>` — the developer's way in. */
 async function importApp(
   root: Layout,
@@ -184,6 +257,16 @@ function flagValue(argv: readonly string[], name: string): string | undefined {
   return at < 0 ? undefined : argv[at + 1];
 }
 
+/**
+ * The nth positional argument, skipping flags.
+ *
+ * `serve --no-open` has no application in it, and reading `argv[1]` would make
+ * `--no-open` the application's name.
+ */
+function positional(argv: readonly string[], index: number): string | undefined {
+  return argv.filter((argument) => !argument.startsWith('-'))[index];
+}
+
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   const command = argv[0];
@@ -193,9 +276,9 @@ async function main(): Promise<number> {
   if (command === '--child') return await runChild(argv.slice(1));
   if (command === '--migrate') return await runMigrate(argv.slice(1));
 
-  if (command === undefined || command === '-h' || command === '--help') {
+  if (command === '-h' || command === '--help') {
     console.log(HELP);
-    return command === undefined ? 1 : 0;
+    return 0;
   }
 
   const root = layout(defaultRoot());
@@ -206,21 +289,29 @@ async function main(): Promise<number> {
 
   try {
     switch (command) {
+      case undefined:
+      case 'open':
+        return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'));
+
       case 'serve': {
-        const appId = argv[1];
-        if (appId === undefined) return usage('serve <appId>');
+        const appId = positional(argv, 1);
+        // `serve` with no application is the launcher's own tab, which is the
+        // ordinary way in: from there a person opens whichever they want.
+        if (appId === undefined) {
+          return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'));
+        }
         return await serve(root, journal, supervisor, appId, !argv.includes('--no-open'));
       }
 
       case 'import': {
-        const sourceDir = argv[1];
+        const sourceDir = positional(argv, 1);
         const appId = flagValue(argv, '--as');
         if (sourceDir === undefined || appId === undefined) return usage('import <sourceDir> --as <appId>');
         return await importApp(root, sourceDir, appId, argv.includes('--grant'));
       }
 
       case 'build': {
-        const appId = argv[1];
+        const appId = positional(argv, 1);
         if (appId === undefined) return usage('build <appId>');
         const built = await buildCandidate({ layout: root, appId });
         if (!built.ok) {
@@ -232,8 +323,8 @@ async function main(): Promise<number> {
       }
 
       case 'activate': {
-        const appId = argv[1];
-        const releaseId = argv[2];
+        const appId = positional(argv, 1);
+        const releaseId = positional(argv, 2);
         if (appId === undefined || releaseId === undefined) return usage('activate <appId> <releaseId>');
         const result = await activate({ layout: root, supervisor, journal, appId, releaseId });
         if (!result.ok) {
@@ -246,7 +337,7 @@ async function main(): Promise<number> {
       }
 
       case 'releases': {
-        const appId = argv[1];
+        const appId = positional(argv, 1);
         if (appId === undefined) return usage('releases <appId>');
         const current = readCurrent(root, appId);
         for (const release of listReleases(root, appId)) {
@@ -259,7 +350,7 @@ async function main(): Promise<number> {
       }
 
       case 'status': {
-        const appId = argv[1];
+        const appId = positional(argv, 1);
         if (appId === undefined) return usage('status <appId>');
         const current = readCurrent(root, appId);
         console.log(`current: ${current ?? 'none'}`);
@@ -283,7 +374,9 @@ async function main(): Promise<number> {
     // Every command but `serve` is one-shot, and a live child's IPC channel is
     // a handle that keeps this process's event loop open. Leaving one behind
     // would make the command appear to hang after it had finished.
-    if (command !== 'serve') await supervisor.stopAll(STOP_DEADLINE_MS);
+    if (command !== 'serve' && command !== 'open' && command !== undefined) {
+      await supervisor.stopAll(STOP_DEADLINE_MS);
+    }
   }
 }
 

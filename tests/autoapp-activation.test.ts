@@ -204,6 +204,35 @@ describe.skipIf(!available)('buildCandidate', () => {
     expect(result.problems.some((p) => p.message.includes('items.ping'))).toBe(true);
   });
 
+  test('a change the release identity cannot represent is refused, not called a success', async () => {
+    const where = makeWorld();
+    const first = await build(where);
+    const app = where.root.app('items');
+
+    // Acceptance examples are part of a specification but not of a release's
+    // identity — which is the page, the host bundle and the contract. So this
+    // change hashes to the release it came from, and the stored release cannot
+    // hold it. Reporting success here would leave somebody looking at a release
+    // that does not contain the check they just added.
+    const manifestPath = join(app.source, 'autoapp.json');
+    const manifest = JSON.parse(await Bun.file(manifestPath).text()) as {
+      acceptance: { id: string; title: string; steps: unknown[] }[];
+    };
+    manifest.acceptance.push({
+      id: 'added-later',
+      title: 'Something new to check',
+      steps: [{ route: 'items.list', input: null }],
+    });
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const result = await buildCandidate({ layout: where.root, appId: 'items' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.problems[0]?.stage).toBe('spec');
+    expect(result.problems[0]?.message).toContain(first);
+    expect(result.problems[0]?.message).toContain('not of a release');
+  });
+
   test('views naming a route that is not there is a views problem', async () => {
     const where = makeWorld();
     const app = where.root.app('items');

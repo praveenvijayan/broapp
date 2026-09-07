@@ -13,3 +13,4 @@ tests/.autoapp-run/
 tsconfig.tsbuildinfo
 *.tsbuildinfo
 .autoapp-manual/
+.autoapp-demo/
