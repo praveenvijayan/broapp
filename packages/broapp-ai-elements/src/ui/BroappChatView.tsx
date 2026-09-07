@@ -24,6 +24,7 @@ import {
 } from './components/ai-elements/conversation.tsx';
 import { Message, MessageContent, MessageResponse } from './components/ai-elements/message.tsx';
 import {
+  ATTACHMENT_UNREADABLE,
   PromptInput,
   PromptInputBody,
   PromptInputButton,
@@ -229,7 +230,13 @@ function AddImages(): React.ReactElement {
   );
 }
 
-/** What is attached but not yet sent, with a way to take one back off. */
+/**
+ * What is attached but not yet sent, with a way to take one back off.
+ *
+ * A chip appears the moment a file arrives, before it has been read into a
+ * `data:` URL; until then it has no thumbnail and the send button is disabled,
+ * so the dimmed chip is what says why.
+ */
 function Pending(): React.ReactElement | null {
   const attachments = usePromptInputAttachments();
   if (attachments.files.length === 0) return null;
@@ -237,7 +244,12 @@ function Pending(): React.ReactElement | null {
     <PromptInputHeader>
       <Attachments variant="list">
         {attachments.files.map((file) => (
-          <Attachment data={file} key={file.id} onRemove={() => attachments.remove(file.id)}>
+          <Attachment
+            className={file.pending === true ? 'opacity-50' : undefined}
+            data={file}
+            key={file.id}
+            onRemove={() => attachments.remove(file.id)}
+          >
             <AttachmentPreview />
             <AttachmentInfo />
             <AttachmentRemove />
@@ -319,7 +331,15 @@ export function BroappChatView({
         // Before downscaling: what the browser shrinks is measured after this.
         maxFileSize={10 * 1024 * 1024}
         multiple
-        onError={(failure) => setAttachmentError(ATTACHMENT_ERRORS[failure.code])}
+        // A file that could not be read says so itself; every other refusal
+        // is one of three generic upstream sentences, replaced here.
+        onError={(failure) =>
+          setAttachmentError(
+            failure.message === ATTACHMENT_UNREADABLE
+              ? failure.message
+              : ATTACHMENT_ERRORS[failure.code],
+          )
+        }
         onSubmit={(submitted) => {
           setAttachmentError(null);
           onSend({ text: submitted.text, files: submitted.files });

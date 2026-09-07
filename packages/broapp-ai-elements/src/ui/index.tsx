@@ -26,6 +26,7 @@ export {
   MessageResponse,
 } from './components/ai-elements/message.tsx';
 export {
+  ATTACHMENT_UNREADABLE,
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
@@ -35,6 +36,12 @@ export {
   PromptInputTools,
   usePromptInputAttachments,
 } from './components/ai-elements/prompt-input.tsx';
+export type {
+  PromptInputAttachment,
+  PromptInputAttachmentError,
+} from './components/ai-elements/prompt-input.tsx';
+export { settleForSubmit } from './components/ai-elements/pending-files.ts';
+export type { PendingEntry } from './components/ai-elements/pending-files.ts';
 export {
   Attachment,
   AttachmentInfo,

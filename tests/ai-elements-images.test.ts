@@ -9,6 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { IMAGE_LIMITS, intrinsicSize, prepareImage, splitDataUrl } from 'broapp-ai-elements';
+import { settleForSubmit } from 'broapp-ai-elements/ui';
 
 /** A one-pixel PNG, as `PromptInput` would hand it over. */
 const PNG =
@@ -111,5 +112,44 @@ describe('IMAGE_LIMITS', () => {
       maxBase64: 2_000_000,
       accept: 'image/png,image/jpeg,image/gif,image/webp',
     });
+  });
+});
+
+describe('settleForSubmit', () => {
+  /** An entry as `PromptInput` holds it, in the two states it can be in. */
+  const done = (id: string) => ({ id, url: `data:image/png;base64,${id}` });
+  const waiting = (id: string) => ({ id, pending: true, url: '' });
+
+  test('waits for a read still running, and returns what it filled in', async () => {
+    let entries = [done('a'), waiting('b')];
+    const read = Promise.resolve().then(() => {
+      entries = [done('a'), done('b')];
+    });
+    const ready = await settleForSubmit(() => entries, new Map([['b', read]]));
+    expect(ready.map((entry) => entry.id)).toEqual(['a', 'b']);
+  });
+
+  test('a read that fails does not take the rest of the turn with it', async () => {
+    // The failed read has already removed its own entry and said so; the
+    // other image is still what the person attached.
+    const entries = [done('a')];
+    const failed = Promise.reject(new Error('unreadable'));
+    const ready = await settleForSubmit(() => entries, new Map([['b', failed]]));
+    expect(ready.map((entry) => entry.id)).toEqual(['a']);
+  });
+
+  test('a file removed while it was being read is not sent', async () => {
+    let entries = [done('a'), waiting('b')];
+    const read = Promise.resolve().then(() => {
+      entries = [done('a')];
+    });
+    const ready = await settleForSubmit(() => entries, new Map([['b', read]]));
+    expect(ready.map((entry) => entry.id)).toEqual(['a']);
+  });
+
+  test('with nothing pending it returns the complete entries only', async () => {
+    const entries = [done('a'), waiting('b')];
+    const ready = await settleForSubmit(() => entries, new Map());
+    expect(ready.map((entry) => entry.id)).toEqual(['a']);
   });
 });

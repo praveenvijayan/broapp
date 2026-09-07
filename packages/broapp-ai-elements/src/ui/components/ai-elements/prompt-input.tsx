@@ -41,6 +41,9 @@ import {
   TooltipTrigger,
 } from "../ui/tooltip.tsx";
 import { cn } from "../../lib/utils.ts";
+// LOCAL: 04c: the send waits for every read. See pending-files.ts.
+import { settleForSubmit } from "./pending-files.ts";
+// END LOCAL
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
   CornerDownLeftIcon,
@@ -87,6 +90,10 @@ import {
 // submit is a `fetch` of that blob: URL, which the policy also refuses — so
 // the turn would be sent with an unreadable URL. Reading the File itself needs
 // neither.
+//
+// Reading is asynchronous, which is a race of its own: LOCAL 04c below holds
+// a send until every read has finished, so the turn carries what the person
+// attached to it.
 const readAsDataUrl = (file: File): Promise<string> =>
   // oxlint-disable-next-line eslint-plugin-promise(avoid-new)
   new Promise((resolve) => {
@@ -98,6 +105,88 @@ const readAsDataUrl = (file: File): Promise<string> =>
     reader.onerror = () => resolve("");
     reader.readAsDataURL(file);
   });
+
+// An attachment exists before its bytes do: an entry is created the moment a
+// file arrives, with an empty `url` and `pending: true`, and its read patches
+// the url in later. Every list of attachments in this file carries that shape.
+export type PromptInputAttachment = FileUIPart & {
+  id: string;
+  pending?: boolean;
+};
+
+/** What `PromptInput` reports through `onError`, and `add` through its own. */
+export interface PromptInputAttachmentError {
+  code: "max_files" | "max_file_size" | "accept";
+  message: string;
+}
+
+/** What a person is told when a file arrived but its bytes could not. */
+export const ATTACHMENT_UNREADABLE = "That file could not be read.";
+
+/** Where a read writes when it finishes, and where it says that it failed. */
+interface ReadTracking {
+  /** Reads still running, keyed by entry id. A submit waits on these. */
+  readonly pending: Map<string, Promise<unknown>>;
+  patch: (id: string, url: string) => void;
+  drop: (id: string) => void;
+  onError?: (error: PromptInputAttachmentError) => void;
+}
+
+/** A file with the id its entry will carry, so a read can find it again. */
+const withIds = (files: File[] | FileList): { id: string; file: File }[] =>
+  [...files].map((file) => ({ file, id: nanoid() }));
+
+/** The entries an arrival creates, before any of them has been read. */
+const entriesFor = (
+  incoming: readonly { readonly id: string; readonly file: File }[]
+): PromptInputAttachment[] =>
+  incoming.map(({ file, id }) => ({
+    filename: file.name,
+    id,
+    mediaType: file.type,
+    pending: true,
+    type: "file" as const,
+    url: "",
+  }));
+
+/**
+ * Start one read per file and track it.
+ *
+ * The chips are already on screen when this is called; all that is missing is
+ * the data URL. A read that fails takes its own entry away rather than leaving
+ * a chip that could never be sent.
+ */
+const startReads = (
+  incoming: readonly { readonly id: string; readonly file: File }[],
+  tracking: ReadTracking
+): void => {
+  for (const { id, file } of incoming) {
+    const read = readAsDataUrl(file).then((url) => {
+      // `readAsDataUrl` answers with an empty string when the read failed.
+      if (url === "") {
+        throw new Error("The file could not be read.");
+      }
+      tracking.patch(id, url);
+      return url;
+    });
+    tracking.pending.set(id, read);
+    void read
+      .catch(() => {
+        tracking.drop(id);
+        tracking.onError?.({
+          code: "accept",
+          message: ATTACHMENT_UNREADABLE,
+        });
+      })
+      .finally(() => {
+        // Only this read's own promise: removing an entry already deletes it,
+        // and deleting somebody else's would drop a read a submit waits for.
+        if (tracking.pending.get(id) === read) {
+          tracking.pending.delete(id);
+        }
+      });
+  }
+};
 // END LOCAL
 
 const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
@@ -201,8 +290,18 @@ const captureScreenshot = async (): Promise<File | null> => {
 // ============================================================================
 
 export interface AttachmentsContext {
-  files: (FileUIPart & { id: string })[];
-  add: (files: File[] | FileList) => void;
+  files: PromptInputAttachment[];
+  // LOCAL: 04c: `add` reports a failed read through the caller's own handler.
+  // `pendingReads` and `currentFiles` are what a submit waits on and reads:
+  // `files` is a render behind by the time a read has finished, and a send in
+  // that window would go out without the image.
+  add: (
+    files: File[] | FileList,
+    onError?: (error: PromptInputAttachmentError) => void
+  ) => void;
+  pendingReads: ReadonlyMap<string, Promise<unknown>>;
+  currentFiles: () => readonly PromptInputAttachment[];
+  // END LOCAL
   remove: (id: string) => void;
   clear: () => void;
   openFileDialog: () => void;
@@ -276,64 +375,90 @@ export const PromptInputProvider = ({
   const clearInput = useCallback(() => setTextInput(""), []);
 
   // ----- attachments state (global when wrapped)
-  const [attachmentFiles, setAttachmentFiles] = useState<
-    (FileUIPart & { id: string })[]
-  >([]);
+  const [attachmentFiles, setAttachmentFiles] = useState<PromptInputAttachment[]>(
+    []
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // oxlint-disable-next-line eslint(no-empty-function)
   const openRef = useRef<() => void>(() => {});
 
-  const add = useCallback((files: File[] | FileList) => {
-    const incoming = [...files];
-    if (incoming.length === 0) {
-      return;
-    }
+  // LOCAL: 04c: the ref is the list, the state is the picture of it.
+  //
+  // A read finishes outside React's own scheduling, and `handleSubmit` looks
+  // at the entries immediately after awaiting it — before any re-render has
+  // run. Reading state there shows the entry as still pending and drops the
+  // image from the turn, which is the bug this edit exists for. Every change
+  // goes through `commit`, so the ref is right the moment it happens and the
+  // state catches up when React is ready to draw.
+  const entriesRef = useRef<PromptInputAttachment[]>([]);
+  const pendingReads = useRef(new Map<string, Promise<unknown>>());
 
-    // LOCAL: data URLs, read asynchronously. See readAsDataUrl.
-    void Promise.all(
-      incoming.map(async (file) => ({
-        filename: file.name,
-        id: nanoid(),
-        mediaType: file.type,
-        type: "file" as const,
-        url: await readAsDataUrl(file),
-      }))
-    ).then((entries) => setAttachmentFiles((prev) => [...prev, ...entries]));
-    // END LOCAL
+  const commit = useCallback((next: PromptInputAttachment[]) => {
+    entriesRef.current = next;
+    setAttachmentFiles(next);
   }, []);
 
-  const remove = useCallback((id: string) => {
-    setAttachmentFiles((prev) => {
-      const found = prev.find((f) => f.id === id);
+  const currentFiles = useCallback(
+    (): readonly PromptInputAttachment[] => entriesRef.current,
+    []
+  );
+
+  const add = useCallback(
+    (
+      files: File[] | FileList,
+      onError?: (error: PromptInputAttachmentError) => void
+    ) => {
+      const incoming = withIds(files);
+      if (incoming.length === 0) {
+        return;
+      }
+      // The chip goes up now — the paste has happened, and that is what a
+      // person expects to see — and the read patches the url in after.
+      commit([...entriesRef.current, ...entriesFor(incoming)]);
+      startReads(incoming, {
+        drop: (id) => commit(entriesRef.current.filter((f) => f.id !== id)),
+        onError,
+        patch: (id, url) =>
+          commit(
+            entriesRef.current.map((f) =>
+              f.id === id ? { ...f, pending: false, url } : f
+            )
+          ),
+        pending: pendingReads.current,
+      });
+    },
+    [commit]
+  );
+
+  const remove = useCallback(
+    (id: string) => {
+      // Nobody is waiting for this file any more, so a submit must not wait
+      // for its read either.
+      pendingReads.current.delete(id);
+      const found = entriesRef.current.find((f) => f.id === id);
       if (found?.url) {
         URL.revokeObjectURL(found.url);
       }
-      return prev.filter((f) => f.id !== id);
-    });
-  }, []);
+      commit(entriesRef.current.filter((f) => f.id !== id));
+    },
+    [commit]
+  );
 
   const clear = useCallback(() => {
-    setAttachmentFiles((prev) => {
-      for (const f of prev) {
-        if (f.url) {
-          URL.revokeObjectURL(f.url);
-        }
+    pendingReads.current.clear();
+    for (const f of entriesRef.current) {
+      if (f.url) {
+        URL.revokeObjectURL(f.url);
       }
-      return [];
-    });
-  }, []);
+    }
+    commit([]);
+  }, [commit]);
 
-  // Keep a ref to attachments for cleanup on unmount (avoids stale closure)
-  const attachmentsRef = useRef(attachmentFiles);
-
-  useEffect(() => {
-    attachmentsRef.current = attachmentFiles;
-  }, [attachmentFiles]);
-
-  // Cleanup blob URLs on unmount to prevent memory leaks
+  // Cleanup blob URLs on unmount to prevent memory leaks. `entriesRef` is the
+  // list itself, so the effect that used to mirror state into a ref is gone.
   useEffect(
     () => () => {
-      for (const f of attachmentsRef.current) {
+      for (const f of entriesRef.current) {
         if (f.url) {
           URL.revokeObjectURL(f.url);
         }
@@ -341,6 +466,7 @@ export const PromptInputProvider = ({
     },
     []
   );
+  // END LOCAL
 
   const openFileDialog = useCallback(() => {
     openRef.current?.();
@@ -350,12 +476,18 @@ export const PromptInputProvider = ({
     () => ({
       add,
       clear,
+      // LOCAL: 04c
+      currentFiles,
+      // END LOCAL
       fileInputRef,
       files: attachmentFiles,
       openFileDialog,
+      // LOCAL: 04c
+      pendingReads: pendingReads.current,
+      // END LOCAL
       remove,
     }),
-    [attachmentFiles, add, remove, clear, openFileDialog]
+    [attachmentFiles, add, remove, clear, openFileDialog, currentFiles]
   );
 
   const __registerFileInput = useCallback(
@@ -556,20 +688,24 @@ export const PromptInput = ({
   const formRef = useRef<HTMLFormElement | null>(null);
 
   // ----- Local attachments (only used when no provider)
-  const [items, setItems] = useState<(FileUIPart & { id: string })[]>([]);
+  const [items, setItems] = useState<PromptInputAttachment[]>([]);
   const files = usingProvider ? controller.attachments.files : items;
+
+  // LOCAL: 04c: the same ref-first list the provider keeps, for the same
+  // reason — see `commit` in PromptInputProvider.
+  const itemsRef = useRef<PromptInputAttachment[]>([]);
+  const localPendingReads = useRef(new Map<string, Promise<unknown>>());
+
+  const commitLocal = useCallback((next: PromptInputAttachment[]) => {
+    itemsRef.current = next;
+    setItems(next);
+  }, []);
+  // END LOCAL
 
   // ----- Local referenced sources (always local to PromptInput)
   const [referencedSources, setReferencedSources] = useState<
     (SourceDocumentUIPart & { id: string })[]
   >([]);
-
-  // Keep a ref to files for cleanup on unmount (avoids stale closure)
-  const filesRef = useRef(files);
-
-  useEffect(() => {
-    filesRef.current = files;
-  }, [files]);
 
   const openFileDialogLocal = useCallback(() => {
     inputRef.current?.click();
@@ -599,11 +735,17 @@ export const PromptInput = ({
   );
 
   const addLocal = useCallback(
-    (fileList: File[] | FileList) => {
+    (
+      fileList: File[] | FileList,
+      // LOCAL: 04c: a caller may report elsewhere; by default this input does.
+      reportTo?: (error: PromptInputAttachmentError) => void
+      // END LOCAL
+    ) => {
+      const report = reportTo ?? onError;
       const incoming = [...fileList];
       const accepted = incoming.filter((f) => matchesAccept(f));
       if (incoming.length && accepted.length === 0) {
-        onError?.({
+        report?.({
           code: "accept",
           message: "No files match the accepted types.",
         });
@@ -613,63 +755,77 @@ export const PromptInput = ({
         maxFileSize ? f.size <= maxFileSize : true;
       const sized = accepted.filter(withinSize);
       if (accepted.length > 0 && sized.length === 0) {
-        onError?.({
+        report?.({
           code: "max_file_size",
           message: "All files exceed the maximum size.",
         });
         return;
       }
 
-      // LOCAL: data URLs, read before the state update. See readAsDataUrl.
-      void Promise.all(
-        sized.map(async (file) => ({
-          filename: file.name,
-          id: nanoid(),
-          mediaType: file.type,
-          type: "file" as const,
-          url: await readAsDataUrl(file),
-        }))
-      ).then((entries) => {
-        setItems((prev) => {
-          const capacity =
-            typeof maxFiles === "number"
-              ? Math.max(0, maxFiles - prev.length)
-              : undefined;
-          const capped =
-            typeof capacity === "number" ? entries.slice(0, capacity) : entries;
-          if (typeof capacity === "number" && entries.length > capacity) {
-            onError?.({
-              code: "max_files",
-              message: "Too many files. Some were not added.",
-            });
-          }
-          return [...prev, ...capped];
+      // LOCAL: 04c: the same checks as before, now run on the synchronous
+      // list, so the chips appear with the paste and the reads follow them.
+      const capacity =
+        typeof maxFiles === "number"
+          ? Math.max(0, maxFiles - itemsRef.current.length)
+          : undefined;
+      const capped =
+        typeof capacity === "number" ? sized.slice(0, capacity) : sized;
+      if (typeof capacity === "number" && sized.length > capacity) {
+        report?.({
+          code: "max_files",
+          message: "Too many files. Some were not added.",
         });
+      }
+      if (capped.length === 0) {
+        return;
+      }
+      const started = withIds(capped);
+      commitLocal([...itemsRef.current, ...entriesFor(started)]);
+      startReads(started, {
+        drop: (id) => commitLocal(itemsRef.current.filter((f) => f.id !== id)),
+        onError: report,
+        patch: (id, url) =>
+          commitLocal(
+            itemsRef.current.map((f) =>
+              f.id === id ? { ...f, pending: false, url } : f
+            )
+          ),
+        pending: localPendingReads.current,
       });
       // END LOCAL
     },
-    [matchesAccept, maxFiles, maxFileSize, onError]
+    [matchesAccept, maxFiles, maxFileSize, onError, commitLocal]
   );
 
   const removeLocal = useCallback(
-    (id: string) =>
-      setItems((prev) => {
-        const found = prev.find((file) => file.id === id);
-        if (found?.url) {
-          URL.revokeObjectURL(found.url);
-        }
-        return prev.filter((file) => file.id !== id);
-      }),
-    []
+    (id: string) => {
+      // LOCAL: 04c: a removed file's read is nobody's business any more, so a
+      // submit does not wait for it. `revokeObjectURL` on a data URL is a
+      // no-op and is kept: nothing here knows what an upstream caller stored.
+      localPendingReads.current.delete(id);
+      const found = itemsRef.current.find((file) => file.id === id);
+      if (found?.url) {
+        URL.revokeObjectURL(found.url);
+      }
+      commitLocal(itemsRef.current.filter((file) => file.id !== id));
+      // END LOCAL
+    },
+    [commitLocal]
   );
 
   // Wrapper that validates files before calling provider's add
   const addWithProviderValidation = useCallback(
-    (fileList: File[] | FileList) => {
+    (
+      fileList: File[] | FileList,
+      // LOCAL: 04c: same signature as the local path; see `addLocal`.
+      reportTo?: (error: PromptInputAttachmentError) => void
+      // END LOCAL
+    ) => {
+      const report = reportTo ?? onError;
       const incoming = [...fileList];
       const accepted = incoming.filter((f) => matchesAccept(f));
       if (incoming.length && accepted.length === 0) {
-        onError?.({
+        report?.({
           code: "accept",
           message: "No files match the accepted types.",
         });
@@ -679,14 +835,19 @@ export const PromptInput = ({
         maxFileSize ? f.size <= maxFileSize : true;
       const sized = accepted.filter(withinSize);
       if (accepted.length > 0 && sized.length === 0) {
-        onError?.({
+        report?.({
           code: "max_file_size",
           message: "All files exceed the maximum size.",
         });
         return;
       }
 
-      const currentCount = files.length;
+      // LOCAL: 04c: the provider's own list, which counts a chip whose read
+      // has not finished; `files` here is a render behind it.
+      const currentCount = controller
+        ? controller.attachments.currentFiles().length
+        : files.length;
+      // END LOCAL
       const capacity =
         typeof maxFiles === "number"
           ? Math.max(0, maxFiles - currentCount)
@@ -694,33 +855,36 @@ export const PromptInput = ({
       const capped =
         typeof capacity === "number" ? sized.slice(0, capacity) : sized;
       if (typeof capacity === "number" && sized.length > capacity) {
-        onError?.({
+        report?.({
           code: "max_files",
           message: "Too many files. Some were not added.",
         });
       }
 
       if (capped.length > 0) {
-        controller?.attachments.add(capped);
+        // LOCAL: 04c: a read that fails there is reported here.
+        controller?.attachments.add(capped, report);
+        // END LOCAL
       }
     },
     [matchesAccept, maxFileSize, maxFiles, onError, files.length, controller]
   );
 
-  const clearAttachments = useCallback(
-    () =>
-      usingProvider
-        ? controller?.attachments.clear()
-        : setItems((prev) => {
-            for (const file of prev) {
-              if (file.url) {
-                URL.revokeObjectURL(file.url);
-              }
-            }
-            return [];
-          }),
-    [usingProvider, controller]
-  );
+  const clearAttachments = useCallback(() => {
+    if (usingProvider) {
+      controller?.attachments.clear();
+      return;
+    }
+    // LOCAL: 04c: the reads go with the entries they were for.
+    localPendingReads.current.clear();
+    for (const file of itemsRef.current) {
+      if (file.url) {
+        URL.revokeObjectURL(file.url);
+      }
+    }
+    commitLocal([]);
+    // END LOCAL
+  }, [usingProvider, controller, commitLocal]);
 
   const clearReferencedSources = useCallback(
     () => setReferencedSources([]),
@@ -815,11 +979,13 @@ export const PromptInput = ({
   useEffect(
     () => () => {
       if (!usingProvider) {
-        for (const f of filesRef.current) {
+        // LOCAL: 04c: `itemsRef` replaced the ref that mirrored state here.
+        for (const f of itemsRef.current) {
           if (f.url) {
             URL.revokeObjectURL(f.url);
           }
         }
+        // END LOCAL
       }
     },
     [usingProvider]
@@ -840,12 +1006,30 @@ export const PromptInput = ({
     () => ({
       add,
       clear: clearAttachments,
+      // LOCAL: 04c: whichever side owns the list owns its reads too.
+      currentFiles: usingProvider
+        ? controller.attachments.currentFiles
+        : () => itemsRef.current,
+      // END LOCAL
       fileInputRef: inputRef,
       files: files.map((item) => ({ ...item, id: item.id })),
       openFileDialog,
+      // LOCAL: 04c
+      pendingReads: usingProvider
+        ? controller.attachments.pendingReads
+        : localPendingReads.current,
+      // END LOCAL
       remove,
     }),
-    [files, add, remove, clearAttachments, openFileDialog]
+    [
+      files,
+      add,
+      remove,
+      clearAttachments,
+      openFileDialog,
+      usingProvider,
+      controller,
+    ]
   );
 
   const refsCtx = useMemo<ReferencedSourcesContext>(
@@ -885,9 +1069,22 @@ export const PromptInput = ({
       }
 
       try {
+        // LOCAL: 04c: an attachment is read asynchronously, so a send that
+        // arrives first waits for it rather than going out without it. The
+        // entries come back from the list itself, not from the `files`
+        // closure, which is stale on the far side of the await.
+        const ready = await settleForSubmit(
+          attachmentsCtx.currentFiles,
+          attachmentsCtx.pendingReads
+        );
+        if (text.trim() === "" && ready.length === 0) {
+          return;
+        }
+        // END LOCAL
+
         // Convert blob URLs to data URLs asynchronously
         const convertedFiles: FileUIPart[] = await Promise.all(
-          files.map(async ({ id: _id, ...item }) => {
+          ready.map(async ({ id: _id, pending: _pending, ...item }) => {
             if (item.url?.startsWith("blob:")) {
               const dataUrl = await convertBlobUrlToDataUrl(item.url);
               // If conversion failed, keep the original blob URL
@@ -924,7 +1121,7 @@ export const PromptInput = ({
         // Don't clear on error - user may want to retry
       }
     },
-    [usingProvider, controller, files, onSubmit, clear]
+    [usingProvider, controller, attachmentsCtx, onSubmit, clear]
   );
 
   // Render with or without local provider
@@ -1246,9 +1443,22 @@ export const PromptInputSubmit = ({
   onStop,
   onClick,
   children,
+  disabled,
   ...props
 }: PromptInputSubmitProps) => {
   const isGenerating = status === "submitted" || status === "streaming";
+
+  // LOCAL: 04c: a send that would leave a pasted image behind is refused
+  // until its read has finished. The Enter handler honours a disabled submit
+  // button, so this covers the keyboard as well as the click. While a turn is
+  // running the button is Stop, which must stay live.
+  const local = useContext(LocalAttachmentsContext);
+  const provider = useOptionalProviderAttachments();
+  const attachments = local ?? provider;
+  const waiting =
+    !isGenerating &&
+    (attachments?.files.some((file) => file.pending === true) ?? false);
+  // END LOCAL
 
   let Icon = <CornerDownLeftIcon className="size-4" />;
 
@@ -1276,6 +1486,9 @@ export const PromptInputSubmit = ({
     <InputGroupButton
       aria-label={isGenerating ? "Stop" : "Submit"}
       className={cn(className)}
+      // LOCAL: 04c
+      disabled={disabled === true || waiting}
+      // END LOCAL
       onClick={handleClick}
       size={size}
       type={isGenerating && onStop ? "button" : "submit"}

@@ -79,7 +79,14 @@ describe('the shipped source', () => {
   });
 
   test('every vendored file says where it came from', async () => {
-    const vendored = files.filter((path) => path.startsWith('src/ui/components/'));
+    // `pending-files.ts` is ours, not the registry's: the race it settles
+    // exists only because the page's policy forced the switch away from
+    // object URLs. It sits beside the file that uses it, and has no upstream
+    // to be diffed against.
+    const ours = new Set(['src/ui/components/ai-elements/pending-files.ts']);
+    const vendored = files.filter(
+      (path) => path.startsWith('src/ui/components/') && !ours.has(path),
+    );
     expect(vendored.length).toBeGreaterThan(15);
     for (const path of vendored) {
       const first = (await read(path)).split('\n')[0] ?? '';
