@@ -12,18 +12,25 @@ with the evidence; and `broapp-autoapp` is publishable.
 
 ## Before starting
 
-Report 08b's session left prompt 09 steps 1 to 3 in `git stash` as
-`stash@{0}: prompt 09 steps 1-3`. Run `git stash list`; if it is there,
-`git stash pop`, run `bun run check`, and continue from step 4. That
-stash also carries a real fix: `bun build --minify` constant-folds
-`process.env.NODE_ENV`, so the crash-injection guard reads `Bun.env`
-instead. Keep it. If the stash is absent, do steps 1 to 3 as written.
+Steps 1 to 3 of this prompt are already done and committed as
+`914583c` ("Prompt 09, steps 1 to 3"). They were written in report 08b's
+session, stashed, and applied on top of prompt 08c; `bun run check`
+passed on that tree with 463 tests. Read that commit's diff first
+(`git show 914583c --stat`, then the files it names), run `bun run check`
+to confirm the tree is green, and continue from **Step 4**. Do not redo
+steps 1 to 3; do fix anything in them the later steps show to be wrong,
+and say so in the report. The prompt's final commit covers steps 4 and 5
+only; the report covers all five.
+
+The checkpoint carries a real fix to keep: `bun build --minify`
+constant-folds `process.env.NODE_ENV`, so the crash-injection guard reads
+`Bun.env`.
 
 Pushing the branch is required by the CI criterion and is the owner's
-decision. If the owner has not said "push" in the run instruction, do
-every local step, write the CI job, and record the CI criterion as
-**unverified** in the report and in `docs/autoapp/packaging.md`. Never
-push without that word.
+decision. If the run instruction does not contain the sentence
+"The owner says: push.", do every local step, write the CI job, and
+record the CI criterion as **unverified** in the report and in
+`docs/autoapp/packaging.md`. Never push without that sentence.
 
 ## Read first
 
