@@ -37,7 +37,10 @@ function option(name: string): string | null {
 /** Compile one binary. Returns its size in bytes. */
 async function compile(target: Target | null): Promise<number> {
   const suffix = target === null ? '' : `-${target.id}`;
-  const extension = target === null ? '' : target.ext;
+  // Bun appends `.exe` for a Windows output whether or not `--outfile` says so,
+  // so the name on disk is not always the name asked for.
+  const extension =
+    target === null ? (process.platform === 'win32' ? '.exe' : '') : target.ext;
   const outfile = `dist/broapp-autoapp${suffix}${extension}`;
   const built = Bun.spawn({
     cmd: [
