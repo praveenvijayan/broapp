@@ -58,7 +58,9 @@ import {
 import { harness, type Harness } from './harness.ts';
 
 const packageDir = join(import.meta.dir, '..', 'packages', 'broapp-autoapp');
-const launcher = join(packageDir, 'dist', 'broapp-autoapp');
+// `.exe` on Windows: `bun build --compile` adds the suffix the platform needs,
+// and a path without it does not exist there.
+const launcher = join(packageDir, 'dist', `broapp-autoapp${process.platform === 'win32' ? '.exe' : ''}`);
 const fixture = join(import.meta.dir, 'fixtures', 'autoapp-app');
 
 /** Compile the launcher once. See `tests/autoapp-activation.test.ts` for why here. */

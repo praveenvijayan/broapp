@@ -7,9 +7,13 @@
  * Broapp application, so its page is built the same way; it just is not a
  * project with a `broapp.config.ts`.
  */
+import { resolve } from 'node:path';
+
 import { buildPage } from 'broapp/build';
 
-const root = new URL('..', import.meta.url).pathname;
+// `import.meta.dir` rather than a URL's `pathname`: on Windows the latter is
+// `/D:/a/...`, which resolves against the drive again and fails to open.
+const root = resolve(import.meta.dir, '..');
 
 const result = await buildPage({
   root,

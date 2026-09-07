@@ -1,0 +1,80 @@
+# Autoapp: the phase 2 backlog
+
+What the nine build prompts deliberately left out, why, and what would have to
+be true before each item is worth doing. The design is in [design.md](design.md),
+the approval model in [security.md](security.md), the platform evidence in
+[packaging.md](packaging.md).
+
+This file proposes. It does not reopen the decisions phase 1 fixed: the branch,
+the package boundary, trusted local code, no generated browser code, the effect
+vocabulary, the three-row policy, approval and channel identity, forward-only
+migrations, or the run outcomes.
+
+## Deferred on purpose
+
+| Item | Why deferred | Precondition to start |
+|---|---|---|
+| **Enforced capabilities.** An OS sandbox for application children: `sandbox-exec` profiles on macOS, Landlock or bubblewrap on Linux, a restricted token or AppContainer on Windows. Or a broker model where privileged work is available only through launcher-provided operations. | v1 children are trusted local code; the manifest describes, the gate decides, nothing contains. Doing containment per platform before the loop existed would have cost the loop. | A non-engineer audience, or a single report of a generated change reaching outside its data directory. Start with the broker model: it is portable and the gate already has the `external` effect to hang it on. |
+| **Custom browser code per application.** Generated React or JavaScript views, which need an origin of their own and therefore a Brobridge change (an explicit `same-site` embedding allowlist) or a second document route. | The renderer covers tables, forms, actions and status. Generated browser code breaks the "one pinned document" property that makes the CSP a guarantee. | A view the renderer cannot express that a real user needed, recorded in a report. Then design the Brobridge opt-in first and review it there. |
+| **Renderer primitives.** A pure navigation action; charts; file upload and download inside the data directory; a list-detail layout; a stream-backed live table using `useStream`. | Prompt 04's set was the minimum for Notes. | Each is small; add when a demo needs it. **Navigation first** — see the finding below, where a button that changes nothing has to call a read operation to get anywhere. |
+| **Workflow failure policies** beyond `stop`: `continue`, `retry` with a count, compensation steps. | Compensation is where "undo" becomes a lie without care; `stop` is honest. | A workflow with external steps in real use. Compensation for external effects stays manual and explicit. |
+| **Workflow capture from demonstration** (record what the person clicks, not what the model called). | Research-grade problem; the tool-call sequence from a run is structured already and covers the demo. | Evidence that people want to save what they did by hand, not what they asked for. |
+| **`external` operations over MCP.** | External effects driven by an external agent through a tab approval is two hops of trust; keep it out until the approval UI shows enough context. | The approvals strip showing the operation's declared hosts and paths from the manifest. |
+| **Approval by MCP elicitation** instead of the tab. | Elicitation support varies by client; the tab is one place that always works. | Two mainstream clients supporting elicitation. Keep the tab path; add elicitation as a second approver. |
+| **Prune.** Deleting `data-prev-*`, snapshots, previews and old releases. | Recovery must never lose data; deleting is a separate, explicit action. | Design a `prune` command that lists what it would remove, requires `--yes`, and never removes the current release, the last two `data-prev`, or any snapshot younger than seven days. Now also wants a retention rule for `runs.sqlite` — see the findings. |
+| **Multiple launcher instances.** Two launchers on one machine over one root. | The control file and journal assume one. | A lock file in `<root>` with pid and liveness check; `serve` refuses to start twice. Small; do it early in phase 2. |
+| **The engineer running inside the application's tab** (the original sketch). | Avoided an IPC RPC surface for the launcher; the launcher tab is the engineer's home. | If users keep two tabs open anyway, add `launcher.*` routes proxied through the app child so the app's `AiChat` can reach the engineer. Costs one more IPC message type and a second gate hop; the gate design already carries `caller`, so the audit trail survives. |
+| **Down migrations and data-restore UX.** | Forward-only by decision; the rollback boundary is documented. | A UI in the launcher that shows, after a failed activation past the switch, the three honest options (compatible downgrade, forward repair, approved restore discarding later writes) and journals which was taken. |
+| **Rate limits and resource limits on children.** CPU, memory, disk quotas. | The child is trusted local code in v1. | Comes with enforced capabilities. |
+| **A second example** beyond Notes, chosen from real use: document intake and reconciliation was one reviewer's guess. | Unverified market pick. | Evidence from anyone using the Notes loop for something else. |
+
+## Findings from the build, folded in
+
+### Blocking the loop
+
+| Finding | Where | What to do |
+|---|---|---|
+| **The engineer reaches edits and stops before a build.** In 08c the model made three correct `source.edit` calls in 8m40s, then spent twenty minutes planning the host and contract changes and ended the turn without calling `candidate.build`. Hunk size is no longer the obstacle; the plan is. | 08c | Measure it against a hosted model before designing around it. If it persists: a shorter loop — build after each coherent edit set, and let a failed build be the next instruction — rather than a longer plan. |
+| **A restarted child is unreachable from the tab that was open.** `serve` restarts a crashed child (three times a minute), and the new child has a new port and a new one-time launch token. Today the launcher prints the address. | 08 | The launcher knows the new address. Give the page a way to be handed one — the same route the launcher tab already uses to open an application. |
+| **The tab does not notice a promotion until it reloads.** `autoapp.viewsGet` is fetched once when `AutoappView` mounts. | 06 | Refetch after a promotion, or make views a stream. Small either way. |
+
+### Correctness and housekeeping
+
+| Finding | Where | What to do |
+|---|---|---|
+| **`MigrationSpec.checksum` is validated but never computed or verified** against the migration's content. A migration can be edited after the fact and nothing notices. | 03, 05 | Compute it in the build from the migration's source and check it before running one. |
+| **`activate` from the CLI cannot drain an application another process is serving.** It finds children through its own supervisor, and a separate `broapp-autoapp activate` has none. It works because the manual sequence stops `serve` first. | 05 | The control connection now exists. Route `activate` through a running launcher when `launcher.json` is present, and keep the standalone path for when it is not. |
+| **`data-prev-*` directories, snapshots and previews accumulate**, and `runs.sqlite` grows with ordinary use — every `user` call is a run. | 05, 06 | The `prune` row above, plus a retention window for run records. Both need the same "list what would go, require `--yes`" shape. |
+| **`listReleases` hashes every release on every call**, and `launcher.appsList` reads every release directory on every call. | 07, 08b | An mtime-keyed cache once releases accumulate. Cheap today; do not do it before it matters. |
+| **`Envelope.effectHint` may be dead weight.** It exists so a core Broapp contract written before effects existed still classifies correctly. Every Autoapp route must declare an effect, so no Autoapp application uses it. | 01 | Keep while core contracts may omit `effect`. Delete when `effect` becomes required in `defineContract` — which is a breaking change for `broapp`, not for Autoapp. |
+| **`checkDependencies` accepts a dependency resolved from a `node_modules` above the workspace.** That is how the examples in this repository build at all, and it means the vendored-directory guarantee is about the *built release* rather than about the workspace. | 09 | Leave as is for a workspace inside a monorepo; consider a `--strict` build that requires every dependency under `source/node_modules` for an application imported from outside one. |
+| **An application whose `package.json` uses `workspace:*` cannot vendor its dependencies.** `import` runs the install and reports that it could not; the build then resolves upward and succeeds anyway. | 09 | Either rewrite `workspace:*` to a concrete version at import time, or say plainly that importing from inside a monorepo is a developer path and not the shipped one. |
+| **`notes.backup` writes a file, is classified `write`, and is therefore offered over MCP.** Whether a file-writing operation should be reachable from another program at all is a question the effect vocabulary does not ask. | 08 | Consider a fourth effect, or a capability-derived filter on what MCP offers. Do not widen `external`: its meaning is load-bearing in the preview policy. |
+| **`autoapp.viewsGet` returns the whole specification on every page load**, and the renderer has no list virtualisation. `notes.list` is bounded at 10,000 rows by its contract, and nobody has measured 10,000 rows in one DOM. | 04 | Per-page views and virtualisation, together, when a release has enough of either to notice. |
+| **`workflowRun` returns only when the run ends**, so a workflow waiting on a person holds an operation open for as long as they take. | 06 | Make it a stream. The operation's signal already cancels it, so the semantics are settled; only the shape changes. |
+
+### Done after all, and removed from this list
+
+- **A patch-shaped `source.change`.** Prompt 07 measured a 27B local model spending 22 minutes composing a whole-file rewrite. `source.edit` with find-and-replace hunks landed in 08b.
+- **Whitespace-tolerant hunk matching.** 08b lost three of six edits to leading whitespace in text the model had just been given. 08c matches exactly first, then line-wise with indentation ignored, and reports which. Three edits for three in the following demo.
+- **An `apps.list` tool.** The engineer could not discover what existed and had to ask. Added in 08c, and called first, unaided, in that demo.
+- **The gate's 120-second confirmation window** against a model that thinks for ten minutes. The launcher's gate and its AI layer now use 600 s, and every question carries `askedAt` and `expiresAt` so the countdown is visible.
+- **Release identity covering only page, host and contract.** A change to views, migrations, acceptance or capabilities alone did not change the identity, so a person could add an acceptance check that could never reach a release. Widened to the whole specification in 08b.
+- **`instanceof` across the release boundary.** A release bundles its own `broapp`; the child runtime carries another. Every check is a shape check now, and `tests/autoapp-boundary.test.ts` fails the suite rather than a review.
+- **The offline tiers, documented as untested.** Now three cases in `tests/autoapp-offline.test.ts` on three platforms, with the evidence and the limits in [packaging.md](packaging.md).
+
+## What was measured
+
+| Question | Answer |
+|---|---|
+| Build iterations the engineer needed per change, and where it stalled | Prompt 07: zero builds — the model never emitted a whole-file `source.change` for the large request (22 minutes composing). 08b: one successful edit in six attempts, three lost to whitespace, two to the 120 s window; still no build. 08c: three edits, three successes, 8m40s — then twenty minutes of planning and the turn ended without a build. The obstacle moved from the tool's shape to the model's plan. |
+| Whether a promoted workflow was used again after the demo session | Not yet. One promotion, used twice inside the session that made it (prompt 06). No data after it. |
+| Whether any approval was declined, timed out, or mismatched in real use | All three happened in the demos: a declined delete (04), two questions that expired under the old 120 s window (08b), and a mismatch check that refuses a grant naming a release the person was not shown (07). None outside a demo — nobody is using this yet. |
+| Binary size: launcher versus a Notes binary | Launcher 72.2 MB, Notes 69.9 MB, both `darwin-arm64` with `--compile --bytecode --minify`. The launcher costs about 2 MB more than an application; the rest of both numbers is the Bun runtime. Per-target sizes are in [packaging.md](packaging.md). |
+| Time from "ask" to "activated" for the Notes change, wall clock | Never reached by a model. The closest is 08b's 52 minutes from the first message to a successful edit, and 08c's 36 minutes to three edits and no build. Activation itself, driven by hand, is seconds: prompt 05's manual run went from `build` to a serving new release with the previous release's data intact. |
+
+These decide whether the core promise — software that keeps adapting to its
+owner — holds up enough to invest in containment, custom views, or a second
+example. On this evidence the loop is real end to end when a person drives it,
+and the part that is not yet real is a model driving it unaided from an ask to
+an activation.

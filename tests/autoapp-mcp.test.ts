@@ -31,7 +31,9 @@ import { layout, setCurrent, type Layout } from 'broapp-autoapp/spec';
 
 
 const packageDir = join(import.meta.dir, '..', 'packages', 'broapp-autoapp');
-const launcher = join(packageDir, 'dist', 'broapp-autoapp');
+// `.exe` on Windows: `bun build --compile` adds the suffix the platform needs,
+// and a path without it does not exist there.
+const launcher = join(packageDir, 'dist', `broapp-autoapp${process.platform === 'win32' ? '.exe' : ''}`);
 const fixture = join(import.meta.dir, 'fixtures', 'autoapp-app');
 const runRoot = join(import.meta.dir, '.autoapp-run');
 const quiet = { warn: () => undefined, error: () => undefined };
@@ -543,6 +545,10 @@ describe.skipIf(!available)('the stdio server', () => {
 
   test('with no launcher running, it says so and exits 1', async () => {
     const written: string[] = [];
+    // This case builds no world, so nothing else has created the run root. On a
+    // machine that has never run these tests — every CI runner — `mkdtempSync`
+    // would fail on the missing parent rather than on anything being tested.
+    mkdirSync(runRoot, { recursive: true });
     const code = await runMcp({
       appId: 'items',
       controlPath: join(mkdtempSync(join(runRoot, 'empty-')), 'launcher.json'),

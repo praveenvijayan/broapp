@@ -17,7 +17,9 @@ import { MAX_MESSAGE_BYTES } from '../packages/broapp-autoapp/src/ipc/messages.t
 
 const root = join(import.meta.dir, '..');
 const packageDir = join(root, 'packages', 'broapp-autoapp');
-const launcher = join(packageDir, 'spike', 'dist', 'launcher');
+// `.exe` on Windows: `bun build --compile` adds the suffix the platform needs,
+// and a path without it does not exist there.
+const launcher = join(packageDir, 'spike', 'dist', `launcher${process.platform === 'win32' ? '.exe' : ''}`);
 const artifact = join(packageDir, 'spike', 'app-v1', 'index.ts');
 
 /**

@@ -19,7 +19,14 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { join, resolve } from 'node:path';
 
 const repo = resolve(import.meta.dir, '..');
-const launcher = join(repo, 'packages', 'broapp-autoapp', 'dist', 'broapp-autoapp');
+// `.exe` on Windows: `bun build --compile` adds the suffix the platform needs.
+const launcher = join(
+  repo,
+  'packages',
+  'broapp-autoapp',
+  'dist',
+  `broapp-autoapp${process.platform === 'win32' ? '.exe' : ''}`,
+);
 const fixture = join(repo, 'tests', 'fixtures', 'autoapp-app');
 
 /**

@@ -17,9 +17,13 @@
  * runner exists, and labels the rest. `packages/broapp/src/cli/targets.ts` says
  * the same thing for an application's own binaries.
  */
+import { join, resolve } from 'node:path';
+
 import { findTarget, TARGETS, type Target } from 'broapp/build';
 
-const packageDir = new URL('..', import.meta.url).pathname;
+// `import.meta.dir` rather than a URL's `pathname`: on Windows the latter is
+// `/D:/a/...`, which resolves against the drive again and fails to open.
+const packageDir = resolve(import.meta.dir, '..');
 const argv = process.argv.slice(2);
 
 /** Read `--flag value` or `--flag=value`. */
@@ -52,7 +56,7 @@ async function compile(target: Target | null): Promise<number> {
     stderr: 'inherit',
   });
   if ((await built.exited) !== 0) throw new Error(`compiling ${outfile} failed`);
-  const size = (await Bun.file(`${packageDir}${outfile}`).stat()).size;
+  const size = (await Bun.file(join(packageDir, outfile)).stat()).size;
   console.log(`${outfile}  ${(size / 1024 / 1024).toFixed(1)} MB`);
   return size;
 }
