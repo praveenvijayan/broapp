@@ -167,17 +167,23 @@ export function decide(channel: Channel, effect: Effect, mode: ExecutionMode): P
  * disagree about that.
  */
 export function argumentsHash(input: unknown): string {
-  return createHash('sha256').update(canonical(input)).digest('hex').slice(0, 32);
+  return createHash('sha256').update(canonicalJson(input)).digest('hex').slice(0, 32);
 }
 
-/** JSON with every object's keys in sorted order, at every depth. */
-function canonical(value: unknown): string {
+/**
+ * JSON with every object's keys in sorted order, at every depth.
+ *
+ * Exported because more than one thing needs the same answer to "are these two
+ * values the same value": the gate, for an approval, and Autoapp's release
+ * identity, for a contract. Two sorters would eventually disagree.
+ */
+export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   const entries = Object.entries(value as Record<string, unknown>)
     .filter(([, member]) => member !== undefined)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return `{${entries.map(([key, member]) => `${JSON.stringify(key)}:${canonical(member)}`).join(',')}}`;
+  return `{${entries.map(([key, member]) => `${JSON.stringify(key)}:${canonicalJson(member)}`).join(',')}}`;
 }
 
 /** A signal that never aborts, for a request that brought none. */

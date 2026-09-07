@@ -21,7 +21,7 @@ export type {
   StreamSink,
 } from './app.ts';
 
-export { argumentsHash, createGate, decide } from './gate.ts';
+export { argumentsHash, canonicalJson, createGate, decide } from './gate.ts';
 export type {
   Approver,
   ApprovalQuestion,
