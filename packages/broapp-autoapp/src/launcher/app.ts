@@ -10,7 +10,7 @@
  * migrating, previewing and serving all happen in child processes. What this
  * file does is decide, record, and hand out addresses.
  */
-import { createGate, createHostApp, publicError } from 'broapp/host';
+import { createGate, createHostApp, openBrowser as openSystemBrowser, publicError } from 'broapp/host';
 import type { Gate, HostApp, HostLogger } from 'broapp/host';
 import type { Bridge } from 'brobridge';
 
@@ -39,6 +39,11 @@ export interface CreateLauncherAppOptions {
   /** The launcher's own gate. `user` for the tab's clicks; the engineer shares it. */
   readonly gate: Gate;
   readonly logger?: HostLogger;
+  /**
+   * Open a URL in the person's browser. Defaults to the operating system's
+   * opener; tests pass a stub so a suite does not open tabs.
+   */
+  readonly openBrowser?: (url: string) => Promise<boolean>;
 }
 
 /** The launcher's routes, ready to mount. */
@@ -67,6 +72,30 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   /** The live child serving one application, if any. */
   const serving = (appId: string): ChildHandle | null => servingChild(supervisor, appId);
 
+  const openBrowser = options.openBrowser ?? openSystemBrowser;
+  /**
+   * Children whose launch URL has been presented once. A launch token burns
+   * on its first valid presentation, so a second visit goes to the bare origin
+   * instead and rides on the session cookie that presentation minted.
+   */
+  const presented = new WeakSet<ChildHandle>();
+
+  /**
+   * Open a child's tab from the host, never from the launcher's page. A
+   * `window.open` from the launcher's origin to the child's arrives with
+   * `Sec-Fetch-Site: same-site`, which Brobridge's fence refuses; a tab the
+   * operating system opens arrives with `none`. When no browser can be
+   * opened, the address goes to the launcher's terminal — the same place
+   * `serve` prints it — and the tab is told so.
+   */
+  async function openTab(child: ChildHandle): Promise<{ opened: boolean }> {
+    const url = presented.has(child) ? `${new URL(child.url).origin}/` : child.url;
+    presented.add(child);
+    const opened = await openBrowser(url);
+    if (!opened) logger.warn(`could not open a browser; open this address yourself: ${url}`);
+    return { opened };
+  }
+
   // The same rows the engineer's `apps.list` gets, from the same helper.
   host.operation('launcher.appsList', () => ({
     apps: listApps(root, supervisor, journal).map((row) => ({ ...row })),
@@ -74,7 +103,7 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
 
   host.operation('launcher.appOpen', async ({ appId }) => {
     const existing = serving(appId);
-    if (existing !== null) return { url: existing.url };
+    if (existing !== null) return await openTab(existing);
     const releaseId = readCurrent(root, appId);
     if (releaseId === null) throw publicError.notFound(`${appId} has no current release yet.`);
     const app = root.app(appId);
@@ -85,9 +114,9 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       dataDir: app.data,
       mode: 'live',
     });
-    // Returned to the tab, which opens it and forgets it. Never logged, never
+    // Opened from here. The address is never returned to the tab, never
     // written down, never given to a model.
-    return { url: child.url };
+    return await openTab(child);
   });
 
   host.operation('launcher.appStop', async ({ appId }) => {
@@ -170,12 +199,12 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
     };
   });
 
-  host.operation('launcher.previewOpen', ({ appId }) => {
+  host.operation('launcher.previewOpen', async ({ appId }) => {
     const preview = states.get(appId).preview;
     if (preview === null) {
       throw publicError.unavailable('There is no preview running for this application.');
     }
-    return { url: preview.url };
+    return await openTab(preview);
   });
 
   host.operation('launcher.activate', async ({ appId, releaseId }) => {
@@ -187,9 +216,13 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       states.update(appId, { preview: null });
     }
     const result = await activate({ layout: root, supervisor, journal, appId, releaseId, logger });
-    return result.ok
-      ? { ok: true, previousRelease: result.previousRelease }
-      : { ok: false, phase: result.phase, reason: result.reason };
+    if (!result.ok) return { ok: false, phase: result.phase, reason: result.reason };
+    // The new release is a new child on a new port with a new credential, so
+    // the tab that showed the old one cannot be reloaded into it. Open the new
+    // one, the way a click on Open would.
+    const child = serving(appId);
+    const opened = child === null ? false : (await openTab(child)).opened;
+    return { ok: true, previousRelease: result.previousRelease, opened };
   });
 
   return {

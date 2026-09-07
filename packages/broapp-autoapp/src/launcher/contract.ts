@@ -7,10 +7,14 @@
  * things an agent asks for. The engineer's own actions are tools, not routes,
  * and they go through the same gate from the other direction.
  *
- * `appOpen` and `previewOpen` return a launch URL. That is a credential, and
- * these are the only two routes that hand one out: they answer a person's click
- * in the launcher's own tab, and the tab passes the URL straight to
- * `window.open` without storing it. No tool returns one.
+ * `appOpen` and `previewOpen` open a browser tab from the host and say only
+ * whether they managed to. A launch URL is a credential, and it never reaches
+ * the launcher's own page: not because the page would keep it, but because a
+ * tab the page opened would be refused. Brobridge's fence admits a document
+ * request only with `Sec-Fetch-Site: same-origin` or `none`, and a navigation
+ * from the launcher's origin to an application's — same host, another port —
+ * arrives as `same-site`. Opened by the operating system, it arrives as
+ * `none`, the way the launcher's own tab does. No tool returns a URL either.
  *
  * The launcher's tab is written as ordinary React rather than as a view
  * specification. It has to open browser tabs and show build problems, neither
@@ -82,12 +86,12 @@ export const launcherContract = defineContract({
       summary: 'Every application on this computer, and whether it is running.',
     },
     'launcher.appOpen': {
-      // A write: it may start a process. The URL it returns is a credential,
-      // which is why only a person's own click reaches this route.
+      // A write: it may start a process and it opens a browser tab, which is
+      // why only a person's own click reaches this route.
       effect: 'write',
       input: appIdInput,
-      output: s.object({ url: s.string() }),
-      summary: 'Start an application if it is not running, and return its address to open.',
+      output: s.object({ opened: s.boolean() }),
+      summary: 'Start an application if it is not running, and open it in a browser tab.',
     },
     'launcher.appStop': {
       effect: 'write',
@@ -148,8 +152,8 @@ export const launcherContract = defineContract({
     'launcher.previewOpen': {
       effect: 'write',
       input: appIdInput,
-      output: s.object({ url: s.string() }),
-      summary: 'The address of the running preview, to open in a tab.',
+      output: s.object({ opened: s.boolean() }),
+      summary: 'Open the running preview in a browser tab.',
     },
     'launcher.activate': {
       // The person's own click. The engineer's `release.activate` tool reaches
@@ -163,6 +167,8 @@ export const launcherContract = defineContract({
       output: s.object({
         ok: s.boolean(),
         previousRelease: s.optional(s.nullable(s.string({ max: 64 }))),
+        /** Whether the activated release was opened in a browser tab. */
+        opened: s.optional(s.boolean()),
         phase: s.optional(s.string({ max: 40 })),
         reason: s.optional(s.string({ max: 1_000 })),
       }),

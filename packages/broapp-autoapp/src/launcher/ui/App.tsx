@@ -65,14 +65,9 @@ export function App(): React.ReactElement {
     [open],
   );
 
-  // `open.data` is consumed here rather than rendered: the effect fires once
-  // per successful call, opens the tab, and nothing keeps the address.
-  useEffect(() => {
-    const url = open.data?.url;
-    if (url === undefined) return;
-    globalThis.open(url, '_blank', 'noopener');
-    open.reset();
-  }, [open]);
+  // The host opens the tab; this page never sees the address. All it can be
+  // told is that no browser could be opened.
+  const notOpened = open.data?.opened === false;
 
   return (
     <div className="launcher">
@@ -115,6 +110,17 @@ export function App(): React.ReactElement {
         {apps.error !== null && (
           <p className="launcher__message launcher__message--error" role="alert">
             {apps.error.message}
+          </p>
+        )}
+        {open.error !== null && (
+          <p className="launcher__message launcher__message--error" role="alert">
+            {open.error.message}
+          </p>
+        )}
+        {notOpened && (
+          <p className="launcher__message launcher__message--error" role="alert">
+            The application is running, but no browser could be opened. Its address is printed
+            in the terminal the launcher runs in.
           </p>
         )}
 

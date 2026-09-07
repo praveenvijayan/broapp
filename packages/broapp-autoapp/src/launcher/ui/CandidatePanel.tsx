@@ -42,13 +42,8 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
     return () => clearInterval(timer);
   }, [reload]);
 
-  // The preview's address is opened and forgotten, like an application's.
-  useEffect(() => {
-    const url = preview.data?.url;
-    if (url === undefined) return;
-    globalThis.open(url, '_blank', 'noopener');
-    preview.reset();
-  }, [preview]);
+  // The host opens the preview's tab; its address never reaches this page.
+  const previewNotOpened = preview.data?.opened === false;
 
   const current = status.data;
   if (current === undefined || current === null) return null;
@@ -147,6 +142,12 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
         >
           Open preview
         </button>
+        {previewNotOpened && (
+          <p className="launcher__message launcher__message--error" role="alert">
+            The preview is running, but no browser could be opened. Its address is printed in
+            the terminal the launcher runs in.
+          </p>
+        )}
         <button
           className="launcher__button"
           type="button"
@@ -168,7 +169,9 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
       {activate.data !== null && (
         <p className={activate.data.ok ? 'launcher__lede' : 'launcher__message launcher__message--error'}>
           {activate.data.ok
-            ? 'Activated. Reload the application’s tab to see it.'
+            ? activate.data.opened === true
+              ? 'Activated and opened in a new tab. The tab that showed the previous release no longer answers; close it.'
+              : 'Activated. Click Open to see it; the tab that showed the previous release no longer answers.'
             : `Not activated at ${activate.data.phase ?? 'an early step'}: ${activate.data.reason ?? ''}`}
         </p>
       )}

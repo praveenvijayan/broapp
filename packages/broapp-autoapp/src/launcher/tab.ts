@@ -41,6 +41,8 @@ export interface CreateLauncherTabOptions {
   /** How long a question waits. Defaults to the launcher's ten minutes. */
   readonly confirmTimeoutMs?: number;
   readonly logger?: HostLogger;
+  /** How a tab is opened for an application or a preview. Tests stub it. */
+  readonly openBrowser?: (url: string) => Promise<boolean>;
 }
 
 /** Everything that mounts on the launcher's bridge. */
@@ -67,6 +69,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     states,
     gate: options.gate,
     logger,
+    ...(options.openBrowser === undefined ? {} : { openBrowser: options.openBrowser }),
   });
 
   const ai = createAi({

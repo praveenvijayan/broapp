@@ -84,6 +84,8 @@ interface World {
 
 let world: World | null = null;
 let live: Harness | null = null;
+/** Every URL the launcher asked to open in a browser, per test. */
+let openedUrls: string[] = [];
 
 /** Inside the repository, so the workspace can resolve `broapp`. */
 const runRoot = join(import.meta.dir, '.autoapp-run');
@@ -947,6 +949,7 @@ describe.skipIf(!available)('the launcher tab', () => {
   }> {
     const where = makeWorld();
     const adapter = createFakeAdapter({ script });
+    openedUrls = [];
     const tab = createLauncherTab({
       layout: where.root,
       supervisor: where.supervisor,
@@ -959,6 +962,11 @@ describe.skipIf(!available)('the launcher tab', () => {
         preconnect: () => undefined,
       }) as typeof fetch,
       logger: quiet,
+      // A suite must not open browser tabs. What is opened is checked instead.
+      openBrowser: async (url) => {
+        openedUrls.push(url);
+        return true;
+      },
     });
     live = await harness((bridge) => tab.mount(bridge));
     return { harness: live, where, adapter };
@@ -976,9 +984,15 @@ describe.skipIf(!available)('the launcher tab', () => {
     expect(listed.apps.map((app) => app.appId)).toEqual(['items']);
     expect(listed.apps[0]?.serving).toBe(false);
 
-    const opened = await client.call('launcher.appOpen', { appId: 'items' });
-    expect(opened.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?bt=/);
+    // The tab is opened by the host, with the launch URL the first time and
+    // the bare origin after that: the token has burnt, the cookie remains.
+    expect(await client.call('launcher.appOpen', { appId: 'items' })).toEqual({ opened: true });
+    expect(openedUrls).toHaveLength(1);
+    expect(openedUrls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?bt=/);
     expect((await client.call('launcher.appsList', undefined)).apps[0]?.serving).toBe(true);
+    expect(await client.call('launcher.appOpen', { appId: 'items' })).toEqual({ opened: true });
+    expect(openedUrls).toHaveLength(2);
+    expect(openedUrls[1]).toBe(`${new URL(openedUrls[0] ?? '').origin}/`);
 
     expect(await client.call('launcher.appStop', { appId: 'items' })).toEqual({ stopped: true });
     await client.close();
@@ -1031,6 +1045,11 @@ describe.skipIf(!available)('the launcher tab', () => {
     });
     expect(result.ok).toBe(true);
     expect(readCurrent(where.root, 'items')).toBe(built.releaseId);
+    // The activated release is a new child on a new port, so the host opens
+    // it: the tab that showed the previous one cannot be reloaded into it.
+    expect(result.opened).toBe(true);
+    expect(openedUrls).toHaveLength(1);
+    expect(openedUrls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?bt=/);
 
     const runs = where.store.listRuns({ channels: ['user'] });
     expect(runs.some((run) => run.summary === 'launcher.activate')).toBe(true);

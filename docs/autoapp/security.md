@@ -17,6 +17,24 @@ nothing it can write is consulted when the channel is chosen.
 stops and asks. A `preview` refuses `external` outright, for everybody: a copy
 of the data is not a copy of the world.
 
+## Opening a tab
+
+An application's launch URL is a credential, and the launcher's page never
+sees one. `appOpen`, `previewOpen` and a successful `activate` open the tab
+from the host, through the operating system's browser opener, and answer only
+whether that worked. This is not only tidiness. Brobridge's fence admits a
+document request with `Sec-Fetch-Site: same-origin` or `none` and nothing else;
+a `window.open` from the launcher's origin to an application's — same host,
+another port — arrives as `same-site` and is refused with a `403`. A tab the
+operating system opens arrives as `none`, the way the launcher's own does.
+
+A launch token burns on its first presentation, so a second Open on a running
+application goes to the bare origin and rides on the session cookie the first
+one minted. A supervised child's token lives eight hours rather than
+Brobridge's two-minute default: that default guards a URL in shell scrollback,
+and a supervised child's is never printed. Without it, a preview or an
+activated release that nobody clicked within two minutes could never be opened.
+
 ## Approvals
 
 An approval binds to `{ requestId, appId, releaseId, route, argumentsHash }`.
