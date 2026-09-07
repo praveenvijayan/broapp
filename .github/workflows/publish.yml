@@ -9,7 +9,7 @@ on:
         description: Which package to publish
         required: true
         type: choice
-        options: [broapp, broapp-ai-anthropic, broapp-ai-compatible, create-broapp, all]
+        options: [broapp, broapp-ai-anthropic, broapp-ai-compatible, broapp-autoapp, create-broapp, all]
       dry_run:
         description: Run npm publish --dry-run instead of publishing
         required: true
@@ -40,9 +40,16 @@ jobs:
       - run: bun run typecheck
       - run: bun test tests
       - run: bun run scripts/release-dry-run.ts
+      - run: bun run scripts/autoapp-dry-run.ts
 
       - name: Stage the template into the generator
         run: bun run scripts/stage-template.ts
+
+      # `broapp-autoapp` ships its own page, built the way an application's is
+      # and imported by `src/launcher/main.ts`. It is not in git, so publishing
+      # without this step produces a package whose launcher cannot start.
+      - name: Build the launcher's page
+        run: bun run --cwd packages/broapp-autoapp build:page
 
       # Order matters: the provider packages and the generator depend on the
       # published broapp, so it goes first and create-broapp last.
@@ -63,6 +70,13 @@ jobs:
       - name: Publish broapp-ai-compatible
         if: inputs.package == 'broapp-ai-compatible' || inputs.package == 'all'
         working-directory: packages/broapp-ai-compatible
+        run: npm publish --provenance --access public ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish broapp-autoapp
+        if: inputs.package == 'broapp-autoapp' || inputs.package == 'all'
+        working-directory: packages/broapp-autoapp
         run: npm publish --provenance --access public ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

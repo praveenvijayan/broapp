@@ -1,13 +1,40 @@
 {
   "name": "broapp-autoapp",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "A Broapp application its owner can reshape while using it: launcher, renderer, specification, engineer, activation",
   "license": "MIT",
+  "homepage": "https://github.com/praveenvijayan/broapp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/praveenvijayan/broapp.git",
+    "directory": "packages/broapp-autoapp"
+  },
+  "bugs": {
+    "url": "https://github.com/praveenvijayan/broapp/issues"
+  },
+  "keywords": [
+    "broapp",
+    "autoapp",
+    "local-first",
+    "ai-agent",
+    "mcp",
+    "self-modifying",
+    "bun",
+    "desktop"
+  ],
   "engines": {
     "bun": ">=1.4.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "dist/launcher-page.html",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
@@ -24,9 +51,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
-    "broapp": "workspace:*",
-    "broapp-ai-anthropic": "workspace:*",
-    "broapp-ai-compatible": "workspace:*"
+    "broapp": "^0.2.1",
+    "broapp-ai-anthropic": "^0.2.1",
+    "broapp-ai-compatible": "^0.2.1"
   },
   "peerDependencies": {
     "ai": "7.0.93",
@@ -49,6 +76,7 @@
   },
   "scripts": {
     "build:page": "bun run scripts/build-page.ts",
-    "build:launcher": "bun run build:page && bun build --compile --bytecode --minify src/launcher/main.ts --outfile dist/broapp-autoapp"
+    "build:launcher": "bun run scripts/build-launcher.ts",
+    "build:all": "bun run scripts/build-launcher.ts --all-targets"
   }
 }

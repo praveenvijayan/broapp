@@ -72,6 +72,11 @@ jobs:
       # binary from an unrelated directory. This is the check that catches a
       # package that works from the monorepo and not from npm.
       - run: bun run scripts/release-dry-run.ts
+      # The same check for the launcher: install the packed packages outside the
+      # workspace, import the Notes workspace through them, and build a
+      # candidate. It catches a `files` list that omits the launcher's page and
+      # a dependency that only resolves inside this repository.
+      - run: bun run scripts/autoapp-dry-run.ts
 
   autoapp:
     name: Autoapp — ${{ matrix.os }}
@@ -87,7 +92,10 @@ jobs:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - run: bun run --cwd packages/broapp-autoapp build:launcher
-      - run: bun test tests/autoapp-spike.test.ts tests/autoapp-activation.test.ts tests/autoapp-mcp.test.ts
+      # `autoapp-spec` is here for one case the other files cannot reach on
+      # Windows: moving `current` onto an existing pointer file, which is a
+      # `MoveFileEx` replacement there rather than a POSIX rename.
+      - run: bun test tests/autoapp-spike.test.ts tests/autoapp-spec.test.ts tests/autoapp-activation.test.ts tests/autoapp-mcp.test.ts
       # Drives the compiled binary end to end — import, serve, the control
       # connection, build, activate, a crash past the switch, and recovery.
       # This is the step that catches a packaging fault the module tests

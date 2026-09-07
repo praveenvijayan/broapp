@@ -18,6 +18,7 @@
     "check": "bun run typecheck && bun run test",
     "pack:local": "bun run scripts/pack-local.ts",
     "dryrun": "bun run scripts/release-dry-run.ts",
+    "dryrun:autoapp": "bun run scripts/autoapp-dry-run.ts",
     "site": "bun run scripts/build-site.ts",
     "smoke": "bun run scripts/smoke-binary.ts"
   },

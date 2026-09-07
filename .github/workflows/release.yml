@@ -26,6 +26,7 @@ jobs:
       - run: bun run typecheck
       - run: bun test tests
       - run: bun run scripts/release-dry-run.ts
+      - run: bun run scripts/autoapp-dry-run.ts
 
   # Built where they run. A cross-compiled binary would be faster to produce and
   # would not have been executed by anything, which is exactly what a release
@@ -89,9 +90,65 @@ jobs:
             examples/*/release/*.zip
           if-no-files-found: error
 
+  # The launcher is one binary for every application on a machine, so it is
+  # built once per target rather than once per example. Cross-compiled from
+  # Linux, because `bun build --compile` can target every platform from one —
+  # and then labelled as compiled-but-not-executed, exactly as the examples are.
+  launcher:
+    name: Launcher — every target
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - name: Build every target
+        working-directory: packages/broapp-autoapp
+        run: bun run build:all
+      - name: Archive
+        working-directory: packages/broapp-autoapp/dist
+        shell: bash
+        run: |
+          for file in broapp-autoapp-*; do
+            case "$file" in
+              *.tar.gz|*.zip) continue ;;
+              *.exe) 7z a "${file%.exe}.zip" "$file" ;;
+              *) chmod +x "$file"; tar -czf "$file.tar.gz" "$file" ;;
+            esac
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher
+          path: |
+            packages/broapp-autoapp/dist/*.tar.gz
+            packages/broapp-autoapp/dist/*.zip
+          if-no-files-found: error
+
+  # The evidence for the launcher, on the three platforms with a runner: build
+  # it natively and drive the compiled binary through import, serve, the control
+  # connection, activation, a crash past the switch, and recovery.
+  launcher-smoke:
+    name: Launcher smoke — ${{ matrix.os }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd packages/broapp-autoapp build:launcher
+      - run: bun run scripts/autoapp-smoke.ts
+
   draft:
     name: Draft release
-    needs: binaries
+    needs: [binaries, launcher, launcher-smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -128,6 +185,15 @@ jobs:
             | windows-x64 | yes | yes |
             | linux-arm64 | yes | **no** — cross-compiled, no runner |
             | linux-x64-musl | yes | **no** — cross-compiled, no runner |
+
+            The `broapp-autoapp-<target>` archives are the Autoapp launcher,
+            which supervises applications and hosts the engineer. Every one of
+            them is cross-compiled from Linux; the launcher is smoke-tested
+            natively on linux-x64, darwin-arm64 and windows-x64, and compiled
+            only on the other three targets. It runs applications as **trusted
+            local code**: crash isolated from the launcher, not permission
+            isolated from you. See `docs/autoapp/packaging.md` and
+            `docs/autoapp/security.md`.
 
             Binaries are **not signed**. macOS will need Gatekeeper bypassed or
             the binary signed and notarised; Windows will show SmartScreen. See

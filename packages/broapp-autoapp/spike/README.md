@@ -9,7 +9,8 @@ the artifact, and a stuck child is somebody else's problem.
 
 1. A compiled launcher spawns a compiled child of *itself*, via
    `process.execPath`, over `Bun.spawn`'s IPC with `serialization: 'json'`.
-2. The child runs with `PATH=/nonexistent`. Nothing in the chain falls back to
+2. The child runs with `PATH=/nonexistent` (empty on Windows, where `PATH` is
+   also the DLL search path). Nothing in the chain falls back to
    a `bun` on the path.
 3. The child `await import()`s an application artifact by absolute path that no
    static import reaches, and the artifact runs *in the child*: it appends to

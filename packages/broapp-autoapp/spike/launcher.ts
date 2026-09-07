@@ -51,12 +51,20 @@ function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promis
 /**
  * The environment a child is given.
  *
- * Deliberately not `process.env`. `PATH=/nonexistent` is the interesting part:
- * if anything in the chain quietly shells out to a `bun` on the path, the
- * spike fails instead of passing on a machine that happens to have one.
+ * Deliberately not `process.env`. A `PATH` that leads nowhere is the
+ * interesting part: if anything in the chain quietly shells out to a `bun` on
+ * the path, the spike fails instead of passing on a machine that happens to
+ * have one. The child still starts, because it is spawned by absolute path
+ * from `process.execPath`.
+ *
+ * On Windows the value is empty rather than `/nonexistent`. A path entry that
+ * is not a valid Windows path is not merely unhelpful — process creation
+ * consults `PATH` for the DLL search as well, and giving it nonsense has been
+ * seen to fail the spawn itself rather than the lookup it was meant to break.
+ * Empty says the same thing in a way Windows understands.
  */
 function childEnv(): Record<string, string> {
-  const env: Record<string, string> = { PATH: '/nonexistent' };
+  const env: Record<string, string> = { PATH: process.platform === 'win32' ? '' : '/nonexistent' };
   for (const name of ['HOME', 'TMPDIR', 'TEMP', 'BROAPP_DATA_DIR', 'AUTOAPP_SPIKE_MISBEHAVE']) {
     const value = process.env[name];
     if (value !== undefined) env[name] = value;

@@ -83,6 +83,12 @@ function stopChildrenOnExit(supervisor: Supervisor): void {
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
+  // The synchronous last resort. `exit` cannot await anything, so this kills
+  // rather than drains — and it is the only handler that runs on Windows, where
+  // a console process is not delivered `SIGTERM` the way a POSIX one is. A
+  // child that outlives its launcher holds a port and a data directory nobody
+  // is supervising, which is worse than an ungraceful stop.
+  process.on('exit', () => supervisor.killAll());
   // `beforeExit` fires when the loop empties, which is the case a signal
   // handler does not cover: the launcher finished its work while a child it
   // started is still alive.

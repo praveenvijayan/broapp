@@ -38,6 +38,13 @@ The reusable developer experience around the pattern:
 - **A release pipeline.** Six compilation targets, native smoke tests where a runner exists, and cross-compiled binaries labelled as such.
 - **An optional AI layer.** Host-only and provider-independent: settings, key storage, context, tools derived from your contract, and a confirmation step before anything changes. Off until a user sets it up.
 
+- **An optional launcher.** [Autoapp](docs/autoapp/design.md) is a separate
+  package that supervises applications, previews a proposed change on a copy of
+  your data, and activates it with a recovery path — so an application can be
+  reshaped by its owner while they use it. A candidate release runs as
+  **trusted local code**: crash isolated in its own child process, not
+  permission isolated from you.
+
 The security-sensitive parts — the trust fence, the one-time launch token, the
 session cookie, the framing, resume — are
 [Brobridge](https://github.com/praveenvijayan/brobridge), used unchanged.
@@ -50,6 +57,7 @@ session cookie, the framing, resume — are
 | `packages/broapp` | Runtime and build tooling. Generated projects depend on it. |
 | `packages/broapp-ai-anthropic` | Anthropic provider for the AI layer. |
 | `packages/broapp-ai-compatible` | OpenAI, Ollama and any OpenAI-compatible server. |
+| `packages/broapp-autoapp` | Optional: the Autoapp launcher, renderer and engineer. |
 | `templates/react-ts` | The canonical template. React + TypeScript, ordinary CSS. |
 | `examples/dashboard` | Streaming system metrics; independent streams and reconnect. |
 | `examples/file-processor` | Progress and cancellation, inside an authorized directory. |

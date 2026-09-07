@@ -11,6 +11,7 @@
  */
 import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { dirname as posixDirname, join as posixJoin, normalize as posixNormalize } from 'node:path/posix';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,6 +44,11 @@ const PAGES: readonly Page[] = [
   { slug: 'troubleshooting.html', title: 'Troubleshooting', source: 'docs/troubleshooting.md', group: 'Reference' },
   { slug: 'limitations.html', title: 'Scope and limitations', source: 'docs/limitations.md', group: 'Reference' },
   { slug: 'publishing.html', title: 'Publishing', source: 'docs/publishing.md', group: 'Reference' },
+
+  { slug: 'autoapp.html', title: 'Autoapp: the design', source: 'docs/autoapp/design.md', group: 'Autoapp' },
+  { slug: 'autoapp-packaging.html', title: 'Autoapp: packaging and offline', source: 'docs/autoapp/packaging.md', group: 'Autoapp' },
+  { slug: 'autoapp-security.html', title: 'Autoapp: approvals and limits', source: 'docs/autoapp/security.md', group: 'Autoapp' },
+
   { slug: 'contributing.html', title: 'Contributing', source: 'CONTRIBUTING.md', group: 'Reference' },
 ];
 
@@ -54,13 +60,29 @@ const REPO = 'https://github.com/praveenvijayan/broapp';
  */
 const ASSET_DIRS = ['diagrams'] as const;
 
+/**
+ * The directory of the document being rendered.
+ *
+ * A relative link means something different depending on where it is written:
+ * `packaging.md` from `docs/` is the packaging guide, and from `docs/autoapp/`
+ * it is the Autoapp one. Resolving from the source's own directory is the only
+ * way both stay right, and it is set once per page below.
+ */
+let sourceDir = 'docs';
+
 /** Rewrite a repository-relative link to its place in the site. */
 function rewriteLink(href: string): string {
   if (/^(?:https?:|mailto:|#)/.test(href)) return href;
 
+  // Resolved from the document that wrote it first; the flatter forms below are
+  // kept because a link may also be written from the repository root.
+  const resolved = posixNormalize(posixJoin(sourceDir, href));
   const clean = href.replace(/^\.\//, '').replace(/^\.\.\//, '');
   const page = PAGES.find(
-    (candidate) => candidate.source === clean || candidate.source === `docs/${clean}`,
+    (candidate) =>
+      candidate.source === resolved ||
+      candidate.source === clean ||
+      candidate.source === `docs/${clean}`,
   );
   if (page !== undefined) return page.slug;
 
@@ -825,6 +847,7 @@ await mkdir(out, { recursive: true });
 
 for (const page of PAGES) {
   const markdown = await readFile(join(root, page.source), 'utf8');
+  sourceDir = posixDirname(page.source);
   const rendered = renderMarkdown(markdown);
   await writeFile(join(out, page.slug), shell(page, rendered.html, rendered.headings), 'utf8');
   console.log(`  ${page.slug.padEnd(28)} <- ${page.source}`);

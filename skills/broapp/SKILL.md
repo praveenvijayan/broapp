@@ -249,6 +249,40 @@ alternative instead.
 - README of the generated project describes what the app does, its flags,
   and where its data lives.
 
+## Autoapp: applications their owner can reshape
+
+`broapp-autoapp` is an optional, separate package. Reach for it only when the
+user asks for an application that can be changed while it is running, or names
+Autoapp, the launcher, or the engineer. An ordinary Broapp application needs
+none of it.
+
+What it adds:
+
+- **A launcher process.** It supervises applications; each runs as its own
+  child process with its own bridge and its own browser tab. No iframes, and
+  the launcher never proxies an application's operations.
+- **An execution gate.** Every operation declares `effect: 'read' | 'write' |
+  'external'`. Channel `user` runs everything; `ai`, `mcp` and `workflow` run
+  reads and must ask a person for writes and external effects; a preview
+  refuses `external` outright. Approvals bind to a release and an arguments
+  hash, are consumed once, and expire.
+- **A declarative view specification** rendered by a pinned renderer
+  (`broapp-autoapp/react`). No generated browser code, ever — that is what
+  keeps the hash-pinned CSP a guarantee.
+- **Candidate releases.** A change is built as an immutable release, previewed
+  on a copy of the data, migrated forward only, and activated as a directory
+  pair switch with a journal and a recovery path.
+- **An MCP adapter**, `broapp-autoapp mcp <appId>`, offering `read` and `write`
+  operations as tools through the same gate. `external` operations are not
+  offered.
+
+The one thing to say out loud whenever it comes up: a candidate release's host
+code is **trusted local code** — crash isolated in its own child process, not
+permission isolated from the person running it. Do not call it a sandbox.
+
+Start from `docs/autoapp/design.md`, then `docs/autoapp/security.md` and
+`docs/autoapp/packaging.md` upstream.
+
 ## References
 
 Load only what the current step needs.

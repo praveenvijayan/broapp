@@ -130,12 +130,28 @@ async function startServing(env: Record<string, string> = {}): Promise<boolean> 
   return await until(() => controlFile() !== null, 30_000);
 }
 
-/** Stop whatever is serving, however it has to be stopped. */
+/**
+ * Stop whatever is serving, however it has to be stopped.
+ *
+ * On Windows a `SIGTERM` is not delivered to a console process the way it is on
+ * POSIX — Bun terminates the process outright, so the launcher's handlers never
+ * run and the application children it started would be left behind. `taskkill
+ * /F /T` takes the whole tree instead. This is the same asymmetry the launcher
+ * answers with a `process.on('exit')` kill; here there is no handler to reach.
+ */
 async function stopServing(): Promise<void> {
   if (serving === null) return;
-  serving.kill('SIGTERM');
-  await Promise.race([serving.exited, after(5_000, null)]);
-  if (serving.exitCode === null) serving.kill('SIGKILL');
+  if (process.platform === 'win32') {
+    Bun.spawnSync({
+      cmd: ['taskkill', '/F', '/T', '/PID', String(serving.pid)],
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+  } else {
+    serving.kill('SIGTERM');
+    await Promise.race([serving.exited, after(5_000, null)]);
+    if (serving.exitCode === null) serving.kill('SIGKILL');
+  }
   await Promise.race([serving.exited, after(5_000, null)]);
   serving = null;
 }

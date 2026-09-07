@@ -21,7 +21,26 @@ export interface Packed {
 }
 
 /** Every package that is published. Order matters only for readable output. */
-const PUBLISHED = ['broapp', 'create-broapp', 'broapp-ai-anthropic', 'broapp-ai-compatible'];
+const PUBLISHED = [
+  'broapp',
+  'create-broapp',
+  'broapp-ai-anthropic',
+  'broapp-ai-compatible',
+  'broapp-autoapp',
+];
+
+/**
+ * Packages that have to build something before they are packed.
+ *
+ * The launcher's own page is an inlined, hash-pinned document built the same
+ * way an application's is, and `src/launcher/main.ts` imports it. It is not in
+ * git — no built artefact is — so packing without building it first produces a
+ * tarball whose binary cannot start. This is the same reason the generator's
+ * template is staged above.
+ */
+const PREPARED: Record<string, readonly string[]> = {
+  'broapp-autoapp': ['bun', 'run', 'build:page'],
+};
 
 /** Pack every publishable package into `outDir`. Returns absolute tarball paths. */
 export async function packLocal(outDir: string = join(root, '.broapp-tmp', 'packs')): Promise<Packed[]> {
@@ -40,6 +59,11 @@ export async function packLocal(outDir: string = join(root, '.broapp-tmp', 'pack
   const packed: Packed[] = [];
   for (const name of PUBLISHED) {
     const packageDir = join(root, 'packages', name);
+    const prepare = PREPARED[name];
+    if (prepare !== undefined) {
+      const built = Bun.spawn([...prepare], { cwd: packageDir, stdout: 'inherit', stderr: 'inherit' });
+      if ((await built.exited) !== 0) throw new Error(`preparing ${name} failed`);
+    }
     const child = Bun.spawn(['bun', 'pm', 'pack', '--destination', outDir], {
       cwd: packageDir,
       stdout: 'inherit',

@@ -94,6 +94,16 @@ export interface Supervisor {
   readonly children: readonly ChildHandle[];
   /** Shut everything down; used at launcher exit. */
   stopAll(deadlineMs: number): Promise<void>;
+  /**
+   * Kill every child, now, without waiting for anything.
+   *
+   * The graceful path is `stopAll`. This exists for `process.on('exit')`, which
+   * is synchronous — a promise made there is never settled. It matters most on
+   * Windows, where a console process is not delivered `SIGTERM` the way a POSIX
+   * one is, so the signal handlers that normally run `stopAll` never fire and
+   * this is the last chance to stop a child outliving its launcher.
+   */
+  killAll(): void;
 }
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5_000;
@@ -163,6 +173,12 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
   const helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
   const readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
   const live = new Set<ChildHandle>();
+  /**
+   * The subprocess behind each handle, for `killAll`. A handle deliberately
+   * exposes no way to kill without waiting, because every other caller should
+   * be draining first.
+   */
+  const processes = new Map<ChildHandle, Subprocess>();
 
   /** Spawn a child and wrap its IPC channel in something waitable. */
   function launch(
@@ -406,7 +422,11 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
       };
 
       live.add(handle);
-      void child.exited.then(() => live.delete(handle));
+      processes.set(handle, child);
+      void child.exited.then(() => {
+        live.delete(handle);
+        processes.delete(handle);
+      });
       return handle;
     },
 
@@ -439,6 +459,16 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
 
     async stopAll(deadlineMs: number): Promise<void> {
       await Promise.all([...live].map((handle) => handle.shutdown(deadlineMs)));
+    },
+
+    killAll(): void {
+      for (const child of processes.values()) {
+        try {
+          child.kill();
+        } catch {
+          // Already gone. There is nothing to report from an exit handler.
+        }
+      }
     },
   };
 

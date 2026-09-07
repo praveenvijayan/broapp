@@ -543,6 +543,17 @@ describe('the release store', () => {
     writeFileSync(`${store.app('notes').current}.tmp`, 'nonsense');
     setCurrent(store, 'notes', spec.manifest.releaseId);
     expect(readCurrent(store, 'notes')).toBe(spec.manifest.releaseId);
+
+    // Moving the pointer to a different release replaces the existing file.
+    // `renameSync` over one is atomic on POSIX; on Windows it goes through
+    // `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING`, which replaces but can
+    // fail against a reader holding the file open. This case runs in the
+    // Windows matrix job for exactly that reason.
+    const next = minimalSpec({ manifest: { ...spec.manifest, name: 'Notes, later' } });
+    expect(next.manifest.releaseId).not.toBe(spec.manifest.releaseId);
+    writeRelease(store, next, { page, host });
+    setCurrent(store, 'notes', next.manifest.releaseId);
+    expect(readCurrent(store, 'notes')).toBe(next.manifest.releaseId);
   });
 
   test('listing an application that has never been written is empty, not an error', () => {

@@ -48,6 +48,67 @@ program people mute.
 
 An unanswered question is a **denial**, not a pause. Nothing runs unattended.
 
+## The control connection
+
+The launcher listens on an ephemeral port on `127.0.0.1` so an MCP process can
+reach a running application. `<root>/launcher.json` holds the port and a
+32-byte hex secret, written atomically at mode `0600` and removed when the
+launcher exits. A connection sends an auth line first or the socket closes; the
+secret is compared with a constant-time equality, there is a two-second auth
+deadline and a one-megabyte line cap.
+
+The secret lives in the launcher process and in that file. It never crosses
+IPC — the launcher authenticates the connection and forwards only
+`{ route, input, client, requestId }` — and it is in no log, no run record and
+no journal row.
+
+**On Windows the mode bits are not enforced.** The file's protection there is
+the user profile directory's ACL. Anything that can read your profile can read
+the secret, and with it can reach the applications this launcher is serving —
+subject to the gate, which still asks the person in the tab for every write.
+
+## MCP
+
+`broapp-autoapp mcp <appId>` is a stdio MCP server. It reaches the application
+the long way round — control connection to the launcher, IPC to the child, the
+application's own gate at the end — because that is the only path that ends at
+`Gate.guard` with a channel the caller did not choose. The `channel` is filled
+in by the child, from the door the message came through; the client's name
+becomes `caller`, which is a label and never a permission.
+
+`read` and `write` operations are offered as tools. `external` ones are **not
+offered at all** rather than offered and refused, because listing a tool that
+always fails teaches an agent to keep trying. Tool annotations
+(`readOnlyHint`, `destructiveHint`) are hints in the specification's own words:
+a client that ignores every one of them gets the same answers, because the gate
+is at the other end of the connection.
+
+A write with no tab open is refused and says why — nobody could be asked. A
+read still runs.
+
+## Attachment
+
+An approval needs somebody to ask. `RunningApp.attached` is the same "is any
+endpoint open" question the idle logic asks, and the routes that can only be
+answered by a person are wrapped in `attachedOnly`. With no tab open, a `write`
+from any channel but `user` is refused rather than queued.
+
+## The rollback boundary
+
+Migrations are forward only. What rollback means depends on one fact: whether
+the new release has accepted a write.
+
+- **Before the first write**, activation is a pair switch and going back is the
+  same switch in reverse: `data` and `data-prev-<timestamp>` change places.
+  Nothing is lost.
+- **After the first write**, there are three honest options and no fourth: a
+  compatible downgrade, a forward repair, or an explicitly approved restore
+  that **discards the writes made since activation**. The activation journal
+  records which of those the person is in.
+
+No `data-prev-*` directory and no snapshot is ever removed by recovery. Deleting
+them is a separate, explicit action that does not exist yet — see the backlog.
+
 ## What is recorded
 
 Every gate decision — allowed, confirmed, denied, refused — is written to
@@ -72,3 +133,21 @@ Generated *browser* code does not exist. The page runs the pinned renderer over
 a declarative view specification with no JavaScript expressions and no raw
 HTML, so a proposal cannot introduce script into a page whose CSP is pinned to
 the hashes the build computed.
+
+## What is deferred, deliberately
+
+Two things a reader might expect to find here are not built, and are not
+half-built either.
+
+- **An OS sandbox for application children** — `sandbox-exec` on macOS,
+  Landlock or bubblewrap on Linux, a restricted token or AppContainer on
+  Windows — or a broker model where privileged work is only available through
+  launcher-provided operations. v1 does neither. Containment per platform,
+  before the loop it protects existed, would have cost the loop.
+- **Enforced capabilities.** `manifest.capabilities` is a declaration a person
+  grants; nothing constrains a child to what it was granted. The declaration is
+  what an approval is shown against, not a boundary.
+
+Both are the first section of [the backlog](backlog.md), with the precondition
+for starting each. Until then, the sentence at the top of this section is the
+whole of it: the child is trusted local code.

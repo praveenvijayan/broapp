@@ -89,9 +89,16 @@ running. See "Trusted local code" below.
 ## Release identity
 
 `releaseId` is the sha256 of the built page bytes, the host bundle bytes and
-the exported contract JSON — hex, lowercase, first 32 characters. It is
-computed by the build, stored in the release manifest, and reported by the
-child on `hello`. A running application with no candidate loop has exactly one
+the canonical JSON of the **whole application specification** with
+`manifest.releaseId` and `manifest.createdAt` removed — hex, lowercase, first
+32 characters. It is computed by the build, stored in the release manifest, and
+reported by the child on `hello`. It covered only the page, the host and the
+contract at first, which meant a change to views, migrations, acceptance
+examples or capabilities alone did not change the identity: a person could add
+an acceptance check that could never reach a release, and be told it was built.
+A release directory written under the older rule is refused rather than
+rehashed, because rehashing would assert its contents are what somebody
+approved. A running application with no candidate loop has exactly one
 release. An approval names a release, so an approval cannot survive a rebuild.
 
 ## The candidate-and-activation loop
@@ -144,11 +151,26 @@ script into a page whose CSP is pinned to the hashes the build computed.
 
 ## Offline tiers
 
-Three separate claims, in increasing order of difficulty. **Untested until
-prompt 09** — none of them is documented as working until it has been.
+Three separate claims, in increasing order of difficulty. Each is now a case in
+`tests/autoapp-offline.test.ts`, run on Linux, macOS and Windows.
 
-- **Run offline.** Installed features that need only local resources work.
-- **Edit offline.** The packaged tooling and packaged dependencies support
-  making changes. AI help needs a local model.
-- **Extend dependencies offline.** Only explicitly packaged dependencies are
-  available.
+| Tier | What holds | What it rests on |
+|---|---|---|
+| **Run offline** | An installed application's local features work with no network. | A built release resolves nothing at run time: every dependency is inlined into `host.js`, and the only specifiers left are `bun:sqlite` and Node builtins. The release serves with its whole source workspace deleted. |
+| **Edit offline** | Source changes build and activate, using dependencies that are already installed. The engineer needs a model — a remote provider is unavailable offline, a local one (Ollama) works. | A per-application vendored `node_modules`, created once at `import`. |
+| **Extend dependencies offline** | Refused, with the reason. | The build checks every declared dependency resolves before bundling, and names the one that does not. |
+
+No flag prevents a socket from opening — Bun 1.4.0 has no `BUN_OFFLINE`,
+`--offline` still downloads — so nothing here rests on one. The evidence, the
+platform matrix and the Windows differences are in
+[packaging.md](packaging.md); approvals, the control connection and what none of
+this protects are in [security.md](security.md).
+
+## Where the rest of it is written down
+
+- [packaging.md](packaging.md) — the launcher binary, its targets and sizes,
+  what is smoke-tested where, Windows, offline evidence, publishing.
+- [security.md](security.md) — the gate, approvals and their windows, the
+  control connection, MCP, attachment, the rollback boundary, what is deferred.
+- [backlog.md](backlog.md) — what phase 1 left out on purpose, and what would
+  have to be true before each item is worth doing.
