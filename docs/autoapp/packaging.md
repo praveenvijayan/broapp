@@ -51,9 +51,11 @@ The CI job is `autoapp` in `.github/workflows/ci.yml`. Nothing is skipped by
 platform; if a case ever has to be, it belongs in the table below with its
 reason, not behind a silent `skipIf`.
 
-| Skipped test | Platform | Why |
+| Skipped check | Platform | Why |
 | --- | --- | --- |
-| — | — | Nothing is skipped. |
+| `autoapp-smoke.ts` step 6, "the control file is gone once nothing is serving" | `windows-latest` | A Windows console process is terminated rather than signalled, so no exit handler runs and the script removes `launcher.json` itself. Checking it there would assert the script's own cleanup, not the launcher's. **What this leaves untested on Windows is real:** a launcher that is killed leaves a stale control file, and an MCP client reading it finds a dead port. It reports "the launcher is not running", which is true but arrived the long way. In the backlog. |
+
+No test is skipped.
 
 ## Windows
 

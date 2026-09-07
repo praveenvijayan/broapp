@@ -87,9 +87,12 @@ async function until(check: () => boolean, ms: number): Promise<boolean> {
   return check();
 }
 
+/** Where the launcher writes its control port and secret. */
+const controlPath = (): string => join(root, 'autoapp', 'launcher.json');
+
 /** The launcher's control file, once it exists. */
 function controlFile(): { port: number; secret: string } | null {
-  const path = join(root, 'autoapp', 'launcher.json');
+  const path = controlPath();
   if (!existsSync(path)) return null;
   try {
     return JSON.parse(readFileSync(path, 'utf8')) as { port: number; secret: string };
@@ -124,6 +127,11 @@ async function describeOverControl(appId: string): Promise<unknown> {
 
 /** Start `serve` in the background and wait for its control file. */
 async function startServing(env: Record<string, string> = {}): Promise<boolean> {
+  // A launcher that was killed rather than stopped leaves its control file
+  // behind — on Windows that is every launcher, because a terminated console
+  // process runs no exit handler. Waiting for a file that is already there
+  // would return before the new launcher had opened anything at all.
+  rmSync(controlPath(), { force: true });
   serving = Bun.spawn({
     cmd: [launcher, 'serve', 'items', '--no-open'],
     env: { ...process.env, BROAPP_DATA_DIR: root, ...env },
@@ -154,6 +162,10 @@ async function stopServing(): Promise<void> {
       stdout: 'ignore',
       stderr: 'ignore',
     });
+    // The exit handler that would have removed this never ran, so the script
+    // does what a graceful stop would have done. A stale file is not harmless:
+    // an MCP client would read a dead port from it — see the backlog.
+    rmSync(controlPath(), { force: true });
   } else {
     serving.kill('SIGTERM');
     await Promise.race([serving.exited, after(5_000, null)]);
@@ -271,8 +283,17 @@ async function main(): Promise<number> {
   }
 
   // 6. The control file is gone once nothing is serving.
-  if (controlFile() !== null) fail('cleanup', 'launcher.json outlived the launcher');
-  else ok('cleanup', 'launcher.json removed on exit');
+  //
+  // Only meaningful where the launcher was asked to stop. On Windows a console
+  // process is terminated rather than signalled, no exit handler runs, and
+  // `stopServing` above removes the file itself — so there is nothing here that
+  // the launcher could have got wrong. Recorded as a skip with its reason in
+  // docs/autoapp/packaging.md rather than passed as if it had been checked.
+  if (process.platform === 'win32') {
+    ok('cleanup', 'not checked on Windows: a terminated launcher runs no exit handler');
+  } else if (controlFile() !== null) {
+    fail('cleanup', 'launcher.json outlived the launcher');
+  } else ok('cleanup', 'launcher.json removed on exit');
 
   return failures.length === 0 ? 0 : 1;
 }
