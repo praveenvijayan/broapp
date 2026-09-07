@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 /**
  * The launcher, as a command.
  *
