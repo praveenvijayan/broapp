@@ -28,7 +28,7 @@ import { createRunStore, type RunStore } from '../host/run-store.ts';
 
 import { attachedOnly } from '../host/autoapp.ts';
 
-import { assertAppModule, type AppInstance } from './module.ts';
+import { assertAppInstance, assertAppModule, type AppInstance } from './module.ts';
 
 /** Exit codes this runtime uses, so a launcher can tell the cases apart. */
 const EXIT = {
@@ -215,13 +215,15 @@ export async function runChild(argv: readonly string[]): Promise<number> {
     // the migrated data before anything is allowed to change it.
     if (paused === 'paused') gate.pause('the application is being checked');
 
-    const instance = await module.start({
-      dataDir,
-      mode: executionMode,
-      gate,
-      approvals: mcpApprovals,
-      logger,
-    });
+    const instance = assertAppInstance(
+      await module.start({
+        dataDir,
+        mode: executionMode,
+        gate,
+        approvals: mcpApprovals,
+        logger,
+      }),
+    );
     child.instance = instance;
 
     const running = await startApp({

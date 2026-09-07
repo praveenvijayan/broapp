@@ -83,3 +83,30 @@ export function assertAppModule(mod: unknown): AppModule {
   }
   return candidate as AppModule;
 }
+
+/**
+ * Check what `start` returned, before anything is done with it.
+ *
+ * `assertAppModule` checks the module; this checks the instance. They are two
+ * different acts of trust: a release's `host.js` was compiled against some
+ * version of `broapp`, not necessarily this one, so the shape of what it hands
+ * back is all the child runtime can rely on — `instanceof` would be false for
+ * the same class from the other bundle, and there is no class here anyway.
+ * Without this, a missing `register` surfaces as a `TypeError` inside
+ * `startApp` several frames later, where nothing says the release is at fault.
+ */
+export function assertAppInstance(value: unknown): AppInstance {
+  if (typeof value !== 'object' || value === null) {
+    throw new TypeError('the release did not return an application from start()');
+  }
+  const candidate = value as Partial<AppInstance>;
+  for (const name of ['register', 'isBusy', 'shutdown', 'invoke'] as const) {
+    if (typeof candidate[name] !== 'function') {
+      throw new TypeError(`the application this release started has no ${name}()`);
+    }
+  }
+  if (typeof candidate.schemaVersion !== 'number' || !Number.isInteger(candidate.schemaVersion)) {
+    throw new TypeError('the application this release started has no whole-number schemaVersion');
+  }
+  return candidate as AppInstance;
+}

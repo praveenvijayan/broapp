@@ -29,6 +29,7 @@ import {
   parseSpec,
   readRelease,
   releaseId as computeReleaseId,
+  stripIdentity,
   writeRelease,
   type AppSpec,
   type Capability,
@@ -217,15 +218,19 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
       return { ok: false, problems: [{ stage: 'spec', message: reason(cause) }] };
     }
 
-    const releaseId = computeReleaseId({ page, host: hostBytes, contract: exported });
-    let spec: AppSpec;
+    // The identity covers the whole specification, so the specification has to
+    // exist before it can be computed. It is assembled with a placeholder name,
+    // hashed — `stripIdentity` removes the placeholder along with `createdAt` —
+    // and then parsed a second time under the name it earned.
+    const PLACEHOLDER = '0'.repeat(32);
+    let draft: AppSpec;
     try {
-      spec = parseSpec({
+      draft = parseSpec({
         manifest: {
           specVersion: 1,
           appId: manifest.appId,
           name: manifest.name,
-          releaseId,
+          releaseId: PLACEHOLDER,
           createdAt: Date.now(),
           runtime: {
             broapp: versionOf('broapp', '0.0.0'),
@@ -246,6 +251,9 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
       return { ok: false, problems: [{ stage: 'spec', message: reason(cause) }] };
     }
 
+    const releaseId = computeReleaseId({ page, host: hostBytes, spec: draft });
+    const spec: AppSpec = { ...draft, manifest: { ...draft.manifest, releaseId } };
+
     // 5. Write it. An identical rebuild produces an identical id, and there is
     //    nothing a second write could legitimately change — so it is a success
     //    that did nothing rather than a conflict.
@@ -256,45 +264,23 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
       if ((cause as { code?: string }).code !== 'conflict') {
         return { ok: false, problems: [{ stage: 'spec', message: reason(cause) }] };
       }
-      // The identity already exists. Either nothing changed — a real no-op —
-      // or something changed that the identity does not cover.
-      //
-      // A release is named by its page, its host bundle and its contract.
-      // Acceptance examples, migrations metadata and capabilities are part of
-      // the specification but not of the name, so a change to only those hashes
-      // to the release it came from. Reporting that as a success would leave
-      // somebody looking at a stored release that does not contain their
-      // change; saying so is the honest outcome.
+      // The identity already exists, and the identity now covers everything a
+      // release contains — so this is a rebuild of the same sources and
+      // nothing else. The stored specification is compared anyway, because if
+      // it differed the hash would be broken, and continuing on a broken hash
+      // is how an approval ends up authorising code nobody looked at.
       const stored = readRelease(params.layout, params.appId, releaseId);
-      // `createdAt` is when the build ran, not part of what was built, so an
-      // identical rebuild differs by it and by nothing else.
-      if (withoutBuildTime(stored) === withoutBuildTime(spec)) {
-        params.logger?.warn(`[autoapp] release ${releaseId} was already built`);
-        return { ok: true, releaseId, spec, rebuilt: false };
+      if (canonicalJson(stripIdentity(stored)) !== canonicalJson(stripIdentity(spec))) {
+        throw new Error(
+          `release ${releaseId} already exists with a different specification; the release identity is not a function of its contents`,
+        );
       }
-      return {
-        ok: false,
-        problems: [
-          {
-            stage: 'spec',
-            message: `this change does not alter the page, the host bundle or the contract, so it hashes to release ${releaseId}, which already exists. Acceptance examples, migrations and capabilities are part of the specification but not of a release's identity; change something the identity covers, or edit the existing release's inputs.`,
-          },
-        ],
-      };
+      params.logger?.warn(`[autoapp] release ${releaseId} was already built`);
+      return { ok: true, releaseId, spec, rebuilt: false };
     }
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
-}
-
-/**
- * A specification without the moment it was assembled.
- *
- * Two builds of the same sources differ in `createdAt` and nothing else, and
- * that is not a difference anybody means.
- */
-function withoutBuildTime(spec: AppSpec): string {
-  return canonicalJson({ ...spec, manifest: { ...spec.manifest, createdAt: 0 } });
 }
 
 /** A cheap shape test, for finding the view specification among a module's exports. */

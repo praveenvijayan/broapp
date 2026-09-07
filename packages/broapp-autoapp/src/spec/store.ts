@@ -32,6 +32,19 @@ import { releaseId as computeReleaseId } from './release-id.ts';
 import type { AppSpec } from './types.ts';
 import { parseSpec } from './validate.ts';
 
+/**
+ * What a release built before prompt 08b reads as.
+ *
+ * Its name is the hash of its page, its host bundle and its contract only, so
+ * under the rule that a name covers the whole specification it does not match
+ * its own contents. It is not migrated: renaming it would break every approval
+ * and every `current` pointer that names it, and rehashing it would be
+ * asserting that its contents are what somebody approved when nothing here
+ * knows that. Importing the application again builds an honest one.
+ */
+export const STALE_RELEASE_MESSAGE =
+  'this release was built by an earlier version of broapp-autoapp; import the application again';
+
 /** The three files a release directory holds. */
 const SPEC_FILE = 'spec.json';
 const PAGE_FILE = 'page.html';
@@ -47,6 +60,9 @@ export interface ReleaseFiles {
 export interface ReleaseSummary {
   readonly releaseId: string;
   readonly createdAt: number;
+  readonly schemaVersion: number;
+  /** True when the directory's name is not the hash of what is inside it. */
+  readonly stale: boolean;
 }
 
 /**
@@ -98,7 +114,7 @@ export function writeRelease(root: Layout, spec: AppSpec, files: ReleaseFiles): 
   // The identity is checked before anything is written. A manifest whose
   // `releaseId` is not the hash of what is about to be stored beside it would
   // make every later verification meaningless.
-  const recomputed = computeReleaseId({ page: files.page, host: files.host, contract: spec.contract });
+  const recomputed = computeReleaseId({ page: files.page, host: files.host, spec });
   if (recomputed !== spec.manifest.releaseId) {
     throw publicError.invalidInput(
       `the manifest names release ${spec.manifest.releaseId}, but these files hash to ${recomputed}`,
@@ -137,7 +153,7 @@ export function writeRelease(root: Layout, spec: AppSpec, files: ReleaseFiles): 
     const written = computeReleaseId({
       page: readFileSync(join(staging, PAGE_FILE)),
       host: readFileSync(join(staging, HOST_FILE)),
-      contract: parseSpec(JSON.parse(readFileSync(join(staging, SPEC_FILE), 'utf8'))).contract,
+      spec: parseSpec(JSON.parse(readFileSync(join(staging, SPEC_FILE), 'utf8'))),
     });
     if (written !== spec.manifest.releaseId) {
       throw publicError.unavailable(
@@ -152,8 +168,14 @@ export function writeRelease(root: Layout, spec: AppSpec, files: ReleaseFiles): 
   return target;
 }
 
-/** Read one release back, and check that it is the release it claims to be. */
-export function readRelease(root: Layout, appId: string, releaseId: string): AppSpec {
+/**
+ * Read one release back, without checking that its name is its hash.
+ *
+ * Only `listReleases` and `readRelease` use this. Everything else wants the
+ * checked read, because a release whose contents are not what its name says
+ * is not a release anything should act on.
+ */
+function readSpecFile(root: Layout, appId: string, releaseId: string): AppSpec {
   const app = root.app(appId);
   const directory = within(app, app.release(releaseId));
   let raw: string;
@@ -177,6 +199,37 @@ export function readRelease(root: Layout, appId: string, releaseId: string): App
   return spec;
 }
 
+/**
+ * True when a release directory's name is not the hash of what is inside it.
+ *
+ * Which today means exactly one thing: it was built when the identity covered
+ * the page, the host bundle and the contract, and this one covers the whole
+ * specification. A directory somebody edited by hand reads the same way, and
+ * the outcome is the same either way — do not act on it.
+ */
+export function isStaleRelease(root: Layout, appId: string, spec: AppSpec): boolean {
+  const app = root.app(appId);
+  const directory = within(app, app.release(spec.manifest.releaseId));
+  let page: Uint8Array;
+  let host: Uint8Array;
+  try {
+    page = readFileSync(join(directory, PAGE_FILE));
+    host = readFileSync(join(directory, HOST_FILE));
+  } catch {
+    // Half a release is not a release. Reporting it the same way sends the
+    // person to the same fix.
+    return true;
+  }
+  return computeReleaseId({ page, host, spec }) !== spec.manifest.releaseId;
+}
+
+/** Read one release back, and check that it is the release it claims to be. */
+export function readRelease(root: Layout, appId: string, releaseId: string): AppSpec {
+  const spec = readSpecFile(root, appId, releaseId);
+  if (isStaleRelease(root, appId, spec)) throw publicError.conflict(STALE_RELEASE_MESSAGE);
+  return spec;
+}
+
 /** Every complete release of one application, newest first. */
 export function listReleases(root: Layout, appId: string): readonly ReleaseSummary[] {
   const app = root.app(appId);
@@ -192,8 +245,16 @@ export function listReleases(root: Layout, appId: string): readonly ReleaseSumma
     // not parse, which includes a release half-copied in by hand.
     if (!/^[0-9a-f]{32}$/.test(name)) continue;
     try {
-      const spec = readRelease(root, appId, name);
-      found.push({ releaseId: name, createdAt: spec.manifest.createdAt });
+      // Read without the identity check, so a stale release is listed and
+      // labelled rather than quietly missing. A person whose `current` will
+      // not start needs to see the release that is the reason.
+      const spec = readSpecFile(root, appId, name);
+      found.push({
+        releaseId: name,
+        createdAt: spec.manifest.createdAt,
+        schemaVersion: spec.manifest.schemaVersion,
+        stale: isStaleRelease(root, appId, spec),
+      });
     } catch {
       continue;
     }

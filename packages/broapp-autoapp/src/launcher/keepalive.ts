@@ -13,7 +13,7 @@
  */
 import type { HostLogger } from 'broapp/host';
 
-import { readCurrent } from '../spec/store.ts';
+import { readCurrent, readRelease } from '../spec/store.ts';
 import type { Layout } from '../spec/layout.ts';
 
 import type { ChildHandle, Supervisor } from './supervisor.ts';
@@ -63,6 +63,21 @@ export async function keepServing(options: KeepServingOptions): Promise<number> 
     const current = readCurrent(layout, appId);
     if (current === null) {
       logger.error(`[autoapp] ${appId} has no current release`);
+      return 1;
+    }
+    // A release whose name is not the hash of its contents is not started.
+    // `readRelease` refuses it, but only somebody who reads a specification
+    // would ever find out; the child is handed a directory path and would run
+    // whatever is in it. Checked here, where starting is decided.
+    try {
+      readRelease(layout, appId, current);
+    } catch (cause) {
+      // `conflict` is what a release that is not what its name says reads as,
+      // whether it went stale under the new identity rule or was moved.
+      if ((cause as { code?: string }).code !== 'conflict') throw cause;
+      logger.error(
+        `[autoapp] ${appId} cannot start release ${current}: ${String((cause as Error).message)}`,
+      );
       return 1;
     }
 

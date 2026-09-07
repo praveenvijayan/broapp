@@ -35,6 +35,22 @@ export class ValidationError extends Error {
   }
 }
 
+/**
+ * True when `error` is a {@link ValidationError}, including one from another
+ * copy of this module.
+ *
+ * `instanceof` is not enough for the same reason it is not enough for
+ * `PublicError`: an Autoapp release bundles its own copy of `broapp`, so a
+ * schema built in one bundle and parsed by code in another throws a different
+ * class object with the same shape. Reducing that to "invalid input" with no
+ * message would tell a caller nothing about what was actually wrong.
+ */
+export function isValidationError(error: unknown): error is ValidationError {
+  return (
+    error instanceof Error && error.name === 'ValidationError' && Array.isArray((error as { issues?: unknown }).issues)
+  );
+}
+
 function formatPath(path: IssuePath): string {
   let out = '';
   for (const segment of path) {

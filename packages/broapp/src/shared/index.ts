@@ -29,7 +29,7 @@ export type {
   StreamSpec,
 } from './contract.ts';
 
-export { s, ValidationError } from './schema.ts';
+export { isValidationError, s, ValidationError } from './schema.ts';
 export type { Infer, InferObject, Issue, JsonSchema, Result, Schema } from './schema.ts';
 
 export {

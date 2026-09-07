@@ -6,12 +6,13 @@
  */
 export {
   applyChange,
+  applyEdits,
   diffSummary,
   readTree,
   readWorkspaceFile,
   snapshot,
 } from './workspace.ts';
-export type { FileChange, Snapshot, TreeEntry } from './workspace.ts';
+export type { EditResult, FileChange, Hunk, Snapshot, TreeEntry } from './workspace.ts';
 
 export { ENGINEER_INSTRUCTIONS, INSTRUCTION_SECTIONS } from './instructions.ts';
 

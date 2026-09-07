@@ -7,7 +7,7 @@
  * "would `resolve()` succeed", rather than a second copy of the same
  * conditions that can drift from the first.
  */
-import { PublicError, publicError } from '../../shared/errors.ts';
+import { isPublicError, publicError } from '../../shared/errors.ts';
 import type { AiSettings } from '../shared/types.ts';
 
 import type { AdapterConfig, ProviderAdapter } from './adapter.ts';
@@ -149,7 +149,7 @@ export function createRegistry(options: RegistryOptions): Registry {
       } catch (cause) {
         // Anything that is not a deliberate "not configured" is a real fault
         // and must not be reported as merely unconfigured.
-        if (!(cause instanceof PublicError)) throw cause;
+        if (!isPublicError(cause)) throw cause;
         configured = false;
       }
       return {

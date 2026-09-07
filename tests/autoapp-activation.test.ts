@@ -16,6 +16,7 @@ import {
   buildCandidate,
   connectToChild,
   createSupervisor,
+  keepServing,
   openJournal,
   recover,
   snapshotDirectory,
@@ -23,7 +24,15 @@ import {
   type Supervisor,
 } from 'broapp-autoapp/launcher';
 import { fromTransportError } from 'broapp/shared';
-import { layout, readCurrent, writeGrants, type Layout } from 'broapp-autoapp/spec';
+import {
+  layout,
+  listReleases,
+  readCurrent,
+  readRelease,
+  setCurrent,
+  writeGrants,
+  type Layout,
+} from 'broapp-autoapp/spec';
 
 const packageDir = join(import.meta.dir, '..', 'packages', 'broapp-autoapp');
 const launcher = join(packageDir, 'dist', 'broapp-autoapp');
@@ -204,16 +213,17 @@ describe.skipIf(!available)('buildCandidate', () => {
     expect(result.problems.some((p) => p.message.includes('items.ping'))).toBe(true);
   });
 
-  test('a change the release identity cannot represent is refused, not called a success', async () => {
+  /**
+   * The flaw prompt 08b fixes. Under the old rule an acceptance-only change
+   * hashed to the release it came from, so `buildCandidate` had to refuse it —
+   * and `activate` runs the acceptance examples as its check, which meant a
+   * person could add a check that could never reach a release.
+   */
+  test('an acceptance-only change is a new release, and it activates', async () => {
     const where = makeWorld();
     const first = await build(where);
     const app = where.root.app('items');
 
-    // Acceptance examples are part of a specification but not of a release's
-    // identity — which is the page, the host bundle and the contract. So this
-    // change hashes to the release it came from, and the stored release cannot
-    // hold it. Reporting success here would leave somebody looking at a release
-    // that does not contain the check they just added.
     const manifestPath = join(app.source, 'autoapp.json');
     const manifest = JSON.parse(await Bun.file(manifestPath).text()) as {
       acceptance: { id: string; title: string; steps: unknown[] }[];
@@ -225,13 +235,57 @@ describe.skipIf(!available)('buildCandidate', () => {
     });
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-    const result = await buildCandidate({ layout: where.root, appId: 'items' });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.problems[0]?.stage).toBe('spec');
-    expect(result.problems[0]?.message).toContain(first);
-    expect(result.problems[0]?.message).toContain('not of a release');
-  });
+    const second = await build(where);
+    expect(second).not.toBe(first);
+    expect(readRelease(where.root, 'items', second).acceptance.map((one) => one.id)).toContain(
+      'added-later',
+    );
+
+    grantAll(where, second);
+    setCurrent(where.root, 'items', first);
+    const result = await activate({
+      layout: where.root,
+      supervisor: where.supervisor,
+      journal: where.journal,
+      appId: 'items',
+      releaseId: second,
+      logger: { warn: () => undefined, error: () => undefined },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(readCurrent(where.root, 'items')).toBe(second);
+    await result.child.shutdown(5_000);
+  }, 120_000);
+
+  test('a views-only change is a new release, and it activates', async () => {
+    const where = makeWorld();
+    const first = await build(where);
+    const app = where.root.app('items');
+
+    // A column header, which the page bundle does not contain: the views module
+    // is bundled for the specification, not shipped to the browser as code.
+    const viewsPath = join(app.source, 'src', 'shared', 'views.ts');
+    const source = await Bun.file(viewsPath).text();
+    writeFileSync(viewsPath, source.replace("header: 'Label'", "header: 'What it is'"));
+
+    const second = await build(where);
+    expect(second).not.toBe(first);
+
+    grantAll(where, second);
+    setCurrent(where.root, 'items', first);
+    const result = await activate({
+      layout: where.root,
+      supervisor: where.supervisor,
+      journal: where.journal,
+      appId: 'items',
+      releaseId: second,
+      logger: { warn: () => undefined, error: () => undefined },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(readCurrent(where.root, 'items')).toBe(second);
+    await result.child.shutdown(5_000);
+  }, 120_000);
 
   test('views naming a route that is not there is a views problem', async () => {
     const where = makeWorld();
@@ -359,7 +413,11 @@ describe.skipIf(!available)('preview mode', () => {
 
 describe.skipIf(!available)('activation', () => {
   /** Build A at schema 2, put some data behind it, then build B at schema 3. */
-  async function twoReleases(where: World): Promise<{ a: string; b: string }> {
+  async function twoReleases(
+    where: World,
+    /** Applied to the source workspace after the full migration list is restored, before B is built. */
+    beforeB?: (sourceDir: string) => void | Promise<void>,
+  ): Promise<{ a: string; b: string }> {
     const a = await build(where, { schemaVersion: 2 });
     grantAll(where, a);
     const app = where.root.app('items');
@@ -376,12 +434,12 @@ describe.skipIf(!available)('activation', () => {
     await client.call('items.add', { label: 'written under A' });
     await client.close();
     await first.shutdown(5_000);
-    const { setCurrent } = await import('broapp-autoapp/spec');
     setCurrent(where.root, 'items', a);
 
     // Restore the full migration list, so B is a real forward step.
     cpSync(join(fixture, 'src', 'host', 'db.ts'), join(app.source, 'src', 'host', 'db.ts'));
     cpSync(join(fixture, 'autoapp.json'), join(app.source, 'autoapp.json'));
+    await beforeB?.(app.source);
     const b = await build(where);
     return { a, b };
   }
@@ -421,21 +479,21 @@ describe.skipIf(!available)('activation', () => {
 
   test('a migration that fails leaves the previous release serving unchanged data', async () => {
     const where = makeWorld();
-    const { a, b } = await twoReleases(where);
+    // Broken in the *source*, so B is a real release with a real bad migration.
+    // Corrupting the built directory instead would now be caught earlier, by
+    // the identity check, and would never reach the migrate phase at all.
+    const { a, b } = await twoReleases(where, async (sourceDir) => {
+      const path = join(sourceDir, 'src', 'host', 'db.ts');
+      const source = await Bun.file(path).text();
+      writeFileSync(
+        path,
+        source.replace(
+          "ALTER TABLE items ADD COLUMN note TEXT NOT NULL DEFAULT '';",
+          'ALTER TABLE items ADD COLUMN note NOT VALID SQL;',
+        ),
+      );
+    });
     const app = where.root.app('items');
-
-    // Break migration 3 inside the release that is about to be activated.
-    const path = join(app.release(b), 'host.js');
-    const source = await Bun.file(path).text();
-    // The release directory is immutable in normal use; a test is allowed to
-    // corrupt one, and this is the cheapest way to make a migration throw.
-    writeFileSync(
-      path,
-      source.replace(
-        "ALTER TABLE items ADD COLUMN note TEXT NOT NULL DEFAULT '';",
-        'ALTER TABLE items ADD COLUMN note NOT VALID SQL;',
-      ),
-    );
 
     const result = await activate({
       layout: where.root,
@@ -458,22 +516,24 @@ describe.skipIf(!available)('activation', () => {
 
   test('an acceptance example that fails stops the activation', async () => {
     const where = makeWorld();
-    const { a, b } = await twoReleases(where);
+    // Written into the manifest, so B genuinely contains this check. Acceptance
+    // examples are part of a release's identity now, so this is an ordinary
+    // build rather than a doctored directory.
+    const { a, b } = await twoReleases(where, async (sourceDir) => {
+      const path = join(sourceDir, 'autoapp.json');
+      const manifest = JSON.parse(await Bun.file(path).text()) as {
+        acceptance: { id: string; title: string; steps: unknown[] }[];
+      };
+      manifest.acceptance = [
+        {
+          id: 'impossible',
+          title: 'Expects something that is not so',
+          steps: [{ route: 'items.list', input: null, expect: { items: [], count: 99 } }],
+        },
+      ];
+      writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+    });
     const app = where.root.app('items');
-
-    // Rewrite the release's own acceptance example so it cannot pass.
-    const specPath = join(app.release(b), 'spec.json');
-    const spec = JSON.parse(await Bun.file(specPath).text()) as {
-      acceptance: { id: string; title: string; steps: unknown[] }[];
-    };
-    spec.acceptance = [
-      {
-        id: 'impossible',
-        title: 'Expects something that is not so',
-        steps: [{ route: 'items.list', input: null, expect: { items: [], count: 99 } }],
-      },
-    ];
-    writeFileSync(specPath, `${JSON.stringify(spec, null, 2)}\n`);
 
     const result = await activate({
       layout: where.root,
@@ -595,7 +655,6 @@ describe.skipIf(!available)('recovery', () => {
     await client.call('items.add', { label: 'written under A' });
     await client.close();
     await first.shutdown(5_000);
-    const { setCurrent } = await import('broapp-autoapp/spec');
     setCurrent(where.root, 'items', a);
     cpSync(join(fixture, 'src', 'host', 'db.ts'), join(app.source, 'src', 'host', 'db.ts'));
     cpSync(join(fixture, 'autoapp.json'), join(app.source, 'autoapp.json'));
@@ -680,6 +739,48 @@ describe.skipIf(!available)('recovery', () => {
     expect(readdirSync(app.dir).filter((n) => n.startsWith('data-prev-'))).toHaveLength(1);
     expect(readdirSync(app.snapshots).length).toBeGreaterThan(0);
   }, 60_000);
+});
+
+describe.skipIf(!available)('serving', () => {
+  test('a stale current is refused with the sentence, not started', async () => {
+    const where = makeWorld();
+    const releaseId = await build(where);
+    setCurrent(where.root, 'items', releaseId);
+    const app = where.root.app('items');
+    mkdirSync(app.data, { recursive: true });
+
+    // Exactly what a release built before prompt 08b looks like: the directory
+    // holds a specification the name is no longer the hash of. Simulated by
+    // editing one field the identity now covers and nothing else.
+    const specPath = join(app.release(releaseId), 'spec.json');
+    const spec = JSON.parse(await Bun.file(specPath).text()) as {
+      acceptance: { id: string; title: string; steps: unknown[] }[];
+    };
+    spec.acceptance.push({
+      id: 'added-by-hand',
+      title: 'Not what this release was named for',
+      steps: [{ route: 'items.list', input: null }],
+    });
+    writeFileSync(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+
+    const said: string[] = [];
+    const code = await keepServing({
+      layout: where.root,
+      supervisor: where.supervisor,
+      appId: 'items',
+      logger: { warn: () => undefined, error: (message) => said.push(message) },
+    });
+
+    expect(code).toBe(1);
+    expect(said.join('\n')).toContain('built by an earlier version of broapp-autoapp');
+    // Nothing was started, so there is nothing to clean up.
+    expect(where.supervisor.children).toHaveLength(0);
+
+    // And `releases` says which one is the problem.
+    const listed = listReleases(where.root, 'items');
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.stale).toBe(true);
+  }, 120_000);
 });
 
 describe.skipIf(!available)('the supervisor', () => {

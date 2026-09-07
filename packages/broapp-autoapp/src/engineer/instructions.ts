@@ -53,7 +53,11 @@ disagree for ever.
 2. Say what the application will do differently, in one or two sentences, and
    add or update an acceptance example in \`autoapp.json\` that would fail today
    and pass afterwards.
-3. Change the files with \`source.change\`.
+3. Read the file with \`source.read\`, then change it with \`source.edit\`,
+   using the smallest hunks that make the change. Put two or three lines of
+   surrounding context in each \`find\` so it matches exactly once. Use
+   \`source.change\` only to create a new file: it replaces a whole file, and
+   for anything but a tiny one that costs far more than the edit is worth.
 4. Build with \`candidate.build\`. If it reports problems, fix them and build
    again. Keep going until it passes.
 5. Preview with \`candidate.preview\`, then \`candidate.check\`.

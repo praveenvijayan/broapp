@@ -24,7 +24,9 @@ import {
   readCurrent,
   readGrants,
   readRelease,
+  canonicalJson,
   releaseId,
+  stripIdentity,
   setCurrent,
   writeGrants,
   writeRelease,
@@ -88,7 +90,9 @@ function minimalSpec(overrides: Partial<AppSpec> = {}): AppSpec {
       specVersion: 1,
       appId: 'notes',
       name: 'Notes',
-      releaseId: releaseId({ page, host, contract }),
+      // Replaced by `resealed` below. The identity covers the whole
+      // specification, so it cannot be computed until the rest of it exists.
+      releaseId: '0'.repeat(32),
       createdAt: 1_700_000_000_000,
       runtime: { broapp: '0.2.1', autoapp: '0.1.0', bun: '1.4.0' },
       entry: { host: 'host.js', page: 'page.html' },
@@ -102,7 +106,7 @@ function minimalSpec(overrides: Partial<AppSpec> = {}): AppSpec {
     acceptance: [],
     ...overrides,
   };
-  return spec;
+  return resealed(spec);
 }
 
 /** The same specification, with its release identity brought back into line. */
@@ -111,7 +115,7 @@ function resealed(spec: AppSpec): AppSpec {
     ...spec,
     manifest: {
       ...spec.manifest,
-      releaseId: releaseId({ page, host, contract: spec.contract }),
+      releaseId: releaseId({ page, host, spec }),
     },
   };
 }
@@ -316,43 +320,105 @@ describe('exportContract', () => {
 
 describe('releaseId', () => {
   test('is a deterministic truncated digest of the three parts', () => {
-    const contract = minimalSpec().contract;
-    const first = releaseId({ page, host, contract });
+    const spec = minimalSpec();
+    const first = releaseId({ page, host, spec });
     expect(first).toMatch(/^[0-9a-f]{32}$/);
-    expect(releaseId({ page, host, contract })).toBe(first);
+    expect(releaseId({ page, host, spec })).toBe(first);
   });
 
   test('changes when one byte of the page changes', () => {
-    const contract = minimalSpec().contract;
+    const spec = minimalSpec();
     const other = new Uint8Array(page);
     other[0] = (other[0] ?? 0) ^ 1;
-    expect(releaseId({ page: other, host, contract })).not.toBe(releaseId({ page, host, contract }));
+    expect(releaseId({ page: other, host, spec })).not.toBe(releaseId({ page, host, spec }));
   });
 
   test('is unaffected by the order keys were written in', () => {
-    const straight = {
-      operations: {
-        'a.one': { effect: 'read' as const, summary: 'One.', input: { type: 'object' }, output: { type: 'object' } },
+    const straight = minimalSpec({
+      contract: {
+        operations: {
+          'a.one': { effect: 'read' as const, summary: 'One.', input: { type: 'object' }, output: { type: 'object' } },
+        },
+        streams: {},
       },
-      streams: {},
-    };
-    const shuffled = {
-      streams: {},
-      operations: {
-        'a.one': { output: { type: 'object' }, input: { type: 'object' }, summary: 'One.', effect: 'read' as const },
-      },
-    };
-    expect(releaseId({ page, host, contract: shuffled })).toBe(
-      releaseId({ page, host, contract: straight }),
-    );
+    });
+    const shuffled = minimalSpec({
+      contract: {
+        streams: {},
+        operations: {
+          'a.one': { output: { type: 'object' }, input: { type: 'object' }, summary: 'One.', effect: 'read' as const },
+        },
+      } as AppSpec['contract'],
+    });
+    expect(releaseId({ page, host, spec: shuffled })).toBe(releaseId({ page, host, spec: straight }));
   });
 
   test('separates the parts, so moving the boundary changes the identity', () => {
-    const contract = minimalSpec().contract;
+    const spec = minimalSpec();
     const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
-    expect(releaseId({ page: bytes('ab'), host: bytes('c'), contract })).not.toBe(
-      releaseId({ page: bytes('a'), host: bytes('bc'), contract }),
+    expect(releaseId({ page: bytes('ab'), host: bytes('c'), spec })).not.toBe(
+      releaseId({ page: bytes('a'), host: bytes('bc'), spec }),
     );
+  });
+
+  /**
+   * The reason prompt 08b exists. Under the old rule these four all hashed to
+   * the release they came from, and `activate` runs the acceptance examples as
+   * its check — so somebody could add a check that could never reach a release.
+   */
+  test('covers acceptance, views, migrations and capabilities', () => {
+    const base = minimalSpec();
+    const identity = (spec: AppSpec): string => releaseId({ page, host, spec });
+
+    const acceptance = minimalSpec({
+      acceptance: [
+        { id: 'lists', title: 'Lists the notes.', steps: [{ route: 'notes.list', input: {} }] },
+      ],
+    });
+    expect(identity(acceptance)).not.toBe(identity(base));
+
+    const views = minimalSpec({
+      views: {
+        ...minimalViews,
+        pages: [{ ...minimalViews.pages[0]!, title: 'Notes, renamed' }],
+      },
+    });
+    expect(identity(views)).not.toBe(identity(base));
+
+    const migrations = minimalSpec({
+      migrations: [
+        {
+          id: '001-create',
+          fromSchemaVersion: 0,
+          toSchemaVersion: 1,
+          checksum: checksum('create'),
+          description: 'Create the table.',
+        },
+      ],
+    });
+    expect(identity(migrations)).not.toBe(identity(base));
+
+    const capabilities = minimalSpec({
+      manifest: {
+        ...base.manifest,
+        capabilities: [{ kind: 'network' as const, hosts: ['example.com'], reason: 'To fetch.' }],
+      },
+    });
+    expect(identity(capabilities)).not.toBe(identity(base));
+  });
+
+  test('is unaffected by when the build ran', () => {
+    const base = minimalSpec();
+    const later = { ...base, manifest: { ...base.manifest, createdAt: base.manifest.createdAt + 9_000 } };
+    expect(releaseId({ page, host, spec: later })).toBe(releaseId({ page, host, spec: base }));
+  });
+
+  test('stripIdentity deletes the two build fields rather than blanking them', () => {
+    const spec = minimalSpec();
+    const stripped = stripIdentity(spec) as { manifest: Record<string, unknown> };
+    expect('releaseId' in stripped.manifest).toBe(false);
+    expect('createdAt' in stripped.manifest).toBe(false);
+    expect(stripped.manifest['appId']).toBe('notes');
   });
 });
 
@@ -365,7 +431,12 @@ describe('the release store', () => {
     expect(readFileSync(join(written, 'page.html'))).toEqual(Buffer.from(page));
     expect(readRelease(store, 'notes', spec.manifest.releaseId)).toEqual(spec);
     expect(listReleases(store, 'notes')).toEqual([
-      { releaseId: spec.manifest.releaseId, createdAt: spec.manifest.createdAt },
+      {
+        releaseId: spec.manifest.releaseId,
+        createdAt: spec.manifest.createdAt,
+        schemaVersion: spec.manifest.schemaVersion,
+        stale: false,
+      },
     ]);
   });
 
@@ -414,6 +485,47 @@ describe('the release store', () => {
     // And it is not listed, because listing reads each one back.
     expect(listReleases(store, 'notes').map((entry) => entry.releaseId)).toEqual([
       spec.manifest.releaseId,
+    ]);
+  });
+
+  test('a release named the way the old rule named it is refused, not misread', () => {
+    const store = root();
+    const app = store.app('notes');
+    const spec = minimalSpec({
+      acceptance: [
+        { id: 'lists', title: 'Lists the notes.', steps: [{ route: 'notes.list', input: {} }] },
+      ],
+    });
+
+    // The identity as it was computed before prompt 08b: page, host bundle and
+    // the exported contract, with nothing else in the digest. Built here rather
+    // than imported, because the old function is gone and the point is that a
+    // directory somebody already has on disk still reads correctly.
+    const old = createHash('sha256');
+    old.update(page);
+    old.update(new Uint8Array([0]));
+    old.update(host);
+    old.update(new Uint8Array([0]));
+    old.update(canonicalJson(spec.contract), 'utf8');
+    const oldId = old.digest('hex').slice(0, 32);
+    expect(oldId).not.toBe(spec.manifest.releaseId);
+
+    const directory = app.release(oldId);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'page.html'), page);
+    writeFileSync(join(directory, 'host.js'), host);
+    writeFileSync(
+      join(directory, 'spec.json'),
+      `${JSON.stringify({ ...spec, manifest: { ...spec.manifest, releaseId: oldId } }, null, 2)}\n`,
+    );
+
+    expect(() => readRelease(store, 'notes', oldId)).toThrow(
+      /built by an earlier version of broapp-autoapp/,
+    );
+    // Listed and labelled rather than hidden: somebody whose `current` will not
+    // start needs to see the release that is the reason.
+    expect(listReleases(store, 'notes')).toEqual([
+      { releaseId: oldId, createdAt: spec.manifest.createdAt, schemaVersion: 0, stale: true },
     ]);
   });
 

@@ -96,10 +96,42 @@ export class PublicError extends Error {
  * Nothing an untrusted value could set by accident.
  */
 export function isPublicError(error: unknown): error is PublicError {
-  if (error instanceof PublicError) return true;
+  // No `instanceof PublicError` fast path. It would be true for one of the two
+  // copies and false for the other, and a check whose answer depends on which
+  // bundle asked is the bug this function exists to fix — including in the
+  // reader's mind, the next time somebody copies this shape.
   if (!(error instanceof Error) || error.name !== 'PublicError') return false;
   const code: unknown = (error as { code?: unknown }).code;
   return typeof code === 'string' && (PUBLIC_CODES as readonly string[]).includes(code);
+}
+
+/**
+ * True when `error` is a {@link BroappError}, including one from another copy
+ * of this module.
+ *
+ * Same reason as {@link isPublicError}. `fromTransportError` is shared code:
+ * the browser calls it inside one bundle, and the Autoapp child runtime calls
+ * it on an error that came out of a release's own bundle.
+ */
+function isBroappError(error: unknown): error is BroappError {
+  if (!(error instanceof Error) || error.name !== 'BroappError') return false;
+  const code: unknown = (error as { code?: unknown }).code;
+  return typeof code === 'string' && (PUBLIC_CODES as readonly string[]).includes(code);
+}
+
+/**
+ * True when `error` is Brobridge's cancellation, from any copy of Brobridge.
+ *
+ * A release bundles its own, so the class identity is not shared. `ErrorCode`
+ * is a set of string constants rather than a symbol, which is what makes the
+ * value comparison meaningful across copies.
+ */
+function isCancelled(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === 'BridgeError' &&
+    (error as { code?: unknown }).code === ErrorCode.CANCELLED
+  );
 }
 
 /** The message every unhandled host failure becomes, on both sides. */
@@ -127,7 +159,7 @@ export class BroappError extends Error {
  * for a user to read.
  */
 export function fromTransportError(error: unknown): BroappError {
-  if (error instanceof BroappError) return error;
+  if (isBroappError(error)) return error;
   const message = error instanceof Error ? error.message : '';
   if (message.startsWith(MARKER)) {
     const space = message.indexOf(' ');
@@ -140,7 +172,7 @@ export function fromTransportError(error: unknown): BroappError {
       );
     }
   }
-  if (error instanceof BridgeError && error.code === ErrorCode.CANCELLED) {
+  if (isCancelled(error)) {
     return new BroappError('rejected', 'The operation was cancelled.', error);
   }
   return new BroappError('internal', INTERNAL_ERROR_MESSAGE, error);

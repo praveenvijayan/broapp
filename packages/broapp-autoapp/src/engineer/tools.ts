@@ -35,7 +35,14 @@ import {
 } from '../spec/index.ts';
 
 import type { CandidateStates, CheckResult } from './state.ts';
-import { applyChange, diffSummary, readTree, readWorkspaceFile, snapshot } from './workspace.ts';
+import {
+  applyChange,
+  applyEdits,
+  diffSummary,
+  readTree,
+  readWorkspaceFile,
+  snapshot,
+} from './workspace.ts';
 
 /** What the engineer's tools need. */
 export interface EngineerToolsOptions {
@@ -50,6 +57,9 @@ export interface EngineerToolsOptions {
 
 /** How long a preview child gets to stop. */
 const STOP_DEADLINE_MS = 10_000;
+
+/** The most lines of an existing file `source.change` will replace wholesale. */
+const MAX_REWRITE_LINES = 60;
 
 /** Just an application id, which is most of these tools' whole input. */
 const appIdInput = s.object({ appId: s.string({ min: 1, max: 40 }) });
@@ -133,13 +143,30 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   tools['source.change'] = guardedTool(gate, {
     name: 'source.change',
     description:
-      'Write files in an application’s source workspace. Only src/ and autoapp.json may be changed. Returns a summary of what changed.',
+      'Create a file, or replace one that is under 60 lines, in an application’s source workspace. For anything else use source.edit. Only src/ and autoapp.json may be changed. Returns a summary of what changed.',
     inputSchema: changeInput.toJsonSchema(),
     effect: 'write',
     run: (input) => {
       const { appId, message, changes } = changeInput.parse(input);
       const sourceDir = root.app(appId).source;
       const before = snapshot(sourceDir);
+
+      // Whole-file rewrites of large files were measured to stall models: the
+      // tool call grows with the file rather than with the change, and report
+      // 07 watched twenty-two minutes go by composing one. Creating a file is
+      // unlimited, because there is no smaller way to say it.
+      for (const change of changes) {
+        if (change.delete === true) continue;
+        const existing = before.get(change.path.split('\\').join('/'));
+        if (existing === undefined) continue;
+        const lines = existing.split('\n').length;
+        if (lines > MAX_REWRITE_LINES) {
+          throw publicError.rejected(
+            `${change.path} is ${String(lines)} lines, and source.change only replaces files under ${String(MAX_REWRITE_LINES)}. Use source.edit with the smallest hunks that make the change.`,
+          );
+        }
+      }
+
       const applied = applyChange(
         sourceDir,
         changes.map((change) =>
@@ -149,6 +176,35 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         ),
         message,
       );
+      const summary = diffSummary(before, snapshot(sourceDir));
+      states.update(appId, { changed: applied.changed });
+      return Promise.resolve({ changed: applied.changed, undo: applied.undo, diff: summary });
+    },
+  });
+
+  const editInput = s.object({
+    appId: s.string({ min: 1, max: 40 }),
+    message: s.string({ min: 1, max: 500 }),
+    hunks: s.array(
+      s.object({
+        path: s.string({ min: 1, max: 400 }),
+        find: s.string({ min: 1, max: 20_000 }),
+        replace: s.string({ max: 20_000 }),
+      }),
+      { min: 1, max: 50 },
+    ),
+  });
+  tools['source.edit'] = guardedTool(gate, {
+    name: 'source.edit',
+    description:
+      'Change files in an application’s source workspace by exact find-and-replace. Each hunk’s "find" must occur exactly once in its file, so include two or three lines of surrounding context. Every hunk is checked before any file is written. Only src/ and autoapp.json may be changed.',
+    inputSchema: editInput.toJsonSchema(),
+    effect: 'write',
+    run: (input) => {
+      const { appId, message, hunks } = editInput.parse(input);
+      const sourceDir = root.app(appId).source;
+      const before = snapshot(sourceDir);
+      const applied = applyEdits(sourceDir, hunks, message);
       const summary = diffSummary(before, snapshot(sourceDir));
       states.update(appId, { changed: applied.changed });
       return Promise.resolve({ changed: applied.changed, undo: applied.undo, diff: summary });

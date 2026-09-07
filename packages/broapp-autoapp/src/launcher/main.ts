@@ -29,7 +29,6 @@ import {
   listReleases,
   readCurrent,
   readGrants,
-  readRelease,
   setCurrent,
   writeGrants,
   type Layout,
@@ -354,9 +353,8 @@ async function main(): Promise<number> {
         if (appId === undefined) return usage('releases <appId>');
         const current = readCurrent(root, appId);
         for (const release of listReleases(root, appId)) {
-          const spec = readRelease(root, appId, release.releaseId);
           console.log(
-            `${release.releaseId === current ? '*' : ' '} ${release.releaseId}  schema ${String(spec.manifest.schemaVersion)}  ${new Date(release.createdAt).toISOString()}`,
+            `${release.releaseId === current ? '*' : ' '} ${release.releaseId}  schema ${String(release.schemaVersion)}  ${new Date(release.createdAt).toISOString()}${release.stale ? '  stale' : ''}`,
           );
         }
         return 0;

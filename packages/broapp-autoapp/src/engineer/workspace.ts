@@ -42,6 +42,20 @@ export type FileChange =
 /** What the workspace looked like before a change, for the diff. */
 export type Snapshot = ReadonlyMap<string, string>;
 
+/** One exact find-and-replace in one file. */
+export interface Hunk {
+  readonly path: string;
+  /** Exact text to find. Must occur exactly once in the file. */
+  readonly find: string;
+  readonly replace: string;
+}
+
+/** What {@link applyEdits} did. */
+export interface EditResult {
+  readonly changed: readonly string[];
+  readonly undo: 'git' | 'source-history';
+}
+
 /** The most one file may be, read or written. */
 const MAX_FILE_BYTES = 200_000;
 /** The most a diff summary may be before it is cut short. */
@@ -181,7 +195,7 @@ export function applyChange(
   sourceDir: string,
   changes: readonly FileChange[],
   message: string,
-): { changed: readonly string[]; undo: 'git' | 'source-history' } {
+): EditResult {
   const targets = changes.map((change) => {
     const path = asPosix(change.path);
     if (!WRITABLE.test(path)) {
@@ -195,18 +209,7 @@ export function applyChange(
     return { change, path, target: within(sourceDir, path) };
   });
 
-  const git = hasGit(sourceDir);
-  if (!git) {
-    // Written before anything is touched, so a failure partway leaves the
-    // history complete rather than covering only what happened to go first.
-    const history = join(dirname(sourceDir), 'source-history', String(Date.now()));
-    for (const { path, target } of targets) {
-      if (!existsSync(target)) continue;
-      const kept = join(history, path);
-      mkdirSync(dirname(kept), { recursive: true, mode: 0o700 });
-      writeFileSync(kept, readFileSync(target));
-    }
-  }
+  const git = keepHistory(sourceDir, targets);
 
   const changed: string[] = [];
   for (const { change, path, target } of targets) {
@@ -219,6 +222,130 @@ export function applyChange(
     changed.push(path);
   }
 
+  return finish(sourceDir, changed, message, git);
+}
+
+/**
+ * Apply exact find-and-replace hunks.
+ *
+ * The reason this exists rather than `applyChange` alone: `source.change`
+ * takes the whole new contents of a file, and report 07 measured a local model
+ * spending twenty-two minutes composing one such call for a five-file change
+ * without emitting it. The cost was linear in the size of the files rather
+ * than in the size of the change. A hunk is proportional to the edit.
+ *
+ * Every hunk is checked against the file before any file is written, and the
+ * new contents are computed in memory first, so a set of hunks either all land
+ * or none do. A half-applied edit is worse than a refused one: the model would
+ * have to work out which half.
+ */
+export function applyEdits(
+  sourceDir: string,
+  hunks: readonly Hunk[],
+  message: string,
+): EditResult {
+  if (hunks.length === 0) throw publicError.invalidInput('no hunks were given');
+
+  /** The new contents of each file, in hunk order, before anything is written. */
+  const buffers = new Map<string, { target: string; content: string }>();
+
+  for (const hunk of hunks) {
+    const path = asPosix(hunk.path);
+    if (!WRITABLE.test(path)) {
+      throw publicError.invalidInput(
+        `${hunk.path} is not somewhere this application's source may be changed; only src/ and autoapp.json are`,
+      );
+    }
+    const target = within(sourceDir, path);
+    let current = buffers.get(path)?.content;
+    if (current === undefined) {
+      if (!existsSync(target)) {
+        throw publicError.notFound(`${hunk.path} is not there; use source.change to create a file`);
+      }
+      current = readFileSync(target, 'utf8');
+    }
+
+    if (hunk.find === '') {
+      throw publicError.invalidInput(`the hunk for ${hunk.path} has nothing to find`);
+    }
+    const matches = countOccurrences(current, hunk.find);
+    if (matches === 0) {
+      throw publicError.invalidInput(`not found in ${hunk.path}: ${excerpt(hunk.find)}`);
+    }
+    if (matches > 1) {
+      throw publicError.invalidInput(
+        `ambiguous in ${hunk.path}: ${String(matches)} matches, include more context`,
+      );
+    }
+
+    // Two hunks on one file apply in order to the same buffer, so the second
+    // sees what the first left. Anything else would make the order of a list
+    // silently matter in a way nobody could see.
+    const next = current.replace(hunk.find, () => hunk.replace);
+    if (Buffer.byteLength(next, 'utf8') > MAX_FILE_BYTES) {
+      throw publicError.invalidInput(`${hunk.path} is larger than the ${String(MAX_FILE_BYTES)}-byte limit`);
+    }
+    buffers.set(path, { target, content: next });
+  }
+
+  const targets = [...buffers.entries()].map(([path, one]) => ({ path, target: one.target }));
+  const git = keepHistory(sourceDir, targets);
+
+  const changed: string[] = [];
+  for (const [path, one] of buffers) {
+    writeFileSync(one.target, one.content);
+    changed.push(path);
+  }
+
+  return finish(sourceDir, changed, message, git);
+}
+
+/** How many times `needle` occurs in `haystack`, without overlapping. */
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let at = haystack.indexOf(needle);
+  while (at >= 0) {
+    count += 1;
+    at = haystack.indexOf(needle, at + needle.length);
+  }
+  return count;
+}
+
+/** The first line and a bit of a `find`, for a message that says which hunk. */
+function excerpt(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length <= 40 ? flat : `${flat.slice(0, 40)}…`;
+}
+
+/**
+ * Keep a copy of everything about to change, and say whether git will.
+ *
+ * Written before anything is touched, so a failure partway leaves the history
+ * complete rather than covering only what happened to go first.
+ */
+function keepHistory(
+  sourceDir: string,
+  targets: readonly { path: string; target: string }[],
+): boolean {
+  const git = hasGit(sourceDir);
+  if (git) return true;
+  const history = join(dirname(sourceDir), 'source-history', String(Date.now()));
+  for (const { path, target } of targets) {
+    if (!existsSync(target)) continue;
+    const kept = join(history, path);
+    mkdirSync(dirname(kept), { recursive: true, mode: 0o700 });
+    writeFileSync(kept, readFileSync(target));
+  }
+  return false;
+}
+
+/** Commit, when there is a repository to commit to, and report the way back. */
+function finish(
+  sourceDir: string,
+  changed: readonly string[],
+  message: string,
+  git: boolean,
+): EditResult {
   if (git) {
     Bun.spawnSync({ cmd: ['git', 'add', '-A'], cwd: sourceDir, stdout: 'ignore', stderr: 'ignore' });
     Bun.spawnSync({
@@ -237,7 +364,6 @@ export function applyChange(
       },
     });
   }
-
   return { changed, undo: git ? 'git' : 'source-history' };
 }
 

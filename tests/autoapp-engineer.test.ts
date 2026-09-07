@@ -46,6 +46,7 @@ import {
   ENGINEER_INSTRUCTIONS,
   INSTRUCTION_SECTIONS,
   applyChange,
+  applyEdits,
   createCandidateStates,
   diffSummary,
   engineerTools,
@@ -239,6 +240,133 @@ describe('the workspace', () => {
     expect(readFileSync(join(app.sourceHistory, kept[0] ?? '', 'autoapp.json'), 'utf8')).toBe(before);
   });
 
+  test('one hunk changes exactly what it names', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    const path = join(source, 'src', 'shared', 'views.ts');
+    const before = readFileSync(path, 'utf8');
+
+    const applied = applyEdits(
+      source,
+      [{ path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'What it is'" }],
+      'rename a column',
+    );
+    expect(applied.changed).toEqual(['src/shared/views.ts']);
+    const after = readFileSync(path, 'utf8');
+    expect(after).toContain("header: 'What it is'");
+    expect(after).toBe(before.replace("header: 'Label'", "header: 'What it is'"));
+  });
+
+  test('two hunks on one file apply in order to the same buffer', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    writeFileSync(join(source, 'src', 'seq.ts'), 'const a = 1;\nconst b = 2;\n');
+
+    applyEdits(
+      source,
+      [
+        { path: 'src/seq.ts', find: 'const a = 1;', replace: 'const a = 10;' },
+        // Only matches what the first hunk wrote, so this passes only if the
+        // second hunk sees the first one's result.
+        { path: 'src/seq.ts', find: 'const a = 10;\nconst b = 2;', replace: 'const a = 10;\nconst b = 20;' },
+      ],
+      'two hunks',
+    );
+    expect(readFileSync(join(source, 'src', 'seq.ts'), 'utf8')).toBe('const a = 10;\nconst b = 20;\n');
+  });
+
+  test('a find that is not there names the file and the text', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    expect(() =>
+      applyEdits(
+        source,
+        [{ path: 'src/shared/views.ts', find: 'header: "nothing like this"', replace: 'x' }],
+        'no',
+      ),
+    ).toThrow(/not found in src\/shared\/views\.ts: header/);
+  });
+
+  test('a find that occurs twice says how many and asks for more context', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    writeFileSync(join(source, 'src', 'twice.ts'), 'const x = 1;\nconst x = 1;\n');
+    expect(() =>
+      applyEdits(source, [{ path: 'src/twice.ts', find: 'const x = 1;', replace: 'const x = 2;' }], 'no'),
+    ).toThrow(/ambiguous in src\/twice\.ts: 2 matches, include more context/);
+  });
+
+  test('one bad hunk among three leaves every file untouched', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    const views = join(source, 'src', 'shared', 'views.ts');
+    const manifest = join(source, 'autoapp.json');
+    const viewsBefore = readFileSync(views, 'utf8');
+    const manifestBefore = readFileSync(manifest, 'utf8');
+
+    expect(() =>
+      applyEdits(
+        source,
+        [
+          { path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'Renamed'" },
+          { path: 'autoapp.json', find: '"schemaVersion"', replace: '"schemaVersion"' },
+          { path: 'src/shared/views.ts', find: 'this text is not in the file', replace: 'x' },
+        ],
+        'one of these is wrong',
+      ),
+    ).toThrow(/not found/);
+
+    // Every hunk is checked before any file is written, so a set either all
+    // lands or none does. A half-applied edit would leave the model working out
+    // which half.
+    expect(readFileSync(views, 'utf8')).toBe(viewsBefore);
+    expect(readFileSync(manifest, 'utf8')).toBe(manifestBefore);
+    expect(existsSync(where.root.app('items').sourceHistory)).toBe(false);
+  });
+
+  test('a hunk refuses a path outside src/ and autoapp.json, and a file that is not there', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    expect(() =>
+      applyEdits(source, [{ path: 'package.json', find: '{', replace: '{' }], 'no'),
+    ).toThrow(/may be changed/);
+    expect(() =>
+      applyEdits(source, [{ path: '../escape.ts', find: 'a', replace: 'b' }], 'no'),
+    ).toThrow();
+    expect(() =>
+      applyEdits(source, [{ path: 'src/never-written.ts', find: 'a', replace: 'b' }], 'no'),
+    ).toThrow(/is not there; use source.change to create a file/);
+  });
+
+  test('an edit is committed with git, and kept in history without it', () => {
+    const withGit = makeWorld();
+    const gitSource = withGit.root.app('items').source;
+    Bun.spawnSync({ cmd: ['git', 'init', '--quiet'], cwd: gitSource, stdout: 'ignore', stderr: 'ignore' });
+    const committed = applyEdits(
+      gitSource,
+      [{ path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'Renamed'" }],
+      'rename the column',
+    );
+    expect(committed.undo).toBe('git');
+    const log = Bun.spawnSync({ cmd: ['git', 'log', '--oneline'], cwd: gitSource, stdout: 'pipe', stderr: 'ignore' });
+    expect(new TextDecoder().decode(log.stdout)).toContain('rename the column');
+
+    const noGit = makeWorld();
+    const app = noGit.root.app('items');
+    const before = readFileSync(join(app.source, 'src', 'shared', 'views.ts'), 'utf8');
+    const kept = applyEdits(
+      app.source,
+      [{ path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'Renamed'" }],
+      'rename the column',
+    );
+    expect(kept.undo).toBe('source-history');
+    const versions = readdirSync(app.sourceHistory);
+    expect(versions).toHaveLength(1);
+    expect(
+      readFileSync(join(app.sourceHistory, versions[0] ?? '', 'src', 'shared', 'views.ts'), 'utf8'),
+    ).toBe(before);
+  });
+
   test('the diff says what changed', () => {
     const where = makeWorld();
     const source = where.root.app('items').source;
@@ -289,6 +417,99 @@ describe.skipIf(!available)('the tools', () => {
     expect(changed.changed).toEqual(['src/note.ts']);
     expect(existsSync(join(app.source, 'src', 'note.ts'))).toBe(true);
   }, 60_000);
+
+  test('an edit asks first, then lands, and the release it builds is a new one', async () => {
+    const where = makeWorld();
+    const app = where.root.app('items');
+    const first = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!first.ok) throw new Error(JSON.stringify(first.problems));
+    setCurrent(where.root, 'items', first.releaseId);
+
+    const views = join(app.source, 'src', 'shared', 'views.ts');
+    const before = readFileSync(views, 'utf8');
+
+    // Declined, nothing moves.
+    await expect(
+      callTool(
+        where,
+        'source.edit',
+        {
+          appId: 'items',
+          message: 'rename a column',
+          hunks: [{ path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'What it is'" }],
+        },
+        { approve: false },
+      ),
+    ).rejects.toThrow(/rejected|not approved/);
+    expect(readFileSync(views, 'utf8')).toBe(before);
+
+    const applied = (await callTool(
+      where,
+      'source.edit',
+      {
+        appId: 'items',
+        message: 'rename a column',
+        hunks: [{ path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'What it is'" }],
+      },
+      { approve: true },
+    )) as { changed: string[]; diff: string };
+    expect(applied.changed).toEqual(['src/shared/views.ts']);
+    expect(applied.diff).toContain('src/shared/views.ts');
+
+    // A views-only change reaches a release now, which is the other half of
+    // this prompt: before it, this hashed to the release it came from.
+    const second = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true })) as {
+      ok: boolean;
+      releaseId: string;
+    };
+    expect(second.ok).toBe(true);
+    expect(second.releaseId).not.toBe(first.releaseId);
+  }, 90_000);
+
+  test('source.change refuses to rewrite a large file and names source.edit', async () => {
+    const where = makeWorld();
+    const app = where.root.app('items');
+    const long = `${Array.from({ length: 80 }, (_, i) => `// line ${String(i)}`).join('\n')}\n`;
+
+    // Creating a file is unlimited: there is no smaller way to say it.
+    await callTool(
+      where,
+      'source.change',
+      { appId: 'items', message: 'add a long file', changes: [{ path: 'src/long.ts', content: long }] },
+      { approve: true },
+    );
+    expect(readFileSync(join(app.source, 'src', 'long.ts'), 'utf8')).toBe(long);
+
+    // Replacing it is not.
+    await expect(
+      callTool(
+        where,
+        'source.change',
+        {
+          appId: 'items',
+          message: 'rewrite the long file',
+          changes: [{ path: 'src/long.ts', content: '// one line\n' }],
+        },
+        { approve: true },
+      ),
+    ).rejects.toThrow(/source\.edit/);
+    expect(readFileSync(join(app.source, 'src', 'long.ts'), 'utf8')).toBe(long);
+
+    // A small existing file is still fair game.
+    await callTool(
+      where,
+      'source.change',
+      { appId: 'items', message: 'shorten it', changes: [{ path: 'src/short.ts', content: '// a\n' }] },
+      { approve: true },
+    );
+    await callTool(
+      where,
+      'source.change',
+      { appId: 'items', message: 'shorten it again', changes: [{ path: 'src/short.ts', content: '// b\n' }] },
+      { approve: true },
+    );
+    expect(readFileSync(join(app.source, 'src', 'short.ts'), 'utf8')).toBe('// b\n');
+  }, 90_000);
 
   test('a broken build returns its problems, and a fix builds', async () => {
     const where = makeWorld();
@@ -640,6 +861,71 @@ describe.skipIf(!available)('the launcher tab', () => {
     await client.close();
   }, 90_000);
 
+  test('a model composing hunks reaches a release', async () => {
+    // The whole point of `source.edit`: the model's tool call is proportional
+    // to the change rather than to the file. Scripted here so the shape is
+    // pinned; report 08b's demo is where a real model composes them.
+    const { harness: test, where } = await start([
+      {
+        kind: 'tool',
+        name: 'source.edit',
+        input: {
+          appId: 'items',
+          message: 'rename the label column',
+          hunks: [
+            { path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'What it is'" },
+          ],
+        },
+        then: [{ kind: 'text', chunks: ['renamed it'] }],
+      },
+    ]);
+    const first = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!first.ok) throw new Error(JSON.stringify(first.problems));
+    setCurrent(where.root, 'items', first.releaseId);
+
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'fake', modelId: 'fake-1' });
+
+    const events: { type: string; callId?: string; denied?: boolean }[] = [];
+    let finished = false;
+    await client.subscribe(
+      'ai.chat',
+      { runId: 'run-abcdefgh', message: 'rename the column', refs: [], history: [] },
+      {
+        onEvent: (event) => {
+          events.push(event as { type: string });
+          if (event.type === 'done' || event.type === 'error') finished = true;
+        },
+        onError: () => {
+          finished = true;
+        },
+      },
+    );
+
+    // A write, so it waits for the person exactly as a click would.
+    while (!events.some((event) => event.type === 'confirm')) await Bun.sleep(10);
+    const asked = events.find((event) => event.type === 'confirm');
+    await client.call('ai.chatConfirm', {
+      runId: 'run-abcdefgh',
+      callId: asked?.callId ?? '',
+      approve: true,
+    });
+    while (!finished) await Bun.sleep(10);
+    expect(events.find((event) => event.type === 'tool-result')?.denied).toBeUndefined();
+    await client.close();
+
+    const views = readFileSync(
+      join(where.root.app('items').source, 'src', 'shared', 'views.ts'),
+      'utf8',
+    );
+    expect(views).toContain("header: 'What it is'");
+
+    const second = await buildCandidate({ layout: where.root, appId: 'items' });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.releaseId).not.toBe(first.releaseId);
+  }, 90_000);
+
   test('the engineer’s tools are offered to the model, and are all guarded', async () => {
     const { harness: test, where } = await start([{ kind: 'text', chunks: ['hello'] }]);
     void where;
@@ -665,7 +951,13 @@ describe('the engineer’s instructions', () => {
     expect(ENGINEER_INSTRUCTIONS).toContain('Do not call it sandboxed');
   });
 
-  test('are under sixty lines, so they are read', () => {
-    expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(60);
+  test('are under seventy lines, so they are read', () => {
+    expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(70);
+  });
+
+  test('send the engineer to source.edit rather than to whole-file rewrites', () => {
+    expect(ENGINEER_INSTRUCTIONS).toContain('source.edit');
+    const flat = ENGINEER_INSTRUCTIONS.replace(/\s+/g, ' ');
+    expect(flat).toContain('Use `source.change` only to create a new file');
   });
 });

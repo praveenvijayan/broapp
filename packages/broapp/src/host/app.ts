@@ -32,7 +32,7 @@ import {
   PublicError,
 } from '../shared/errors.ts';
 import { encodeEvent } from '../shared/ndjson.ts';
-import { ValidationError } from '../shared/schema.ts';
+import { isValidationError } from '../shared/schema.ts';
 
 import { createGate } from './gate.ts';
 import type { Channel, Envelope, ExecutionMode, Gate } from './gate.ts';
@@ -217,7 +217,7 @@ export function createReservedHostApp<C extends AnyContract>(
       // nothing worth recording.
       throw new PublicError(
         'invalid_input',
-        cause instanceof ValidationError ? cause.message : 'invalid input',
+        isValidationError(cause) ? cause.message : 'invalid input',
       ).toBridgeError();
     }
     const context: CallContext = {
@@ -386,7 +386,7 @@ async function runStream<E>(
     running.delete(controller);
     throw new PublicError(
       'invalid_input',
-      cause instanceof ValidationError ? cause.message : 'invalid stream parameters',
+      isValidationError(cause) ? cause.message : 'invalid stream parameters',
     ).toBridgeError();
   }
 
