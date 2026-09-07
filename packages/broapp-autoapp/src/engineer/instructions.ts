@@ -41,6 +41,9 @@ Each application has a source workspace with a fixed shape:
   renaming one throws their work away.
 - \`src/host/app.ts\` — exports \`start\` and \`migrate\`.
 - \`src/ui/main.tsx\` and \`src/ui/index.html\` — the browser entry.
+- \`src/ui/styles.css\`. The renderer draws every form, table and button from
+  \`views.ts\`, coloured by \`--autoapp-*\` properties on \`:root\` (\`--autoapp-text\`,
+  \`--autoapp-input\`, \`--autoapp-border\`, …). Set those; \`.input\` styles nothing.
 
 Migrations are appended and never edited. One that has already run against
 somebody's data is history; changing it means their database and your list

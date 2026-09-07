@@ -7,6 +7,62 @@
  * not still looks deliberate.
  */
 
+
+/*
+ * Defaults for every `--autoapp-*` property, in both colour schemes.
+ *
+ * `:where(:root)` has no specificity, so an application that sets any of
+ * these on its own `:root` wins whatever order the stylesheets were bundled
+ * in. The point of having defaults at all is the application that sets none:
+ * before this block, a field's background fell back to `#ffffff` while its
+ * text inherited the page's — light on white under a dark scheme, which is
+ * unreadable, and which a stylesheet rule for `.input` cannot reach because
+ * the field is drawn here, not there.
+ */
+:where(:root) {
+  --autoapp-heading: #16181d;
+  --autoapp-text: #33383f;
+  --autoapp-text-muted: #6b6862;
+  --autoapp-muted: #6b7280;
+  --autoapp-border: #dfe3ea;
+  --autoapp-surface: #ffffff;
+  --autoapp-input: #ffffff;
+  --autoapp-button: #f4f5f8;
+  --autoapp-button-hover: #e9ebf1;
+  --autoapp-accent: #2a5bd7;
+  --autoapp-code-surface: #f4f5f8;
+  --autoapp-notice-surface: #fdf6e7;
+  --autoapp-notice-border: #f0d9a8;
+  --autoapp-notice-text: #6b5312;
+  --autoapp-warning: #b4690e;
+  --autoapp-warning-bg: #fdf3e3;
+  --autoapp-error-surface: #fdecec;
+  --autoapp-error-text: #a12222;
+}
+
+@media (prefers-color-scheme: dark) {
+  :where(:root) {
+    --autoapp-heading: #f2f3f5;
+    --autoapp-text: #e6e8ec;
+    --autoapp-text-muted: #a2a7b0;
+    --autoapp-muted: #a2a7b0;
+    --autoapp-border: #3a3e46;
+    --autoapp-surface: #1e2024;
+    --autoapp-input: #16171a;
+    --autoapp-button: #262a30;
+    --autoapp-button-hover: #30353c;
+    --autoapp-accent: #7aa2ff;
+    --autoapp-code-surface: #14151a;
+    --autoapp-notice-surface: #2a2618;
+    --autoapp-notice-border: #5a4a1e;
+    --autoapp-notice-text: #e8d59a;
+    --autoapp-warning: #e0b95a;
+    --autoapp-warning-bg: #3a3012;
+    --autoapp-error-surface: #3a1c16;
+    --autoapp-error-text: #f08a76;
+  }
+}
+
 .autoapp {
   display: flex;
   flex-direction: column;
