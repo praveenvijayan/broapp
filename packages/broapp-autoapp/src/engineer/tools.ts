@@ -22,7 +22,6 @@ import { s } from 'broapp/shared';
 import { activate } from '../launcher/activate.ts';
 import { listApps } from '../launcher/apps.ts';
 import { buildCandidate } from '../launcher/candidate.ts';
-import { connectToChild } from '../launcher/client.ts';
 import type { Journal } from '../launcher/journal.ts';
 import { snapshotDirectory } from '../launcher/snapshot.ts';
 import type { Supervisor } from '../launcher/supervisor.ts';
@@ -57,6 +56,8 @@ export interface EngineerToolsOptions {
 }
 
 /** How long a preview child gets to stop. */
+/** How long one acceptance step may take. */
+const CHECK_STEP_TIMEOUT_MS = 30_000;
 const STOP_DEADLINE_MS = 10_000;
 
 /** The most lines of an existing file `source.change` will replace wholesale. */
@@ -316,16 +317,23 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       }
       const spec = readRelease(root, appId, releaseId);
       const results: CheckResult[] = [];
-      // One connection for every example: a launch URL carries a single-use
-      // token, so a second `connect` to the same URL is refused.
-      const bridge = await connectToChild(preview.url);
-      try {
+      // Over the child's IPC channel, not over HTTP with its launch URL: that
+      // URL's token is single-use, and spending it here is what left the
+      // person's Open preview answering 403.
+      {
         for (const example of spec.acceptance) {
           try {
             let detail = '';
             let passed = true;
             for (const step of example.steps) {
-              const output: unknown = await bridge.call(step.route, step.input);
+              const output: unknown = await preview.invoke({
+                route: step.route,
+                input: step.input,
+                client: 'launcher',
+                requestId: crypto.randomUUID(),
+                timeoutMs: CHECK_STEP_TIMEOUT_MS,
+                as: 'check',
+              });
               if (step.expect !== undefined && JSON.stringify(output) !== JSON.stringify(step.expect)) {
                 passed = false;
                 detail = `${step.route} returned ${JSON.stringify(output)}, not ${JSON.stringify(step.expect)}`;
@@ -342,8 +350,6 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
             });
           }
         }
-      } finally {
-        await bridge.close();
       }
       states.update(appId, { checks: results });
       return { results };

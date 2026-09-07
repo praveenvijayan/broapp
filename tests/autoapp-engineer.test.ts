@@ -801,6 +801,13 @@ describe.skipIf(!available)('the tools', () => {
     expect(checked.results).toHaveLength(1);
     expect(checked.results[0]?.passed).toBe(false);
     expect(checked.results[0]?.detail).toContain('count');
+    // The check ran over IPC, so the preview's one-time launch token is still
+    // there for the person's Open preview. This is the first visit.
+    const { connectToChild } = await import('broapp-autoapp/launcher');
+    const preview = where.states.get('items').preview;
+    if (preview === null) throw new Error('the preview should be running');
+    const visitor = await connectToChild(preview.url);
+    await visitor.close();
     await callTool(where, 'preview.stop', { appId: 'items' }, { approve: true });
   }, 90_000);
 

@@ -348,12 +348,15 @@ export async function runChild(argv: readonly string[]): Promise<number> {
         break;
 
       case 'invoke': {
-        // One MCP call, forwarded by the launcher. The envelope is built here,
-        // from what this runtime knows — the channel is `mcp` because that is
-        // the door the request came through, and nothing the client sent is
+        // One call, forwarded by the launcher. The envelope is built here, from
+        // what this runtime knows — the channel is `mcp` because that is the
+        // door an MCP request came through, and nothing the client sent is
         // consulted when it is filled in. That is what stops an external agent
-        // from claiming to be the person at the keyboard.
+        // from claiming to be the person at the keyboard. The one exception is
+        // marked by the launcher itself: an acceptance example it runs stands
+        // in for the person, as it did when it arrived over the launch URL.
         const requestId = message.requestId ?? crypto.randomUUID();
+        const check = message.as === 'check';
         const instance = child.instance;
         if (instance === undefined || instance === null) {
           post({
@@ -370,8 +373,9 @@ export async function runChild(argv: readonly string[]): Promise<number> {
         void instance
           .invoke(message.route ?? '', message.input, {
             requestId,
-            channel: 'mcp',
-            caller: `mcp:${message.client ?? 'unknown'}`,
+            ...(check
+              ? { channel: 'user' as const, caller: 'launcher:check' }
+              : { channel: 'mcp' as const, caller: `mcp:${message.client ?? 'unknown'}` }),
             approver: child.approver ?? undefined,
           })
           .then(
@@ -388,7 +392,7 @@ export async function runChild(argv: readonly string[]): Promise<number> {
               // trying. Said here, at the reply, rather than inside the gate:
               // the decision and its record are already made.
               const detail =
-                reduced.code === 'rejected' && child.running?.attached !== true
+                !check && reduced.code === 'rejected' && child.running?.attached !== true
                   ? `${reduced.message}: no browser tab is open for this application, so nobody could be asked. Open it with \`broapp-autoapp serve\`.`
                   : reduced.message;
               post({

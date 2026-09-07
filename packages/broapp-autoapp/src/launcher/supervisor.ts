@@ -52,6 +52,8 @@ export interface ChildHandle {
     client: string;
     requestId: string;
     timeoutMs: number;
+    /** An acceptance example the launcher runs itself; see `Invoke.as`. */
+    as?: 'check';
   }): Promise<unknown>;
   /** Stop admitting writes and wait for work to finish. `false` means the deadline passed first. */
   drain(deadlineMs: number): Promise<boolean>;
@@ -403,9 +405,18 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
           };
         },
 
-        async invoke({ route, input, client, requestId, timeoutMs }): Promise<unknown> {
+        async invoke({ route, input, client, requestId, timeoutMs, as }): Promise<unknown> {
           const reply = await request(
-            { v: IPC_VERSION, id: nextId(), type: 'invoke', route, input, client, requestId },
+            {
+              v: IPC_VERSION,
+              id: nextId(),
+              type: 'invoke',
+              route,
+              input,
+              client,
+              requestId,
+              ...(as === undefined ? {} : { as }),
+            },
             timeoutMs,
             `${route} to answer`,
           );

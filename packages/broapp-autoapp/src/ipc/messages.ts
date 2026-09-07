@@ -90,6 +90,16 @@ export interface Invoke extends Base {
   readonly input?: unknown;
   /** The MCP client's own name, for the record and for the question. */
   readonly client?: string;
+  /**
+   * Set by the launcher when the call is one of the release's own acceptance
+   * examples, run by the launcher itself rather than forwarded for an MCP
+   * client. The child runs it on channel `user` — the check stands in for the
+   * person, as it did when it arrived over the launch URL — and nothing but
+   * the launcher's own code sets it. Running checks over IPC rather than HTTP
+   * is what keeps the child's one-time launch token unspent for the tab the
+   * person is about to open.
+   */
+  readonly as?: 'check';
   readonly requestId?: string;
   readonly ok?: boolean;
   readonly output?: unknown;

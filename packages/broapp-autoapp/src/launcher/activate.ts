@@ -27,7 +27,6 @@ import {
   type Layout,
 } from '../spec/index.ts';
 
-import { connectToChild } from './client.ts';
 import { snapshotDirectory } from './snapshot.ts';
 import type { Journal, Phase } from './journal.ts';
 import type { ChildHandle, Supervisor } from './supervisor.ts';
@@ -86,29 +85,33 @@ class InjectedCrash extends Error {
   }
 }
 
+/** How long one acceptance step may take. */
+const CHECK_STEP_TIMEOUT_MS = 30_000;
+
 /**
- * Run every acceptance example against a running child, over one connection.
+ * Run every acceptance example against a running child, over its IPC channel.
  *
- * One connection, not one per example: a launch URL carries a *single-use*
- * token, so the second `connectToChild` with the same URL is refused with 403.
- * The launcher is the one process allowed to hold that URL in memory, and this
- * is the only place that needs to speak to a candidate before anybody else can.
+ * Not over HTTP with the launch URL, which is what this used to do: that URL
+ * carries a *single-use* token, and redeeming it here left nothing for the tab
+ * the person opens next — every activated release answered 403 to its first
+ * visitor. Over IPC the child runs each step on channel `user`, as it did when
+ * the check arrived as a browser would, and the token stays unspent.
  */
 async function runExamples(
-  url: string,
+  candidate: ChildHandle,
   examples: readonly AcceptanceExample[],
 ): Promise<string | null> {
-  if (examples.length === 0) return null;
-  let bridge: Awaited<ReturnType<typeof connectToChild>>;
-  try {
-    bridge = await connectToChild(url);
-  } catch (cause) {
-    return `the candidate could not be reached: ${String(cause instanceof Error ? cause.message : cause)}`;
-  }
   try {
     for (const example of examples) {
       for (const step of example.steps) {
-        const output: unknown = await bridge.call(step.route, step.input);
+        const output: unknown = await candidate.invoke({
+          route: step.route,
+          input: step.input,
+          client: 'launcher',
+          requestId: crypto.randomUUID(),
+          timeoutMs: CHECK_STEP_TIMEOUT_MS,
+          as: 'check',
+        });
         if (step.expect === undefined) continue;
         if (JSON.stringify(output) !== JSON.stringify(step.expect)) {
           return `${example.id}: ${step.route} returned ${JSON.stringify(output)}, not ${JSON.stringify(step.expect)}`;
@@ -118,8 +121,6 @@ async function runExamples(
     return null;
   } catch (cause) {
     return String(cause instanceof Error ? cause.message : cause);
-  } finally {
-    await bridge.close();
   }
 }
 
@@ -270,7 +271,7 @@ export async function activate(params: ActivateParams): Promise<ActivateResult> 
           stopCandidate: candidate,
         });
       }
-      const problem = await runExamples(candidate.url, spec.acceptance);
+      const problem = await runExamples(candidate, spec.acceptance);
       if (problem !== null) {
         return await giveUpBeforeSwitch('checked', `an acceptance example failed: ${problem}`, {
           removeNext: true,

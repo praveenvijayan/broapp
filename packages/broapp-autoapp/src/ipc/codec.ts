@@ -18,6 +18,12 @@ const TYPES = ['hello', 'ready', 'health', 'drain', 'shutdown', 'fatal', 'migrat
 const STATES = ['starting', 'serving', 'draining', 'stopping'] as const;
 
 /** A field that has to be there and has to be a non-empty string. */
+/** `as` has exactly one value; anything else is a message this build cannot read. */
+function requireCheck(record: Record<string, unknown>): 'check' {
+  if (record['as'] !== 'check') throw new Error(`invoke.as must be "check", not ${JSON.stringify(record['as'])}`);
+  return 'check';
+}
+
 function requireString(record: Record<string, unknown>, field: string): string {
   const value = record[field];
   if (typeof value !== 'string' || value === '') {
@@ -141,6 +147,7 @@ export function parseMessage(raw: unknown): Message {
         ...(record['route'] === undefined ? {} : { route: requireString(record, 'route') }),
         ...(record['input'] === undefined ? {} : { input: record['input'] }),
         ...(record['client'] === undefined ? {} : { client: requireString(record, 'client') }),
+        ...(record['as'] === undefined ? {} : { as: requireCheck(record) }),
         ...(record['requestId'] === undefined ? {} : { requestId: requireString(record, 'requestId') }),
         ...(ok === undefined ? {} : { ok }),
         ...(record['output'] === undefined ? {} : { output: record['output'] }),

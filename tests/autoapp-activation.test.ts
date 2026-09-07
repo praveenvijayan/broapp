@@ -252,6 +252,10 @@ describe.skipIf(!available)('buildCandidate', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(readCurrent(where.root, 'items')).toBe(second);
+    // The acceptance check ran over IPC, so the new child's one-time launch
+    // token is still unspent for the tab that opens next.
+    const visitor = await connectToChild(result.child.url);
+    await visitor.close();
     await result.child.shutdown(5_000);
   }, 120_000);
 
