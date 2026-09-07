@@ -25,6 +25,13 @@ describe('aiContract', () => {
       'ai.modelsList',
       'ai.connectionTest',
       'ai.chatConfirm',
+      'ai.threadsList',
+      'ai.threadsCreate',
+      'ai.threadsGet',
+      'ai.threadsSave',
+      'ai.threadsUpdate',
+      'ai.threadsDelete',
+      'ai.threadsClear',
     ]);
     expect(aiContract.routes.streams).toEqual(['ai.chat']);
   });
@@ -108,6 +115,64 @@ describe('aiContract', () => {
   test('a chat event needs a known type', () => {
     expect(chat.event.parse({ type: 'text', text: 'x' })).toEqual({ type: 'text', text: 'x' });
     expect(() => chat.event.parse({ type: 'nope' })).toThrow(/type/);
+  });
+
+  test('ai.chat accepts a per-turn model id', () => {
+    expect(
+      chat.params.parse({
+        runId: 'run-12345678',
+        message: 'hi',
+        refs: [],
+        history: [],
+        modelId: 'gemma4:31b-mlx',
+      }).modelId,
+    ).toBe('gemma4:31b-mlx');
+  });
+
+  test('ai.chat refuses a model id longer than the bound', () => {
+    expect(() =>
+      chat.params.parse({
+        runId: 'run-12345678',
+        message: 'hi',
+        refs: [],
+        history: [],
+        modelId: 'm'.repeat(201),
+      }),
+    ).toThrow(/modelId/);
+  });
+
+  test('a thread route refuses an id that is not one', () => {
+    const get = aiContract.operations['ai.threadsGet'];
+    expect(() => get.input.parse({ id: 'short' })).toThrow(/id/);
+    expect(get.input.parse({ id: 'a'.repeat(32) })).toEqual({ id: 'a'.repeat(32) });
+  });
+
+  test('ai.threadsCreate takes nothing, a title, or a model', () => {
+    const create = aiContract.operations['ai.threadsCreate'];
+    expect(create.input.parse({})).toEqual({});
+    expect(create.input.parse({ title: 'Groceries', modelId: null })).toEqual({
+      title: 'Groceries',
+      modelId: null,
+    });
+    expect(() => create.input.parse({ title: 'x'.repeat(121) })).toThrow(/title/);
+  });
+
+  test('ai.threadsSave bounds the messages and their parts', () => {
+    const save = aiContract.operations['ai.threadsSave'];
+    const id = 'b'.repeat(32);
+    const message = { id: 'm1', role: 'user' as const, parts: [{ type: 'text', text: 'hi' }] };
+    expect(save.input.parse({ id, messages: [message] })).toEqual({ id, messages: [message] });
+    // A part is `unknown` by design; the *number* of them is not.
+    expect(() =>
+      save.input.parse({
+        id,
+        messages: [{ id: 'm1', role: 'user', parts: new Array(201).fill({ type: 'text' }) }],
+      }),
+    ).toThrow(/parts/);
+    expect(() =>
+      save.input.parse({ id, messages: new Array(201).fill(message) }),
+    ).toThrow(/messages/);
+    expect(() => save.input.parse({ id, messages: [{ ...message, role: 'tool' }] })).toThrow(/role/);
   });
 
   test('ai.settingsUpdate accepts a partial change', () => {

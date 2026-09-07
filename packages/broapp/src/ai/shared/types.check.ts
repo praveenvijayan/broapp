@@ -12,7 +12,15 @@ import type {
   StreamParams,
 } from '../../shared/contract.ts';
 import type { AiContract } from './contract.ts';
-import type { AiSettings, BroappModel, ChatEvent, ChatFile, ProviderInfo } from './types.ts';
+import type {
+  AiSettings,
+  BroappModel,
+  ChatEvent,
+  ChatFile,
+  ProviderInfo,
+  StoredMessage,
+  Thread,
+} from './types.ts';
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
@@ -47,6 +55,15 @@ const chatFileMatch: Equal<
   ChatFile
 > = true;
 void chatFileMatch;
+
+const threadMatch: Equal<OperationOutput<AiContract, 'ai.threadsCreate'>, Thread> = true;
+void threadMatch;
+
+const storedMessageMatch: Equal<
+  OperationOutput<AiContract, 'ai.threadsGet'>['messages'][number],
+  StoredMessage
+> = true;
+void storedMessageMatch;
 
 // The update route is the only one that takes a partial: every field optional,
 // so a browser can change one setting without restating the rest.

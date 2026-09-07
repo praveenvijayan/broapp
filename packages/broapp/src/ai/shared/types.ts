@@ -78,6 +78,40 @@ export interface ChatFile {
 }
 
 /**
+ * A stored conversation, without its messages.
+ *
+ * `modelId` is null for a conversation that follows Settings, and a model id
+ * for one that has been pinned to a model of its own. The provider is never
+ * part of a conversation: it is a Settings decision, because changing it
+ * changes which key is used and whether anything leaves the computer.
+ */
+export interface Thread {
+  id: string;
+  title: string;
+  modelId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+}
+
+/**
+ * One message as it is stored.
+ *
+ * `parts` are the AI SDK's own message parts. The host writes them as JSON and
+ * hands them back unread — it has no opinion about what a part is, which is
+ * why the type is `unknown[]` rather than a copy of the SDK's union that would
+ * drift from it. One thing the host *does* change on the way in: a `file` part
+ * becomes the text `[image: name]`, because a data URL in SQLite would be a
+ * copy of the image nobody asked to keep.
+ */
+export interface StoredMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  parts: unknown[];
+  metadata?: unknown;
+}
+
+/**
  * One event on the `ai.chat` stream. Flat on purpose: the `s` validator has
  * no unions, so the discriminant is `type` and the other fields are
  * optional. Which fields are present for which type:

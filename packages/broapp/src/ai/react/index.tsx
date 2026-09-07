@@ -32,5 +32,7 @@ export type {
   ChatFile,
   ChatTurn,
   ProviderInfo,
+  StoredMessage,
+  Thread,
   ToolPermission,
 } from '../shared/index.ts';

@@ -24,6 +24,8 @@ stays as the no-dependency option.
 | 04b | `04b-vision-capability.md` | Fix-up from report 04: the compatible adapter learns vision from Ollama's `/api/show` or a known OpenAI id; custom servers are assumed able. | Provider tests green; rows 8–11 and 13 re-run with a vision model. |
 | 04c | `04c-attachment-race.md` | Fix-up from report 04b: a send waits for pending `FileReader` reads; the chip shows immediately; submit disabled while pending. | Helper tests green; manual rows A–D pass. |
 | 04d | `04d-drawer-and-scheme.md` | Panel follows the page's `color-scheme` via `light-dark()`; scoped form-control reset; `BroappChatDrawer` + `BroappChatToggle`; launcher moves Engineer into the drawer. | View/CSS tests green; manual rows 1–10 pass with macOS in dark mode. |
+| 06 | `06-threads.md` | Threads in SQLite under the data dir: seven `ai.threads*` routes, per-thread `modelId` sent on `ai.chat`, `useBroappChat({ threadId, modelId })`, `useAiThreads()`. Images stored as placeholders. | Harness tests green incl. restart; `tests/ai-chat.test.ts` unchanged. |
+| 07 | `07-workspace-layout.md` | Launcher as a full-width chat workspace: rail + history + chat + applications, model picker per thread, chat menu, settings drawer that overlays, light/system/dark switch. | View/CSS tests green; manual rows 1–17; nothing shifts when anything opens. |
 | 05 | `05-backlog.md` | Not a build prompt. What comes next and why it waited. | — |
 
 ## How to run one prompt

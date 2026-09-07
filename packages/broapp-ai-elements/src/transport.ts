@@ -42,6 +42,15 @@ export interface BroappChatTransportOptions {
   onToolResult?(call: ToolCallState): void;
   /** How many calls are waiting for a person, whenever that changes. */
   onAwaiting?(pending: number): void;
+  /**
+   * The model for each turn, read when the turn starts.
+   *
+   * Null — the default — means the model chosen in Settings. A conversation
+   * with a model of its own returns that id; the provider is never overridden,
+   * because a provider is a different key and a different answer to "does this
+   * leave my computer".
+   */
+  modelId?(): string | null;
   /** For tests. Default: `crypto.randomUUID().replace(/-/g, '')`. */
   runId?(): string;
 }
@@ -172,6 +181,7 @@ export function createBroappChatTransport(
       calls = new Map();
       awaiting = new Set();
       const refs = [...(options.refs?.() ?? [])];
+      const modelId = options.modelId?.() ?? null;
       // The turn owns `running` from here, before the subscription is open:
       // `client()` and `subscribe` both await, and a second send inside that
       // window would otherwise start a second run.
@@ -397,6 +407,7 @@ export function createBroappChatTransport(
                 refs,
                 history,
                 ...(files.length === 0 ? {} : { files }),
+                ...(modelId === null ? {} : { modelId }),
               },
               {
                 onEvent: apply,

@@ -19,3 +19,6 @@ export type { PreparedImage } from './images.ts';
 
 export { useBroappChat } from './use-broapp-chat.ts';
 export type { BroappChatHook, BroappChatOptions } from './use-broapp-chat.ts';
+
+export { useAiThreads } from './use-ai-threads.ts';
+export type { AiThreadsHook } from './use-ai-threads.ts';

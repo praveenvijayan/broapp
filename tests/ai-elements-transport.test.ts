@@ -17,7 +17,7 @@ import type { UIMessageChunk } from 'ai';
 import { aiContract } from 'broapp/ai';
 import { createAi, createFakeAdapter, fromContract } from 'broapp/ai/host';
 import type { Ai, FakeAdapter, FakeStep } from 'broapp/ai/host';
-import type { ToolCallState } from 'broapp/ai/react';
+import type { AiClient, ToolCallState } from 'broapp/ai/react';
 import { createHostApp, publicError } from 'broapp/host';
 import type { BroappClient } from 'broapp/client';
 import { defineContract, mergeContracts, s } from 'broapp/shared';
@@ -619,3 +619,37 @@ describe('images', () => {
     await wired.client.close();
   });
 });
+
+describe('a conversation with its own model', () => {
+  test('sends modelId when one is set, and nothing when it is null', async () => {
+    const started = await start({ script: [{ kind: 'text', chunks: ['ok'] }] });
+    const client = await started.harness.connect(merged);
+    const sent: Record<string, unknown>[] = [];
+    let model: string | null = null;
+    // A recording client: what matters is the params the turn carries, and
+    // nothing on the host reports the model id back to the browser.
+    const connected = client as unknown as AiClient;
+    const spy: AiClient = {
+      ...connected,
+      subscribe: (route, params, handlers) => {
+        sent.push(params as unknown as Record<string, unknown>);
+        return connected.subscribe(route, params, handlers);
+      },
+    };
+    const transport = createBroappChatTransport({
+      client: () => Promise.resolve(spy),
+      runId: () => `run-model-${String(sent.length + 1)}`,
+      modelId: () => model,
+    });
+
+    await chunks(await send(transport, [user('first')]));
+    expect(sent[0]).not.toHaveProperty('modelId');
+
+    model = 'fake-2';
+    await chunks(await send(transport, [user('second')]));
+    expect(sent[1]?.['modelId']).toBe('fake-2');
+
+    await client.close();
+  });
+});
+

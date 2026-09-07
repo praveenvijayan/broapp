@@ -13,5 +13,7 @@ export type {
   ChatFile,
   ChatTurn,
   ProviderInfo,
+  StoredMessage,
+  Thread,
   ToolPermission,
 } from './types.ts';

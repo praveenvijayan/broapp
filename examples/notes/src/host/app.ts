@@ -96,6 +96,9 @@ export function assemble(state: StoreState, context: AppStartContext): AppInstan
     shutdown: () => {
       ai.abortAll('the application is shutting down');
       app.abortAll('the application is shutting down');
+      // The AI layer holds the conversation database open once somebody has
+      // used the panel; closing it checkpoints that WAL as well.
+      ai.close();
       runs.close();
       // Checkpoint the WAL and close the handle. Skipping this leaves a
       // database that needs its sidecar files to be readable.

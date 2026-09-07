@@ -36,8 +36,15 @@ export interface Registry {
   adapter(id: string): ProviderAdapter | null;
   /** Current settings plus the key, for adapter calls. */
   currentConfig(): Promise<{ adapter: ProviderAdapter; config: AdapterConfig } | null>;
-  /** Everything needed to run a chat, or a `PublicError` explaining what is missing. */
-  resolve(): Promise<ResolvedModel>;
+  /**
+   * Everything needed to run a chat, or a `PublicError` explaining what is
+   * missing.
+   *
+   * `override.modelId` replaces the model Settings names, for this call only
+   * and only within the configured provider — a conversation may pin a model,
+   * never a vendor.
+   */
+  resolve(override?: { readonly modelId?: string | undefined }): Promise<ResolvedModel>;
   /** The public view: settings without the key. */
   settings(): Promise<AiSettings>;
   update(patch: UpdatePatch): Promise<AiSettings>;
@@ -112,7 +119,7 @@ export function createRegistry(options: RegistryOptions): Registry {
       return { adapter, config: configFrom(settings, adapter, apiKey) };
     },
 
-    async resolve() {
+    async resolve(override) {
       const settings = options.settingsStore.read();
       if (settings.provider === null) throw publicError.unavailable(NOT_SET_UP);
       const adapter = byId.get(settings.provider);
@@ -130,13 +137,17 @@ export function createRegistry(options: RegistryOptions): Registry {
       if (adapter.needs.baseUrl === 'required' && (config.baseUrl === null || config.baseUrl === '')) {
         throw publicError.unavailable(`A server address is required for ${adapter.label}.`);
       }
-      if (settings.modelId === null) {
+      // Read after the provider, the key and the address, so a conversation
+      // carrying its own model still hears "AI is not set up yet" first: the
+      // model is the last thing missing, never the first.
+      const modelId = override?.modelId ?? settings.modelId;
+      if (modelId === null) {
         // Distinct from "not set up": the user is looking at the settings panel
         // with a provider selected, and being told to choose a provider is an
         // instruction they have already followed.
         throw publicError.unavailable(`Choose a model for ${adapter.label}.`);
       }
-      return { adapter, config, modelId: settings.modelId };
+      return { adapter, config, modelId };
     },
 
     async settings() {

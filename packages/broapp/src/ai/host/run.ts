@@ -444,7 +444,10 @@ async function runTurn(
 ): Promise<void> {
   // Throws a PublicError when nothing is configured. `runStream` in host/app.ts
   // turns that into the right thing on the wire, so it is not caught here.
-  const resolved = await deps.registry.resolve();
+  // The turn's own model, when a conversation has one. `resolve` applies it
+  // after the provider and key checks, so the vision check below and the model
+  // instance built later both follow it without a second code path.
+  const resolved = await deps.registry.resolve({ modelId: params.modelId });
 
   // Both checks come before anything is emitted, so a turn that cannot carry
   // its images fails as a whole rather than half-answering.

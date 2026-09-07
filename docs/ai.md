@@ -130,6 +130,54 @@ the model to emit a link to somewhere else therefore produces text, not a way
 out of the page. The stylesheet is ordinary CSS with no `@import`, no `url()`
 and no web font, so `broapp build` inlines and hashes it like any other.
 
+## Conversations
+
+A conversation is a **thread** the host keeps in SQLite, at
+`<dataDir>/ai/threads.sqlite`. It has a title, its own model, and its messages.
+The file is opened the first time a thread route is called, so an application
+whose user never opens the panel never gets one.
+
+```tsx
+const threads = useAiThreads();               // the list, and the writes
+const chat = useBroappChat({ threadId, modelId });
+```
+
+`useBroappChat({ threadId })` loads that thread on mount, saves it after every
+turn — one that finished, one the person stopped, and one that errored, because
+the text so far is part of what happened — and `clear()` empties the stored
+copy as well as the screen. `useAiThreads()` is the list beside it:
+`create`, `rename`, `setModel`, `remove`, `clearAll`, `refresh`. There is no
+optimistic update: a write goes to the host and the list is read back, so what
+is on screen is what is stored — including the title the host derived, which
+the browser cannot predict.
+
+What is stored is the messages as the AI SDK shapes them, written as JSON and
+handed back unread. Two things are deliberately not stored:
+
+- **Images.** A `file` part becomes the line `[image: name]` before it is
+  written. A data URL in SQLite would be a second copy of the picture that
+  nobody asked to keep and nothing ever deletes — and it is the same
+  placeholder the model already sees on every turn after the one the image
+  arrived on, so a reloaded conversation says exactly what the model was told.
+- **Anything about a key.** Settings and secrets live in their own files; a
+  test asserts the configured key does not appear in `threads.sqlite`.
+
+A thread's `modelId` is sent with each turn and overrides the model chosen in
+Settings **within the configured provider**. The provider is never overridden
+per turn: a different provider means a different key and a different answer to
+"does this leave my computer", and that stays a Settings decision. A thread
+with `modelId: null` follows Settings.
+
+Every thread route answers even when no provider is configured. A conversation
+is the user's own writing; somebody who has just deleted their key still owns
+it and must still be able to read and delete it. "Clear all conversations" is
+`clearAll()`, and an application that offers a settings panel should offer it
+there.
+
+Call `ai.close()` from the application's shutdown, beside `ai.abortAll(...)`:
+it checkpoints the database's write-ahead log, so what is left on disk is one
+complete file rather than one that needs its sidecars.
+
 ## How the model knows your application
 
 Four things reach the model, and nothing else.
@@ -332,8 +380,9 @@ cancellation.
   fetches and evaluates at runtime, which a page whose policy is
   `default-src 'none'` cannot do — and which would cost more bundle than a
   coloured keyword is worth. Fenced code renders as plain `<pre><code>`.
-- **No persisted conversations.** History lives in the browser tab and is gone
-  when it closes.
+- **Images are not stored.** A conversation on disk keeps the line
+  `[image: name]` where a picture was, so reopening it shows the placeholder
+  rather than the image. See "Conversations".
 - **No OS keychain.** The key is a `0600` file. Keychain, Credential Manager and
   Secret Service are a later addition.
 - **Images are bounded.** Up to four per message, downscaled in the browser to

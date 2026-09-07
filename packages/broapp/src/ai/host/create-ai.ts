@@ -28,6 +28,7 @@ import { createRegistry, type Registry } from './registry.ts';
 import { runChat, type RunDeps } from './run.ts';
 import { createFileSecretStore, createMemorySecretStore } from './secrets.ts';
 import { createSettingsStore } from './settings.ts';
+import { openThreads, type ThreadStore } from './threads.ts';
 import { GUARDED, type AiContextProviders, type AiTool } from './tool.ts';
 
 /** What the application is, in the words a model is given. */
@@ -90,6 +91,16 @@ const TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.]*$/;
 export interface Ai {
   mount(bridge: Bridge): void;
   abortAll(reason: string): void;
+  /**
+   * Release what the layer holds open. Call it from the application's
+   * shutdown, beside `abortAll`.
+   *
+   * Today that is the conversation store: closing it checkpoints the WAL, so
+   * what is left on disk is one complete database rather than one that needs
+   * its sidecars. Calling it twice is harmless, and an application that never
+   * opened a conversation has nothing to close.
+   */
+  close(): void;
   readonly activeStreams: number;
   /** For tests, and for applications that read settings on the host. */
   readonly registry: Registry;
@@ -216,6 +227,21 @@ export function createAi(options: CreateAiOptions): Ai {
       approvals.answer({ requestId: `${runId}:${callId}`, approved: approve }) === 'accepted',
   }));
 
+  // Opened on the first conversation route and not before: an application
+  // whose user never opens the panel should not find a database in its data
+  // directory, and `createAi` is built unconditionally by every application
+  // that offers AI at all.
+  let threads: ThreadStore | null = null;
+  const threadStore = (): ThreadStore => (threads ??= openThreads(options.dataDir));
+
+  host.operation('ai.threadsList', () => ({ threads: threadStore().list() }));
+  host.operation('ai.threadsCreate', (input) => threadStore().create(input));
+  host.operation('ai.threadsGet', ({ id }) => threadStore().get(id));
+  host.operation('ai.threadsSave', (input) => threadStore().save(input));
+  host.operation('ai.threadsUpdate', (input) => threadStore().update(input));
+  host.operation('ai.threadsDelete', ({ id }) => ({ deleted: threadStore().remove(id) }));
+  host.operation('ai.threadsClear', () => ({ deleted: threadStore().clear() }));
+
   /** The current provider config, or the "not set up" error. */
   async function requireConfig(): Promise<{ adapter: ProviderAdapter; config: AdapterConfig }> {
     const current = await registry.currentConfig();
@@ -228,6 +254,10 @@ export function createAi(options: CreateAiOptions): Ai {
   return {
     mount: (bridge: Bridge) => host.mount(bridge),
     abortAll: (reason: string) => host.abortAll(reason),
+    close: () => {
+      threads?.close();
+      threads = null;
+    },
     get activeStreams() {
       return host.activeStreams;
     },

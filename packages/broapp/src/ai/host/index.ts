@@ -32,3 +32,6 @@ export { apiKeySecretName, createFileSecretStore, createMemorySecretStore } from
 export type { SecretStore } from './secrets.ts';
 
 export type { Registry, ResolvedModel, UpdatePatch } from './registry.ts';
+
+export { DEFAULT_THREAD_TITLE, openThreads } from './threads.ts';
+export type { ThreadStore } from './threads.ts';

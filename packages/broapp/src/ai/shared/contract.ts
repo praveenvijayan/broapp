@@ -68,6 +68,40 @@ const chatFile = s.object({
   data: s.string({ min: 1, max: 2_000_000 }),
 });
 
+/** A conversation identifier. The host chooses it; the browser only echoes it. */
+const threadId = s.string({ pattern: /[A-Za-z0-9_-]{8,64}/ });
+
+/** A conversation, without its messages. */
+const thread = s.object({
+  id: threadId,
+  title: s.string({ max: 120 }),
+  /** Null means "whatever Settings says". */
+  modelId: s.nullable(s.string({ max: 200 })),
+  createdAt: s.number(),
+  updatedAt: s.number(),
+  messageCount: s.number({ int: true, min: 0 }),
+});
+
+/**
+ * One stored UI message. Parts are the AI SDK's; the host stores, never
+ * interprets.
+ *
+ * `s.unknown()` is normally forbidden on an input, because the point of an
+ * input schema is that browser-supplied data is untrusted. It is right here
+ * for the one reason that exempts it: nothing on the host ever reads inside a
+ * part. They are written to SQLite as JSON and handed back to the same browser
+ * that sent them, so the shape the host would be validating is a shape only
+ * the AI SDK understands and only the AI SDK consumes. What is still bounded
+ * is the *amount*: 200 parts to a message, 200 messages to a save, and a byte
+ * ceiling on the whole save in `threads.ts`.
+ */
+const storedMessage = s.object({
+  id: s.string({ max: 200 }),
+  role: s.enum(['user', 'assistant', 'system']),
+  parts: s.array(s.unknown(), { max: 200 }),
+  metadata: s.optional(s.unknown()),
+});
+
 /**
  * One stream event, flat because the validator has no unions.
  *
@@ -136,6 +170,56 @@ export const aiContract = defineContract({
       output: s.object({ accepted: s.boolean() }),
       summary: 'Answer a confirm event. `accepted` is false when no run is waiting on that call.',
     },
+    // Conversations are the user's own data, so every route below answers even
+    // when no provider is configured: somebody who has just removed their key
+    // is still entitled to read and delete what they wrote.
+    'ai.threadsList': {
+      input: s.void(),
+      output: s.object({ threads: s.array(thread, { max: 500 }) }),
+      summary: 'Every stored conversation, most recently changed first.',
+    },
+    'ai.threadsCreate': {
+      input: s.object({
+        title: s.optional(s.string({ max: 120 })),
+        modelId: s.optional(s.nullable(s.string({ max: 200 }))),
+      }),
+      output: thread,
+      summary: 'Start a conversation. Without a title it is named after its first message.',
+    },
+    'ai.threadsGet': {
+      input: s.object({ id: threadId }),
+      output: s.object({ thread, messages: s.array(storedMessage, { max: 200 }) }),
+      summary: 'One conversation and its messages.',
+    },
+    'ai.threadsSave': {
+      input: s.object({
+        id: threadId,
+        messages: s.array(storedMessage, { max: 200 }),
+        title: s.optional(s.string({ max: 120 })),
+      }),
+      output: thread,
+      summary: 'Replace the messages of a conversation, whole.',
+    },
+    'ai.threadsUpdate': {
+      input: s.object({
+        id: threadId,
+        title: s.optional(s.string({ max: 120 })),
+        // Null puts the conversation back on whatever Settings says.
+        modelId: s.optional(s.nullable(s.string({ max: 200 }))),
+      }),
+      output: thread,
+      summary: 'Rename a conversation, or give it a model of its own.',
+    },
+    'ai.threadsDelete': {
+      input: s.object({ id: threadId }),
+      output: s.object({ deleted: s.boolean() }),
+      summary: 'Delete one conversation and its messages.',
+    },
+    'ai.threadsClear': {
+      input: s.void(),
+      output: s.object({ deleted: s.number({ int: true, min: 0 }) }),
+      summary: 'Delete every conversation.',
+    },
   },
   streams: {
     'ai.chat': {
@@ -147,6 +231,11 @@ export const aiContract = defineContract({
         // Images travel with the turn they arrive on. History keeps a
         // placeholder instead, because a transcript of base64 would not fit.
         files: s.optional(s.array(chatFile, { max: 4 })),
+        // The model for this turn only, and only *within* the configured
+        // provider. A provider is never overridden per turn: a different
+        // provider means a different key and a different answer to "does this
+        // leave my computer", and that stays a Settings decision.
+        modelId: s.optional(s.string({ max: 200 })),
       }),
       event: chatEvent,
       summary: 'One chat turn. Emits text, tool calls, confirmations and usage.',
