@@ -122,6 +122,19 @@
         "broapp": ">=0.2.1",
       },
     },
+    "packages/broapp-autoapp": {
+      "name": "broapp-autoapp",
+      "version": "0.1.0",
+      "dependencies": {
+        "broapp": "workspace:*",
+      },
+      "peerDependencies": {
+        "react": ">=18",
+      },
+      "optionalPeers": [
+        "react",
+      ],
+    },
     "packages/create-broapp": {
       "name": "create-broapp",
       "version": "0.2.1",
@@ -168,6 +181,8 @@
     "broapp-ai-anthropic": ["broapp-ai-anthropic@workspace:packages/broapp-ai-anthropic"],
 
     "broapp-ai-compatible": ["broapp-ai-compatible@workspace:packages/broapp-ai-compatible"],
+
+    "broapp-autoapp": ["broapp-autoapp@workspace:packages/broapp-autoapp"],
 
     "brobridge": ["brobridge@0.2.1", "", { "dependencies": { "@brobridgejs/core": "^0.2.1", "ws": "^8.21.3" } }, "sha512-cFT/fxz0TLhZl9vMlN79YAoroAzDUGIFP/9FuKXDUcKE/O8BZYybGSmzOB7Rs3ZOprUhLaJVPuZSNbs8pn/k0w=="],
 

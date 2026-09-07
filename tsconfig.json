@@ -3,6 +3,7 @@
   "include": [
     "packages/*/src/**/*.ts",
     "packages/*/src/**/*.tsx",
+    "packages/*/spike/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts"
   ],

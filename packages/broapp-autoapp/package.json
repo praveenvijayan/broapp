@@ -1,0 +1,16 @@
+{
+  "name": "broapp-autoapp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A Broapp application its owner can reshape while using it: launcher, renderer, specification, engineer, activation",
+  "license": "MIT",
+  "engines": { "bun": ">=1.4.0" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": { "broapp": "workspace:*" },
+  "peerDependencies": { "react": ">=18" },
+  "peerDependenciesMeta": { "react": { "optional": true } }
+}
