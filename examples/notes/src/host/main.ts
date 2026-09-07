@@ -19,6 +19,9 @@ import manifest from '../../package.json' with { type: 'json' };
 import { join } from 'node:path';
 
 import { ensureDataDir, startApp } from 'broapp/host';
+import { createViewsHost } from 'broapp-autoapp/host';
+
+import { notesViews } from '../shared/views.ts';
 
 import { createNotesAi } from './ai.ts';
 import { createApp, type StoreState } from './operations.ts';
@@ -89,6 +92,9 @@ async function main(): Promise<number> {
   }
 
   const app = createApp(state);
+  // The renderer's own routes, in the reserved `autoapp` group: the release's
+  // views, plus whatever this person has changed about them.
+  const views = createViewsHost({ dataDir, views: notesViews });
   // The AI layer is a second host app on the same bridge. It is built
   // unconditionally and costs nothing until the user chooses a provider: no
   // key, no provider, no requests.
@@ -103,6 +109,7 @@ async function main(): Promise<number> {
     register: (bridge) => {
       app.mount(bridge);
       ai.mount(bridge);
+      views.mount(bridge);
     },
     // An idle exit must not throw away a computation someone is watching. The
     // grace period is for a closed tab, not for a busy host — and a chat turn

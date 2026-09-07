@@ -57,6 +57,7 @@
         "broapp": "workspace:*",
         "broapp-ai-anthropic": "workspace:*",
         "broapp-ai-compatible": "workspace:*",
+        "broapp-autoapp": "workspace:*",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
       },
@@ -128,6 +129,10 @@
       "version": "0.1.0",
       "dependencies": {
         "broapp": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/react": "^19.0.0",
+        "react": "^19.0.0",
       },
       "peerDependencies": {
         "react": ">=18",

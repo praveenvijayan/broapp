@@ -14,6 +14,8 @@
  */
 import type { Effect, JsonSchema } from 'broapp/shared';
 
+import type { ViewsSpec } from '../views/types.ts';
+
 /** The only specification version there is. */
 export const SPEC_VERSION = 1 as const;
 
@@ -114,8 +116,8 @@ export interface AcceptanceExample {
 export interface AppSpec {
   readonly manifest: AppManifest;
   readonly contract: ContractExport;
-  /** Defined by prompt 04. Validated here for shape only. */
-  readonly views: { readonly specVersion: 1; readonly pages: readonly unknown[] };
+  /** The interface this release draws, validated by `parseViews`. */
+  readonly views: ViewsSpec;
   /** Defined by prompt 06. Validated here for shape only. */
   readonly workflows: readonly { readonly id: string }[];
   readonly migrations: readonly MigrationSpec[];

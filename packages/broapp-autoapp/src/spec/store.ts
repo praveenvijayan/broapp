@@ -25,6 +25,8 @@ import { join, resolve } from 'node:path';
 
 import { publicError } from 'broapp/host';
 
+import { checkViewsAgainstContract } from '../views/check.ts';
+
 import type { AppLayout, Layout } from './layout.ts';
 import { releaseId as computeReleaseId } from './release-id.ts';
 import type { AppSpec } from './types.ts';
@@ -100,6 +102,16 @@ export function writeRelease(root: Layout, spec: AppSpec, files: ReleaseFiles): 
   if (recomputed !== spec.manifest.releaseId) {
     throw publicError.invalidInput(
       `the manifest names release ${spec.manifest.releaseId}, but these files hash to ${recomputed}`,
+    );
+  }
+
+  // The views and the contract are edited separately, and a release is the one
+  // moment they have to be true together. A table reading a route that no
+  // longer exists is a screen that fails the instant somebody opens it.
+  const problems = checkViewsAgainstContract(spec.views, spec.contract);
+  if (problems.length > 0) {
+    throw publicError.invalidInput(
+      `the interface does not match the contract: ${problems.join('; ')}`,
     );
   }
 

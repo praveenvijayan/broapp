@@ -37,6 +37,14 @@ export function createApp(state: StoreState) {
 
   app.operation('notes.list', ({ done }) => ({ notes: store().list(done) }));
 
+  app.operation('notes.get', ({ id }) => {
+    const [note] = store().byIds([id]);
+    // A note that is not there is the browser's question answered, not a
+    // failure of the application: the page it was opened from may be stale.
+    if (note === undefined) throw publicError.notFound('That note is not there any more.');
+    return note;
+  });
+
   app.operation('notes.create', ({ title, body }) => {
     const trimmed = title.trim();
     if (trimmed === '') throw publicError.invalidInput('A note needs a title.');

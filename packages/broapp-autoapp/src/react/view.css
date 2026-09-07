@@ -1,0 +1,212 @@
+/*
+ * The renderer's own styles.
+ *
+ * Every selector is prefixed `.autoapp-` so a host application's stylesheet and
+ * this one cannot collide. Colours come from custom properties with fallbacks,
+ * so an application that defines them gets its own palette and one that does
+ * not still looks deliberate.
+ */
+
+.autoapp {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.autoapp-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.autoapp-page__title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+  color: var(--autoapp-heading, #16181d);
+}
+
+.autoapp-section,
+.autoapp-table,
+.autoapp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--autoapp-border, #dfe3ea);
+  border-radius: 10px;
+  background: var(--autoapp-surface, #ffffff);
+}
+
+.autoapp-section__title,
+.autoapp-table__title,
+.autoapp-form__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--autoapp-heading, #16181d);
+}
+
+.autoapp-text {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--autoapp-text, #33383f);
+}
+
+.autoapp-link {
+  color: var(--autoapp-accent, #2a5bd7);
+  text-decoration: none;
+}
+
+.autoapp-link:hover,
+.autoapp-link:focus-visible {
+  text-decoration: underline;
+}
+
+.autoapp-empty {
+  margin: 0;
+  color: var(--autoapp-muted, #6b7280);
+  font-style: italic;
+}
+
+.autoapp-table__grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.autoapp-table__grid th,
+.autoapp-table__grid td {
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--autoapp-border, #dfe3ea);
+  vertical-align: top;
+}
+
+.autoapp-table__grid th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--autoapp-muted, #6b7280);
+}
+
+.autoapp-col--narrow {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.autoapp-col--wide {
+  width: 60%;
+}
+
+.autoapp-row-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.autoapp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.autoapp-field__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--autoapp-text, #33383f);
+}
+
+.autoapp-field__input {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--autoapp-border, #dfe3ea);
+  border-radius: 7px;
+  font: inherit;
+  color: inherit;
+  background: var(--autoapp-input, #ffffff);
+}
+
+.autoapp-field__input:focus-visible {
+  outline: 2px solid var(--autoapp-accent, #2a5bd7);
+  outline-offset: 1px;
+}
+
+.autoapp-field__check {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.autoapp-button {
+  align-self: flex-start;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--autoapp-border, #dfe3ea);
+  border-radius: 7px;
+  background: var(--autoapp-button, #f4f5f8);
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+}
+
+.autoapp-button:hover:not(:disabled) {
+  background: var(--autoapp-button-hover, #e9ebf1);
+}
+
+.autoapp-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.autoapp-button--small {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.85rem;
+}
+
+.autoapp-button-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.autoapp-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--autoapp-border, #dfe3ea);
+}
+
+.autoapp-status__label {
+  color: var(--autoapp-muted, #6b7280);
+}
+
+.autoapp-status__value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.autoapp-message {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 7px;
+  font-size: 0.9rem;
+}
+
+.autoapp-message--error {
+  background: var(--autoapp-error-surface, #fdecec);
+  color: var(--autoapp-error-text, #a12222);
+}
+
+.autoapp-conflicts {
+  margin: 0;
+  padding: 0.6rem 0.9rem 0.6rem 1.6rem;
+  border: 1px solid var(--autoapp-notice-border, #f0d9a8);
+  border-radius: 8px;
+  background: var(--autoapp-notice-surface, #fdf6e7);
+  color: var(--autoapp-notice-text, #6b5312);
+  font-size: 0.9rem;
+}
+
+.autoapp-conflicts__item + .autoapp-conflicts__item {
+  margin-top: 0.25rem;
+}

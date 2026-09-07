@@ -47,6 +47,22 @@ function root(): ReturnType<typeof layout> {
 }
 
 const page = new TextEncoder().encode('<!doctype html><title>notes</title>');
+
+/** The smallest view specification that is valid: one page, reading one source. */
+const minimalViews = {
+  specVersion: 1 as const,
+  home: 'notes',
+  pages: [
+    {
+      id: 'notes',
+      title: 'Notes',
+      sources: [{ id: 'all', operation: 'notes.list', input: {} }],
+      children: [
+        { id: 'all-notes', kind: 'text' as const, template: 'Notes: {{all.notes}}' },
+      ],
+    },
+  ],
+};
 const host = new TextEncoder().encode('export const start = () => undefined;\n');
 
 /** A checksum-shaped string, so the migration schema is satisfied. */
@@ -80,7 +96,7 @@ function minimalSpec(overrides: Partial<AppSpec> = {}): AppSpec {
       capabilities: [],
     },
     contract,
-    views: { specVersion: 1, pages: [] },
+    views: minimalViews,
     workflows: [],
     migrations: [],
     acceptance: [],
@@ -241,13 +257,15 @@ describe('exportContract', () => {
     expect(Object.keys(exported.operations).sort()).toEqual([
       'notes.backup',
       'notes.create',
+      'notes.get',
       'notes.list',
       'notes.remove',
       'notes.status',
       'notes.update',
     ]);
-    expect(exported.operations['notes.list']?.effect).toBe('read');
-    expect(exported.operations['notes.status']?.effect).toBe('read');
+    for (const route of ['notes.list', 'notes.get', 'notes.status']) {
+      expect(exported.operations[route]?.effect).toBe('read');
+    }
     for (const route of ['notes.create', 'notes.update', 'notes.remove', 'notes.backup']) {
       expect(exported.operations[route]?.effect).toBe('write');
     }

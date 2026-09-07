@@ -34,6 +34,13 @@ export const contract = defineContract({
       output: s.object({ notes: s.array(note, { max: 10_000 }) }),
     },
 
+    'notes.get': {
+      effect: 'read',
+      summary: 'One note by id.',
+      input: s.object({ id: s.number({ int: true, min: 1 }) }),
+      output: note,
+    },
+
     'notes.create': {
       effect: 'write',
       summary: 'Create a note with a title and a body.',

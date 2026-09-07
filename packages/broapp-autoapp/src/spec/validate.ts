@@ -18,6 +18,9 @@
 import { s, ValidationError } from 'broapp/shared';
 import type { Issue, JsonSchema, Result, Schema } from 'broapp/shared';
 
+import { parseViews } from '../views/validate.ts';
+import type { ViewsSpec } from '../views/types.ts';
+
 import {
   APP_ID_PATTERN,
   SPEC_VERSION,
@@ -202,13 +205,35 @@ const acceptance = s.object({
   ),
 }) as unknown as Schema<AcceptanceExample>;
 
+/**
+ * The view specification, validated by its own parser.
+ *
+ * It has structural rules of its own — a table pointing at a source that is not
+ * on its page, a link to a page that does not exist — and restating them here
+ * would be a second copy to keep in step. So the whole field is delegated, and
+ * its issues are re-pathed under `views` so a caller still learns where the
+ * failure was.
+ */
+const viewsField = custom<ViewsSpec>(
+  'views',
+  (value, path) => {
+    try {
+      return { ok: true, value: parseViews(value) };
+    } catch (cause) {
+      const issues = (cause as { issues?: Issue[] }).issues;
+      if (issues === undefined) {
+        return fail(path, cause instanceof Error ? cause.message : 'invalid view specification');
+      }
+      return { ok: false, issues: issues.map((issue) => ({ ...issue, path: [...path, ...issue.path] })) };
+    }
+  },
+  () => ({ type: 'object' }),
+);
+
 const specShape = s.object({
   manifest,
   contract,
-  views: s.object({
-    specVersion: s.number({ int: true, min: 1, max: 1 }),
-    pages: s.array(s.unknown(), { max: 500 }),
-  }),
+  views: viewsField,
   workflows: s.array(s.object({ id: s.string({ min: 1, max: 100 }) }), { max: 500 }),
   migrations: s.array(migration, { max: 1_000 }),
   acceptance: s.array(acceptance, { max: 500 }),

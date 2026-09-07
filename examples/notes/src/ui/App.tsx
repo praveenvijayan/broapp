@@ -1,77 +1,44 @@
 /**
  * Notes.
  *
- * A list, a form, and a status panel. Every mutation refetches the list rather
- * than patching local state optimistically: this is a local application talking
- * to a process on the same machine, the round trip is sub-millisecond, and an
- * optimistic update that diverges from the database is a bug users cannot
- * explain.
+ * There is almost nothing here. The list, the form and the details panel are
+ * not React components in this application any more — they are entries in
+ * `src/shared/views.ts`, drawn by `broapp-autoapp/react`, which is pinned and
+ * the same for every Autoapp application. What is left in this file is the
+ * frame: the heading, the connection badge, and the AI panels.
+ *
+ * That is the whole point of the arrangement. An AI engineer can propose a
+ * different interface by proposing a different view specification, and nothing
+ * that runs in the browser changes — so the page's content-security policy
+ * stays pinned to the hashes the build computed.
  */
-import { useCallback, useEffect, useState } from 'react';
-import { useConnection, useOperation } from 'broapp/react';
+import { useEffect, useState } from 'react';
+import { AutoappView } from 'broapp-autoapp/react';
 import { AiChat, AiSettings } from 'broapp/ai/react';
 
 import { ConnectionBadge } from './ConnectionBadge.tsx';
-import { NoteEditor } from './NoteEditor.tsx';
-import { StatusPanel } from './StatusPanel.tsx';
-import type { AppContract } from '../shared/types.ts';
 
-type Filter = 'all' | 'open' | 'done';
+/** The note the person is looking at, from the hash: `#/note/12` is `note:12`. */
+function useOpenNote(): readonly string[] {
+  const read = (): readonly string[] => {
+    const match = /^#\/note\/(\d+)/.exec(globalThis.location.hash);
+    return match === null ? [] : [`note:${match[1] ?? ''}`];
+  };
+  const [refs, setRefs] = useState<readonly string[]>(read);
+  useEffect(() => {
+    const onChange = (): void => setRefs(read());
+    globalThis.addEventListener('hashchange', onChange);
+    return () => globalThis.removeEventListener('hashchange', onChange);
+  }, []);
+  return refs;
+}
 
 export function App(): React.ReactElement {
-  const connection = useConnection();
-  const ready = connection.phase === 'ready';
-
-  const list = useOperation<AppContract, 'notes.list'>('notes.list');
-  const create = useOperation<AppContract, 'notes.create'>('notes.create');
-  const update = useOperation<AppContract, 'notes.update'>('notes.update');
-  const remove = useOperation<AppContract, 'notes.remove'>('notes.remove');
-  const status = useOperation<AppContract, 'notes.status'>('notes.status');
-
-  const [filter, setFilter] = useState<Filter>('all');
-  const [editing, setEditing] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-
-  const { run: runList } = list;
-  const { run: runStatus } = status;
-
-  const refresh = useCallback(
-    (next: Filter = filter) => {
-      void runList({ done: next === 'all' ? null : next === 'done' });
-      void runStatus(undefined);
-    },
-    [filter, runList, runStatus],
-  );
-
-  useEffect(() => {
-    if (ready) refresh();
-    // Refetch when the connection comes back, so a tab that was disconnected
-    // does not sit on a stale list.
-  }, [ready, refresh]);
-
-  const notes = list.data?.notes ?? [];
-  const unhealthy = status.data?.healthy === false;
-
-  async function submit(input: { title: string; body: string }): Promise<void> {
-    await create.run(input);
-    refresh();
-  }
-
-  async function save(note: { id: number; title: string; body: string; done: boolean }): Promise<void> {
-    await update.run(note);
-    setEditing(null);
-    refresh();
-  }
-
-  async function toggle(note: { id: number; title: string; body: string; done: boolean }): Promise<void> {
-    await update.run({ ...note, done: !note.done });
-    refresh();
-  }
-
-  async function destroy(id: number): Promise<void> {
-    await remove.run({ id });
-    refresh();
-  }
+  // Bumped when an approved tool call may have changed the database, so the
+  // renderer reloads rather than showing a list the model has already edited.
+  const [changed, setChanged] = useState(0);
+  const refs = useOpenNote();
 
   return (
     <div className="app">
@@ -86,6 +53,12 @@ export function App(): React.ReactElement {
           </p>
         </div>
         <div className="app__header-actions">
+          <a className="button" href="#/notes">
+            Notes
+          </a>
+          <a className="button" href="#/status">
+            Details
+          </a>
           <button
             className="button"
             type="button"
@@ -105,117 +78,20 @@ export function App(): React.ReactElement {
           </section>
         )}
 
-        {unhealthy && (
-          <p className="message message--error" role="alert">
-            The notes database could not be opened, so nothing can be saved. Its location is in the
-            details below — move that file aside and restart to begin with an empty one.
-          </p>
-        )}
+        <AutoappView reloadToken={changed} />
 
-        <section className="card" aria-labelledby="new-heading">
-          <h2 className="card__title" id="new-heading">
-            New note
-          </h2>
-          <NoteEditor
-            key="new"
-            submitLabel="Add note"
-            pending={create.pending}
-            error={create.error?.message ?? null}
-            onSubmit={submit}
-          />
-        </section>
-
-        <section className="card" aria-labelledby="list-heading">
-          <header className="card__head">
-            <h2 className="card__title" id="list-heading">
-              {notes.length === 0 ? 'No notes yet' : `${String(notes.length)} note${notes.length === 1 ? '' : 's'}`}
-            </h2>
-            <div className="segmented" role="group" aria-label="Filter notes">
-              {(['all', 'open', 'done'] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className="segmented__button"
-                  aria-pressed={filter === option}
-                  onClick={() => {
-                    setFilter(option);
-                    refresh(option);
-                  }}
-                >
-                  {option === 'all' ? 'All' : option === 'open' ? 'To do' : 'Done'}
-                </button>
-              ))}
-            </div>
-          </header>
-
-          {list.error !== null && <p className="message message--error">{list.error.message}</p>}
-
-          <ul className="notes">
-            {notes.map((note) =>
-              editing === note.id ? (
-                <li className="notes__item notes__item--editing" key={note.id}>
-                  <NoteEditor
-                    submitLabel="Save"
-                    initial={{ title: note.title, body: note.body }}
-                    pending={update.pending}
-                    error={update.error?.message ?? null}
-                    onSubmit={(input) => save({ ...input, id: note.id, done: note.done })}
-                    onCancel={() => setEditing(null)}
-                  />
-                </li>
-              ) : (
-                <li className="notes__item" key={note.id}>
-                  <label className="notes__check">
-                    <input
-                      type="checkbox"
-                      checked={note.done}
-                      onChange={() => void toggle(note)}
-                      aria-label={`Mark "${note.title}" as ${note.done ? 'not done' : 'done'}`}
-                    />
-                  </label>
-                  <div className="notes__content">
-                    <h3 className={note.done ? 'notes__title notes__title--done' : 'notes__title'}>
-                      {note.title}
-                    </h3>
-                    {note.body !== '' && <p className="notes__body">{note.body}</p>}
-                    <p className="notes__meta">
-                      Updated {new Date(note.updatedAt).toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="notes__actions">
-                    <button className="button button--small" type="button" onClick={() => setEditing(note.id)}>
-                      Edit
-                    </button>
-                    <button
-                      className="button button--small button--danger"
-                      type="button"
-                      onClick={() => void destroy(note.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ),
-            )}
-          </ul>
-        </section>
-
-        {/* The note being edited is what the user is looking at, so it is what
-            the model is shown. Everything else it needs it has to search for. */}
+        {/* The note being looked at is what the model is shown. Everything else
+            it needs it has to search for. */}
         <AiChat
-          refs={editing === null ? [] : [`note:${String(editing)}`]}
+          refs={refs}
           placeholder="Ask about your notes…"
           onToolResult={(call) => {
-            // A confirmed tool may have changed the database, so the list is
-            // refetched rather than guessed at.
-            if (call.status === 'done' && call.tool !== 'notes.list') refresh();
+            if (call.status === 'done' && call.tool !== 'notes.list' && call.tool !== 'notes.get') {
+              setChanged((count) => count + 1);
+            }
           }}
         />
       </main>
-
-      <footer className="app__footer">
-        <StatusPanel status={status} onBackedUp={() => refresh()} />
-      </footer>
     </div>
   );
 }

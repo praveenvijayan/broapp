@@ -92,7 +92,7 @@ export function createNotesAi(
       },
     },
     tools: fromContract(contract, app, {
-      read: ['notes.list'],
+      read: ['notes.list', 'notes.get'],
       // Everything that changes the user's data asks first.
       confirm: ['notes.create', 'notes.update', 'notes.remove'],
     }),

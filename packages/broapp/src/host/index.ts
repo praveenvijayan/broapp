@@ -7,8 +7,8 @@
  */
 export { createHostApp } from './app.ts';
 /**
- * Not for applications: it skips the check that refuses the reserved `ai`
- * route group. Only `broapp/ai/host` should use it.
+ * Not for applications: it skips the check that refuses Broapp's reserved
+ * route groups. Only `broapp/ai/host` and `broapp-autoapp/host` should use it.
  */
 export { createReservedHostApp } from './app.ts';
 export type {

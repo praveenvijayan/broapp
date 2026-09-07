@@ -202,22 +202,29 @@ export function mergeContracts<A extends AnyContract, B extends AnyContract>(
   }>;
 }
 
-/** The route group Broapp reserves for its AI layer. */
-export const RESERVED_GROUPS: readonly string[] = ['ai'];
+/**
+ * The route groups Broapp reserves for itself.
+ *
+ * `ai` belongs to the AI layer and `autoapp` to Autoapp's own host routes.
+ * Both are mounted as a second host app on the same bridge as the
+ * application's, so a name that appeared in both route tables would be
+ * unresolvable.
+ */
+export const RESERVED_GROUPS: readonly string[] = ['ai', 'autoapp'];
 
 /**
  * Throws if a contract declares a route in a reserved group.
  *
- * This is not checked in `defineContract`, because Broapp's own AI contract is
- * built with `defineContract` and has to be allowed the group. It is checked
- * where an *application* contract enters the host instead.
+ * This is not checked in `defineContract`, because Broapp's own contracts are
+ * built with `defineContract` and have to be allowed their groups. It is
+ * checked where an *application* contract enters the host instead.
  */
 export function assertNoReservedRoutes(contract: AnyContract): void {
   for (const route of [...contract.routes.operations, ...contract.routes.streams]) {
     const { group } = splitRoute(route);
     if (RESERVED_GROUPS.includes(group)) {
       throw new TypeError(
-        `route ${JSON.stringify(route)} uses the group ${JSON.stringify(group)}, which is reserved for Broapp's AI layer`,
+        `route ${JSON.stringify(route)} uses the group ${JSON.stringify(group)}, which is reserved for Broapp`,
       );
     }
   }
