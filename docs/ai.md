@@ -210,6 +210,14 @@ Two packages ship:
   Ollama, LM Studio, llama.cpp's server, vLLM and OpenRouter, because they
   answer `GET /models` with the same envelope and accept the same chat request.
 
+`GET /models` says nothing about what a model can do, so each preset learns
+vision its own way. `ollama()` asks the server's native `POST /api/show`, which
+reports `capabilities`, and treats any failure there as "unknown" rather than
+"cannot see". `openai()` matches the id against the vision-capable families
+(`gpt-4o`, `gpt-4.1`, `gpt-4-turbo`, `gpt-5`, `o1`, `o3`, `o4`, `chatgpt-4o`),
+a list that will age. `customServer()`, and `openaiCompatible()` without the
+`vision` option, assume every model can see.
+
 An adapter is small. It answers what it needs, lists models, proves a
 configuration works, and builds a model:
 
@@ -317,6 +325,10 @@ cancellation.
   message they arrive on. A model whose `capabilities.vision` is false refuses
   the turn. `broapp/ai/react`'s `AiChat` does not send images at all; the
   attachment path is `broapp-ai-elements`.
+- **A custom server is assumed to see.** Nothing in the OpenAI-compatible API
+  reports capabilities, so an unrecognised server is never refused an image on
+  a guess; if the model cannot read it, the provider's own error is what you
+  get.
 - **One turn at a time.** Sending while a turn is running is ignored.
 - **`ai.modelsList` needs a configured provider**, so a settings panel cannot
   preview another provider's models before switching to it.

@@ -21,6 +21,7 @@ stays as the no-dependency option.
 | 02 | `02-attachments.md` | `files` on `ai.chat`; host file parts and the vision refusal; browser downscaling; history placeholder. | `tests/ai-chat.test.ts` unchanged and green; new cases green; two 1.9 MB files round-trip. |
 | 03 | `03-elements-ui.md` | Vendored AI Elements + shadcn primitives, `BroappChat`, the approval card with countdown, hardened markdown, the built stylesheet. | `renderToString` proves markdown links/images/HTML are inert; built CSS has no `url(`/`@import`; bundle passes off-origin. |
 | 04 | `04-adoption-docs-release.md` | Notes example and launcher on `BroappChat`; docs, skill, site, packing, dry runs; manual run with a pasted screenshot. | Full `bun run check`, notes build + smoke, launcher build, both dry runs; the manual-run table filled in. |
+| 04b | `04b-vision-capability.md` | Fix-up from report 04: the compatible adapter learns vision from Ollama's `/api/show` or a known OpenAI id; custom servers are assumed able. | Provider tests green; rows 8–11 and 13 re-run with a vision model. |
 | 05 | `05-backlog.md` | Not a build prompt. What comes next and why it waited. | — |
 
 ## How to run one prompt

@@ -24,6 +24,12 @@ export interface CompatibleOptions {
   readonly defaultBaseUrl: string | null;
   /** Sent as the OpenAI-compatible provider `name`. Default: `id`. */
   readonly name?: string;
+  /**
+   * How to learn whether a model can see. `'ollama'` asks the server's own
+   * `/api/show`; `'by-id'` matches known model ids; `'assume'` reports true
+   * and lets the provider answer if it cannot. Default `'assume'`.
+   */
+  readonly vision?: 'ollama' | 'by-id' | 'assume';
 }
 
 interface ModelEntry {
@@ -33,6 +39,56 @@ interface ModelEntry {
 function baseUrlOf(options: CompatibleOptions, config: AdapterConfig): string {
   const url = config.baseUrl ?? options.defaultBaseUrl ?? '';
   return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+/**
+ * OpenAI model ids that can read an image, by prefix.
+ *
+ * This will age. OpenAI names models faster than this file changes, so a new
+ * one that can see reads as blind here until someone edits the line — which is
+ * the direction that fails loudly rather than at the worst moment.
+ */
+const OPENAI_VISION_IDS = /^(gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|o1|o3|o4|chatgpt-4o)/;
+
+/**
+ * The server's own API root, from its OpenAI-compatible base URL.
+ *
+ * Ollama serves the OpenAI surface under `/v1` and its native one under the
+ * root, so dropping a single trailing `/v1` is the whole conversion.
+ */
+function nativeRootOf(baseUrl: string): string {
+  return baseUrl.endsWith('/v1') ? baseUrl.slice(0, -'/v1'.length) : baseUrl;
+}
+
+/**
+ * What Ollama's `/api/show` says one model can do, or `null` when it will not
+ * say.
+ *
+ * Every failure — unreachable, non-2xx, a body that is not the expected shape
+ * — is `null` and is not surfaced. This is a side channel: the model list must
+ * not fail because it did.
+ */
+async function ollamaCapabilities(
+  root: string,
+  modelId: string,
+  headers: Record<string, string>,
+  config: AdapterConfig,
+  signal: AbortSignal,
+): Promise<readonly string[] | null> {
+  try {
+    const response = await config.fetch(`${root}/api/show`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: modelId }),
+      signal,
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { capabilities?: unknown };
+    if (!Array.isArray(body.capabilities)) return null;
+    return body.capabilities.filter((entry): entry is string => typeof entry === 'string');
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -102,7 +158,8 @@ export function openaiCompatible(options: CompatibleOptions): ProviderAdapter {
 
       const body = (await response.json().catch(() => ({}))) as { data?: unknown };
       const entries = Array.isArray(body.data) ? (body.data as ModelEntry[]) : [];
-      return entries
+      const vision = options.vision ?? 'assume';
+      const listed = entries
         .filter((entry): entry is ModelEntry & { id: string } => typeof entry.id === 'string')
         .sort((left, right) => left.id.localeCompare(right.id))
         .map(
@@ -110,11 +167,41 @@ export function openaiCompatible(options: CompatibleOptions): ProviderAdapter {
             provider: options.id,
             modelId: entry.id,
             label: entry.id,
-            // Conservative: the endpoint says nothing about what the model can
-            // do, and claiming a capability it lacks fails at the worst moment.
-            capabilities: { tools: true, vision: false, structuredOutput: false },
+            // This endpoint says nothing about capabilities, so `vision` is
+            // whatever `options.vision` can work out. Where it cannot work
+            // anything out the answer is `true`, and deliberately: a false
+            // refusal blocks a setup that works, while a false allowance costs
+            // one request and returns the provider's own error, which is more
+            // precise than a guess made here.
+            capabilities: {
+              tools: true,
+              vision: vision === 'by-id' ? OPENAI_VISION_IDS.test(entry.id) : true,
+              structuredOutput: false,
+            },
           }),
         );
+      if (vision !== 'ollama') return listed;
+
+      // Ollama's own API knows, so ask it once per model, in parallel, and let
+      // a model whose answer did not arrive keep the assumed `true`.
+      const root = nativeRootOf(baseUrlOf(options, config));
+      const answers = await Promise.all(
+        listed.map((model) => ollamaCapabilities(root, model.modelId, headers, config, signal)),
+      );
+      return listed.map((model, index) => {
+        const capabilities = answers[index] ?? null;
+        if (capabilities === null) return model;
+        return {
+          ...model,
+          capabilities: {
+            ...model.capabilities,
+            // The same answer carries both; `structuredOutput` it does not
+            // mention, so that one is left alone.
+            tools: capabilities.includes('tools'),
+            vision: capabilities.includes('vision'),
+          },
+        };
+      });
     },
 
     async test(config, signal) {
@@ -151,6 +238,7 @@ export const ollama = (): ProviderAdapter =>
     label: 'Ollama (local)',
     needs: { apiKey: 'none', baseUrl: 'optional' },
     defaultBaseUrl: 'http://127.0.0.1:11434/v1',
+    vision: 'ollama',
   });
 
 /** OpenAI itself. */
@@ -160,6 +248,7 @@ export const openai = (): ProviderAdapter =>
     label: 'OpenAI',
     needs: { apiKey: 'required', baseUrl: 'optional' },
     defaultBaseUrl: 'https://api.openai.com/v1',
+    vision: 'by-id',
   });
 
 /**
@@ -169,6 +258,9 @@ export const openai = (): ProviderAdapter =>
  * wants none, while a hosted gateway such as OpenRouter answers `GET /models`
  * without one and then rejects every chat request. Offering the field lets
  * both work.
+ *
+ * Vision is assumed: nothing here can know what an unnamed server runs, and
+ * refusing an image turn on that ignorance would block a setup that works.
  */
 export const customServer = (): ProviderAdapter =>
   openaiCompatible({

@@ -22,7 +22,9 @@ import { harness, type Harness } from './harness.ts';
 /** Every request the stub saw. */
 interface Seen {
   readonly url: string;
+  readonly method: string;
   readonly headers: Record<string, string>;
+  readonly body: string | null;
 }
 
 function stubFetch(
@@ -35,7 +37,12 @@ function stubFetch(
     for (const [name, value] of Object.entries((init?.headers ?? {}) as Record<string, string>)) {
       headers[name.toLowerCase()] = value;
     }
-    seen.push({ url, headers });
+    seen.push({
+      url,
+      method: init?.method ?? 'GET',
+      headers,
+      body: typeof init?.body === 'string' ? init.body : null,
+    });
     return handler(url, init);
   };
   return Object.assign(stub as unknown as typeof fetch, { seen, preconnect: () => undefined });
@@ -161,11 +168,94 @@ describe('the OpenAI-compatible adapter', () => {
     expect(fetchImpl.seen[0]?.url).toBe('http://127.0.0.1:11434/v1/models');
     expect(fetchImpl.seen[0]?.headers['authorization']).toBeUndefined();
     expect(models.map((model) => model.modelId)).toEqual(['gemma', 'llama3']);
+    // `/api/show` answered without a `capabilities` array here, which is the
+    // "it would not say" case: unknown, and so not refused.
     expect(models[0]?.capabilities).toEqual({
       tools: true,
-      vision: false,
+      vision: true,
       structuredOutput: false,
     });
+  });
+
+  test('Ollama learns vision from its own /api/show', async () => {
+    const fetchImpl = stubFetch((url, init) => {
+      if (url.endsWith('/v1/models')) {
+        return json({ data: [{ id: 'gemma4:31b-mlx' }, { id: 'llama3' }] });
+      }
+      const asked = JSON.parse(String(init?.body)) as { model: string };
+      return json({
+        capabilities:
+          asked.model === 'gemma4:31b-mlx'
+            ? ['completion', 'vision', 'tools', 'thinking']
+            : ['completion', 'tools'],
+      });
+    });
+    const models = await ollama().models(configWith(fetchImpl), never);
+
+    expect(fetchImpl.seen).toHaveLength(3);
+    expect(fetchImpl.seen[1]?.url).toBe('http://127.0.0.1:11434/api/show');
+    expect(fetchImpl.seen[1]?.method).toBe('POST');
+    expect(fetchImpl.seen[1]?.body).toBe(JSON.stringify({ model: 'gemma4:31b-mlx' }));
+    expect(fetchImpl.seen[2]?.url).toBe('http://127.0.0.1:11434/api/show');
+    expect(fetchImpl.seen[2]?.method).toBe('POST');
+    expect(fetchImpl.seen[2]?.body).toBe(JSON.stringify({ model: 'llama3' }));
+    // A local server that wants no key must not be handed an empty one on the
+    // side channel either.
+    expect(fetchImpl.seen.every((entry) => entry.headers['authorization'] === undefined)).toBe(true);
+
+    expect(models.map((model) => [model.modelId, model.capabilities.vision])).toEqual([
+      ['gemma4:31b-mlx', true],
+      ['llama3', false],
+    ]);
+    expect(models[1]?.capabilities.tools).toBe(true);
+  });
+
+  test('an /api/show that fails leaves that model unrefused', async () => {
+    const fetchImpl = stubFetch((url, init) => {
+      if (url.endsWith('/v1/models')) return json({ data: [{ id: 'blind' }, { id: 'broken' }] });
+      const asked = JSON.parse(String(init?.body)) as { model: string };
+      if (asked.model === 'broken') return new Response('boom', { status: 500 });
+      return json({ capabilities: ['completion', 'tools'] });
+    });
+    const models = await ollama().models(configWith(fetchImpl), never);
+
+    // The list itself still resolves: a side channel must not fail it.
+    expect(models.map((model) => [model.modelId, model.capabilities.vision])).toEqual([
+      ['blind', false],
+      ['broken', true],
+    ]);
+  });
+
+  test('a trailing slash on the base URL still finds /api/show', async () => {
+    const fetchImpl = stubFetch((url) =>
+      url.endsWith('/v1/models') ? json({ data: [{ id: 'llama3' }] }) : json({ capabilities: [] }),
+    );
+    await ollama().models(configWith(fetchImpl, { baseUrl: 'http://127.0.0.1:11434/v1/' }), never);
+    expect(fetchImpl.seen[1]?.url).toBe('http://127.0.0.1:11434/api/show');
+  });
+
+  test('OpenAI knows its vision models by id, and asks nothing extra', async () => {
+    const fetchImpl = stubFetch(() =>
+      json({ data: [{ id: 'gpt-4o-mini' }, { id: 'gpt-3.5-turbo' }, { id: 'o3' }] }),
+    );
+    const models = await openai().models(configWith(fetchImpl, { apiKey: 'k' }), never);
+
+    expect(fetchImpl.seen).toHaveLength(1);
+    expect(models.map((model) => [model.modelId, model.capabilities.vision])).toEqual([
+      ['gpt-3.5-turbo', false],
+      ['gpt-4o-mini', true],
+      ['o3', true],
+    ]);
+  });
+
+  test('a custom server is assumed to see', async () => {
+    const fetchImpl = stubFetch(() => json({ data: [{ id: 'a' }, { id: 'b' }] }));
+    const models = await customServer().models(
+      configWith(fetchImpl, { baseUrl: 'http://127.0.0.1:8000/v1' }),
+      never,
+    );
+    expect(fetchImpl.seen).toHaveLength(1);
+    expect(models.every((model) => model.capabilities.vision)).toBe(true);
   });
 
   test('OpenAI sends the key as a bearer token', async () => {
