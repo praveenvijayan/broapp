@@ -12,7 +12,7 @@ export {
   readWorkspaceFile,
   snapshot,
 } from './workspace.ts';
-export type { EditResult, FileChange, Hunk, Snapshot, TreeEntry } from './workspace.ts';
+export type { EditResult, FileChange, Hunk, MatchedBy, Snapshot, TreeEntry } from './workspace.ts';
 
 export { ENGINEER_INSTRUCTIONS, INSTRUCTION_SECTIONS } from './instructions.ts';
 

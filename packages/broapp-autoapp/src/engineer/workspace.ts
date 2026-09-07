@@ -26,6 +26,7 @@ import {
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { publicError } from 'broapp/host';
+import type { PublicError } from 'broapp/shared';
 
 /** One file in the workspace. */
 export interface TreeEntry {
@@ -50,10 +51,15 @@ export interface Hunk {
   readonly replace: string;
 }
 
+/** Which pass of {@link applyEdits} found a hunk. */
+export type MatchedBy = 'exact' | 'indent';
+
 /** What {@link applyEdits} did. */
 export interface EditResult {
   readonly changed: readonly string[];
   readonly undo: 'git' | 'source-history';
+  /** How each hunk matched, in the order the hunks were given. */
+  readonly matchedBy?: readonly MatchedBy[];
 }
 
 /** The most one file may be, read or written. */
@@ -226,7 +232,7 @@ export function applyChange(
 }
 
 /**
- * Apply exact find-and-replace hunks.
+ * Apply find-and-replace hunks.
  *
  * The reason this exists rather than `applyChange` alone: `source.change`
  * takes the whole new contents of a file, and report 07 measured a local model
@@ -238,6 +244,9 @@ export function applyChange(
  * new contents are computed in memory first, so a set of hunks either all land
  * or none do. A half-applied edit is worse than a refused one: the model would
  * have to work out which half.
+ *
+ * A hunk matches exactly, or line for line with leading whitespace ignored;
+ * see {@link locate} for why there is no third, looser pass.
  */
 export function applyEdits(
   sourceDir: string,
@@ -248,6 +257,8 @@ export function applyEdits(
 
   /** The new contents of each file, in hunk order, before anything is written. */
   const buffers = new Map<string, { target: string; content: string }>();
+  /** Which pass matched each hunk, so a caller can see when the file's own indentation was used. */
+  const matchedBy: MatchedBy[] = [];
 
   for (const hunk of hunks) {
     const path = asPosix(hunk.path);
@@ -268,24 +279,16 @@ export function applyEdits(
     if (hunk.find === '') {
       throw publicError.invalidInput(`the hunk for ${hunk.path} has nothing to find`);
     }
-    const matches = countOccurrences(current, hunk.find);
-    if (matches === 0) {
-      throw publicError.invalidInput(`not found in ${hunk.path}: ${excerpt(hunk.find)}`);
-    }
-    if (matches > 1) {
-      throw publicError.invalidInput(
-        `ambiguous in ${hunk.path}: ${String(matches)} matches, include more context`,
-      );
-    }
 
     // Two hunks on one file apply in order to the same buffer, so the second
     // sees what the first left. Anything else would make the order of a list
     // silently matter in a way nobody could see.
-    const next = current.replace(hunk.find, () => hunk.replace);
-    if (Buffer.byteLength(next, 'utf8') > MAX_FILE_BYTES) {
+    const found = locate(current, hunk, hunk.path);
+    if (Buffer.byteLength(found.content, 'utf8') > MAX_FILE_BYTES) {
       throw publicError.invalidInput(`${hunk.path} is larger than the ${String(MAX_FILE_BYTES)}-byte limit`);
     }
-    buffers.set(path, { target, content: next });
+    matchedBy.push(found.matchedBy);
+    buffers.set(path, { target, content: found.content });
   }
 
   const targets = [...buffers.entries()].map(([path, one]) => ({ path, target: one.target }));
@@ -297,18 +300,205 @@ export function applyEdits(
     changed.push(path);
   }
 
-  return finish(sourceDir, changed, message, git);
+  return { ...finish(sourceDir, changed, message, git), matchedBy };
 }
 
-/** How many times `needle` occurs in `haystack`, without overlapping. */
-function countOccurrences(haystack: string, needle: string): number {
-  let count = 0;
+/**
+ * Find one hunk in one file, and return the file with it replaced.
+ *
+ * Two passes, and only two. Exact first, so a hunk that reproduces the file
+ * byte for byte can never be pulled onto something else. Then line-wise with
+ * leading whitespace ignored, because report 08b measured three of four
+ * approved edits failing on indentation in text `source.read` had just handed
+ * the model verbatim — it reads a file correctly and then cannot type the
+ * spaces back.
+ *
+ * There is no third, fuzzier pass, and there should not be. A hunk that
+ * matches something the model did not mean is worse than one that fails: the
+ * failure costs a turn, and the wrong match costs somebody's file, silently,
+ * inside a change they already approved. Whitespace is safe to ignore because
+ * it does not change what the code means; nothing else is.
+ */
+function locate(
+  current: string,
+  hunk: Hunk,
+  path: string,
+): { readonly content: string; readonly matchedBy: MatchedBy } {
+  const exact = occurrences(current, hunk.find);
+  if (exact.length > 1) {
+    throw ambiguous(path, exact.map((at) => lineOf(current, at)));
+  }
+  const first = exact[0];
+  if (first !== undefined) {
+    return {
+      content: current.slice(0, first) + hunk.replace + current.slice(first + hunk.find.length),
+      matchedBy: 'exact',
+    };
+  }
+
+  const fileLines = current.split('\n');
+  const wanted = toLines(hunk.find);
+  const starts = lineWise(fileLines, wanted);
+  if (starts.length > 1) {
+    throw ambiguous(path, starts.map((start) => start + 1));
+  }
+  const start = starts[0];
+  if (start === undefined) throw notFound(path, hunk.find, fileLines);
+
+  const matched = fileLines.slice(start, start + wanted.length);
+  const replaced = reindent(matched, toLines(hunk.replace));
+  return {
+    content: [
+      ...fileLines.slice(0, start),
+      ...replaced,
+      ...fileLines.slice(start + wanted.length),
+    ].join('\n'),
+    matchedBy: 'indent',
+  };
+}
+
+/** Every character offset at which `needle` occurs, without overlapping. */
+function occurrences(haystack: string, needle: string): readonly number[] {
+  const out: number[] = [];
   let at = haystack.indexOf(needle);
   while (at >= 0) {
-    count += 1;
+    out.push(at);
     at = haystack.indexOf(needle, at + needle.length);
   }
-  return count;
+  return out;
+}
+
+/** The one-based line a character offset falls on. */
+function lineOf(text: string, offset: number): number {
+  let line = 1;
+  for (let index = 0; index < offset; index += 1) {
+    if (text.charCodeAt(index) === 10) line += 1;
+  }
+  return line;
+}
+
+/**
+ * The lines of a hunk's text, with a trailing newline read as a separator.
+ *
+ * `"a\n"` is one line, not two: the empty string after the last newline is how
+ * `split` says the text ended, not a line the file has to contain.
+ */
+function toLines(text: string): readonly string[] {
+  const lines = text.split('\n');
+  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+/** A line with its leading and trailing whitespace gone. */
+function bare(line: string): string {
+  return line.trim();
+}
+
+/** The leading whitespace of a line, tabs and spaces alike. */
+function indentOf(line: string): string {
+  return /^[ \t]*/.exec(line)?.[0] ?? '';
+}
+
+/** Every line at which `wanted` matches, comparing lines without their indentation. */
+function lineWise(fileLines: readonly string[], wanted: readonly string[]): readonly number[] {
+  const out: number[] = [];
+  if (wanted.length === 0) return out;
+  const stripped = wanted.map(bare);
+  for (let start = 0; start + stripped.length <= fileLines.length; start += 1) {
+    let same = true;
+    for (let offset = 0; offset < stripped.length; offset += 1) {
+      if (bare(fileLines[start + offset] ?? '') !== stripped[offset]) {
+        same = false;
+        break;
+      }
+    }
+    if (same) out.push(start);
+  }
+  return out;
+}
+
+/**
+ * The replacement, wearing the file's indentation rather than the model's.
+ *
+ * Line for line when the counts are equal, which is the ordinary case: each
+ * replacement line takes the indentation of the line it stands in for, so a
+ * file indented with tabs stays indented with tabs however the hunk was typed.
+ *
+ * When the counts differ the anchor is the first matched line's indentation.
+ * A replacement line the model left flush against the margin is written flush,
+ * and one it indented is written at the anchor — plus whatever it indented
+ * *beyond* its own shallowest line, so a nested block keeps its nesting. With
+ * one level throughout, that extra is empty and the rule is exactly the anchor.
+ */
+function reindent(matched: readonly string[], replace: readonly string[]): readonly string[] {
+  if (replace.length === matched.length) {
+    return replace.map((line, index) => {
+      const body = line.trimStart();
+      return body === '' ? '' : indentOf(matched[index] ?? '') + body;
+    });
+  }
+  const anchor = indentOf(matched[0] ?? '');
+  const indents = replace
+    .filter((line) => line.trim() !== '' && /^[ \t]/.test(line))
+    .map(indentOf);
+  const shallowest = sharedPrefix(indents);
+  return replace.map((line) => {
+    const body = line.trimStart();
+    if (body === '') return '';
+    if (!/^[ \t]/.test(line)) return body;
+    return anchor + indentOf(line).slice(shallowest.length) + body;
+  });
+}
+
+/** The longest string every one of `values` starts with. */
+function sharedPrefix(values: readonly string[]): string {
+  const first = values[0];
+  if (first === undefined) return '';
+  let length = first.length;
+  for (const value of values) {
+    let index = 0;
+    while (index < length && index < value.length && value[index] === first[index]) index += 1;
+    length = index;
+  }
+  return first.slice(0, length);
+}
+
+/** A hunk that matched in more than one place, with every line it matched on. */
+function ambiguous(path: string, lines: readonly number[]): PublicError {
+  return publicError.invalidInput(
+    `ambiguous in ${path}: ${String(lines.length)} matches, include more context (lines ${lines.join(', ')})`,
+  );
+}
+
+/**
+ * A hunk that matched nowhere, with the nearest real line quoted.
+ *
+ * The nearest line is what makes this useful rather than merely true. A model
+ * that has just been told "not found" will retype the same hunk; one that has
+ * been shown the line it nearly matched can see what it got wrong.
+ */
+function notFound(path: string, find: string, fileLines: readonly string[]): PublicError {
+  const first = toLines(find)[0] ?? '';
+  const target = bare(first);
+  let bestLine = -1;
+  let bestScore = -1;
+  for (let index = 0; index < fileLines.length; index += 1) {
+    const candidate = bare(fileLines[index] ?? '');
+    if (candidate === '') continue;
+    let score = 0;
+    while (score < target.length && score < candidate.length && target[score] === candidate[score]) {
+      score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestLine = index;
+    }
+  }
+  const said = `not found in ${path}: ${excerpt(first)}`;
+  if (bestLine < 0 || bestScore <= 0) return publicError.invalidInput(`${said}.`);
+  return publicError.invalidInput(
+    `${said}. Closest line ${String(bestLine + 1)}: "${fileLines[bestLine] ?? ''}"`,
+  );
 }
 
 /** The first line and a bit of a `find`, for a message that says which hunk. */

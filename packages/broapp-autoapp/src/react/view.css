@@ -256,6 +256,25 @@
   border-top: 1px solid var(--autoapp-notice-border, #f0d9a8);
 }
 
+.autoapp-approvals__expires {
+  margin-left: 0.5rem;
+  color: var(--autoapp-text-muted, #6b6862);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Under a minute left. The whole card changes rather than only the number, so
+   it is visible to somebody who is not reading it closely. */
+.autoapp-approvals__item--urgent {
+  border-left: 3px solid var(--autoapp-warning, #b4690e);
+  padding-left: 0.5rem;
+  background: var(--autoapp-warning-bg, #fdf3e3);
+}
+
+.autoapp-approvals__item--urgent .autoapp-approvals__expires {
+  color: var(--autoapp-warning, #b4690e);
+  font-weight: 600;
+}
+
 .autoapp-run-step,
 .autoapp-draft__step {
   padding: 0.5rem 0;

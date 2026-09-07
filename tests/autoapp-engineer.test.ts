@@ -367,6 +367,165 @@ describe('the workspace', () => {
     ).toBe(before);
   });
 
+  test('an exact match wins over one that ignores indentation', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    const path = join(source, 'src', 'mixed.ts');
+    // Two lines that differ only in how they are indented. Ignoring the
+    // whitespace would make this ambiguous; matching exactly does not.
+    writeFileSync(path, '  const a = 1;\n\tconst a = 1;\n');
+
+    const applied = applyEdits(
+      source,
+      [{ path: 'src/mixed.ts', find: '  const a = 1;', replace: '  const a = 2;' }],
+      'exact',
+    );
+    expect(applied.matchedBy).toEqual(['exact']);
+    expect(readFileSync(path, 'utf8')).toBe('  const a = 2;\n\tconst a = 1;\n');
+  });
+
+  test('a hunk one space out matches, and the file keeps its own indentation', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    const path = join(source, 'src', 'shared', 'views.ts');
+
+    const applied = applyEdits(
+      source,
+      [
+        {
+          path: 'src/shared/views.ts',
+          // Thirteen spaces where the file has twelve: report 08b watched a
+          // real model do exactly this to text it had just been given.
+          find: "             { id: 'label', header: 'Label', path: 'label' },",
+          replace: "             { id: 'label', header: 'What it is', path: 'label' },",
+        },
+      ],
+      'rename a column',
+    );
+    expect(applied.matchedBy).toEqual(['indent']);
+    expect(readFileSync(path, 'utf8')).toContain(
+      "\n            { id: 'label', header: 'What it is', path: 'label' },\n",
+    );
+  });
+
+  test('a replacement that adds a line takes the matched block’s indentation', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    const path = join(source, 'src', 'shared', 'views.ts');
+
+    applyEdits(
+      source,
+      [
+        {
+          path: 'src/shared/views.ts',
+          find: "             { id: 'label', header: 'Label', path: 'label' },",
+          replace:
+            "             { id: 'label', header: 'Label', path: 'label' },\n" +
+            "             { id: 'note', header: 'Note', path: 'note' },",
+        },
+      ],
+      'add a column',
+    );
+    const after = readFileSync(path, 'utf8');
+    expect(after).toContain("\n            { id: 'note', header: 'Note', path: 'note' },\n");
+    expect(after).not.toContain("\n             { id: 'note'");
+  });
+
+  test('two matches that differ only in indentation are ambiguous, with their lines', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    writeFileSync(join(source, 'src', 'twice.ts'), '  foo();\n  bar();\n\tfoo();\n\tbar();\n');
+
+    expect(() =>
+      applyEdits(
+        source,
+        [{ path: 'src/twice.ts', find: 'foo();\nbar();', replace: 'foo();\nbaz();' }],
+        'no',
+      ),
+    ).toThrow(/ambiguous in src\/twice\.ts: 2 matches, include more context \(lines 1, 3\)/);
+  });
+
+  test('a hunk that matches nowhere quotes the nearest real line', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    let message = '';
+    try {
+      applyEdits(
+        source,
+        [
+          {
+            path: 'src/shared/views.ts',
+            // A typo, not a whitespace slip, so neither pass can match it.
+            find: "{ id: 'label', header: 'Lable', path: 'label' },",
+            replace: 'x',
+          },
+        ],
+        'no',
+      );
+    } catch (cause) {
+      message = cause instanceof Error ? cause.message : String(cause);
+    }
+    expect(message).toContain('not found in src/shared/views.ts');
+    expect(message).toMatch(/Closest line \d+: ".*header: 'Label'.*"/);
+  });
+
+  test('a file indented with tabs stays indented with tabs', () => {
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    const path = join(source, 'src', 'tabs.ts');
+    writeFileSync(path, 'function f() {\n\t\tconst a = 1;\n}\n');
+
+    const applied = applyEdits(
+      source,
+      [{ path: 'src/tabs.ts', find: '  const a = 1;', replace: '  const a = 2;' }],
+      'spaces in, tabs out',
+    );
+    expect(applied.matchedBy).toEqual(['indent']);
+    expect(readFileSync(path, 'utf8')).toBe('function f() {\n\t\tconst a = 2;\n}\n');
+  });
+
+  test('report 08b’s three whitespace failures now apply', () => {
+    // The report does not quote the hunks, so these are the equivalent it
+    // describes: seven spaces where the file has six, and a `s.optional(…)`
+    // line added inside an object. All three in one call, as the model sent
+    // them, and all three have to land or none does.
+    const where = makeWorld();
+    const source = where.root.app('items').source;
+    const contract = join(source, 'src', 'shared', 'contract.ts');
+    const views = join(source, 'src', 'shared', 'views.ts');
+
+    const applied = applyEdits(
+      source,
+      [
+        {
+          path: 'src/shared/contract.ts',
+          find: '   label: s.string(),\n   createdAt: s.number(),',
+          replace:
+            '   label: s.string(),\n   done: s.optional(s.boolean()),\n   createdAt: s.number(),',
+        },
+        {
+          path: 'src/shared/contract.ts',
+          find: "       effect: 'write',\n       summary: 'Add one item.',",
+          replace: "       effect: 'write',\n       summary: 'Add one item, with a flag.',",
+        },
+        {
+          path: 'src/shared/views.ts',
+          find: "             { id: 'label', header: 'Label', path: 'label' },",
+          replace: "             { id: 'label', header: 'What it is', path: 'label' },",
+        },
+      ],
+      'tags and archive',
+    );
+
+    expect(applied.matchedBy).toEqual(['indent', 'indent', 'indent']);
+    const after = readFileSync(contract, 'utf8');
+    expect(after).toContain('\n  done: s.optional(s.boolean()),\n');
+    expect(after).toContain("\n      summary: 'Add one item, with a flag.',\n");
+    expect(readFileSync(views, 'utf8')).toContain(
+      "\n            { id: 'label', header: 'What it is', path: 'label' },\n",
+    );
+  });
+
   test('the diff says what changed', () => {
     const where = makeWorld();
     const source = where.root.app('items').source;
@@ -378,6 +537,38 @@ describe('the workspace', () => {
 });
 
 describe.skipIf(!available)('the tools', () => {
+  test('apps.list answers "which application" without anybody being asked', async () => {
+    const where = makeWorld();
+    type Row = {
+      appId: string;
+      name: string;
+      currentRelease: string | null;
+      serving: boolean;
+      schemaVersion: number | null;
+    };
+
+    // A read, so no approver is offered and none is needed.
+    const before = (await callTool(where, 'apps.list', undefined)) as { apps: Row[] };
+    expect(before.apps.map((row) => row.appId)).toEqual(['items']);
+    expect(before.apps[0]?.currentRelease).toBeNull();
+
+    const built = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!built.ok) throw new Error(JSON.stringify(built.problems));
+    setCurrent(where.root, 'items', built.releaseId);
+
+    const after = (await callTool(where, 'apps.list', undefined)) as { apps: Row[] };
+    expect(after.apps[0]).toEqual({
+      appId: 'items',
+      name: built.spec.manifest.name,
+      currentRelease: built.releaseId,
+      serving: false,
+      schemaVersion: null,
+    });
+    // The same rows the tab gets, minus the process id: a number a model
+    // cannot use is a number it will try to use.
+    expect(JSON.stringify(after)).not.toContain('pid');
+  }, 90_000);
+
   test('reading needs nobody, changing asks first', async () => {
     const where = makeWorld();
     const app = where.root.app('items');
@@ -926,6 +1117,57 @@ describe.skipIf(!available)('the launcher tab', () => {
     expect(second.releaseId).not.toBe(first.releaseId);
   }, 90_000);
 
+  test('a model that starts with apps.list goes on to spec.read unaided', async () => {
+    // Report 08b watched a real model stop before doing anything and ask which
+    // application was meant, because there was no way to find out. Both calls
+    // are reads, so nothing is asked and nothing is nudged.
+    const { harness: test, where } = await start([
+      {
+        kind: 'tool',
+        name: 'apps.list',
+        input: {},
+        then: [
+          {
+            kind: 'tool',
+            name: 'spec.read',
+            input: { appId: 'items' },
+            then: [{ kind: 'text', chunks: ['it is the items application'] }],
+          },
+        ],
+      },
+    ]);
+    const built = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!built.ok) throw new Error(JSON.stringify(built.problems));
+    setCurrent(where.root, 'items', built.releaseId);
+
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'fake', modelId: 'fake-1' });
+
+    const events: { type: string; tool?: string; denied?: boolean }[] = [];
+    let finished = false;
+    await client.subscribe(
+      'ai.chat',
+      { runId: 'run-bcdefghi', message: 'add a column', refs: [], history: [] },
+      {
+        onEvent: (event) => {
+          events.push(event as { type: string });
+          if (event.type === 'done' || event.type === 'error') finished = true;
+        },
+        onError: () => {
+          finished = true;
+        },
+      },
+    );
+    while (!finished) await Bun.sleep(10);
+    await client.close();
+
+    expect(events.some((event) => event.type === 'confirm')).toBe(false);
+    expect(
+      events.filter((event) => event.type === 'tool-result').map((event) => event.tool),
+    ).toEqual(['apps.list', 'spec.read']);
+    expect(events.some((event) => event.denied === true)).toBe(false);
+  }, 90_000);
+
   test('the engineer’s tools are offered to the model, and are all guarded', async () => {
     const { harness: test, where } = await start([{ kind: 'text', chunks: ['hello'] }]);
     void where;
@@ -953,6 +1195,16 @@ describe('the engineer’s instructions', () => {
 
   test('are under seventy lines, so they are read', () => {
     expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(70);
+  });
+
+  test('name apps.list first in the loop, and forgive indentation', () => {
+    const flat = ENGINEER_INSTRUCTIONS.replace(/\s+/g, ' ');
+    expect(flat).toContain('Find the application with `apps.list` if you were not told its id');
+    // `apps.list` is the first tool the loop names.
+    const loop = ENGINEER_INSTRUCTIONS.slice(ENGINEER_INSTRUCTIONS.indexOf('# How to work'));
+    expect(loop.indexOf('`apps.list`')).toBeLessThan(loop.indexOf('`spec.read`'));
+    expect(flat).toContain('Leading whitespace need not match');
+    expect(flat).toContain('three to eight lines is right');
   });
 
   test('send the engineer to source.edit rather than to whole-file rewrites', () => {

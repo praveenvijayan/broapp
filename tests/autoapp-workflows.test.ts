@@ -246,6 +246,8 @@ describe('draftFromRun and parameterise', () => {
       appId: 'items',
       releaseId: 'a'.repeat(32),
       mode: 'live' as const,
+      askedAt: Date.now(),
+      expiresAt: Date.now() + 120_000,
       startedAt: Date.now(),
       endedAt: Date.now(),
     };

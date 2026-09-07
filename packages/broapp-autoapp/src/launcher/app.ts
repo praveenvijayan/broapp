@@ -10,8 +10,6 @@
  * migrating, previewing and serving all happen in child processes. What this
  * file does is decide, record, and hand out addresses.
  */
-import { readdirSync } from 'node:fs';
-
 import { createGate, createHostApp, publicError } from 'broapp/host';
 import type { Gate, HostApp, HostLogger } from 'broapp/host';
 import type { Bridge } from 'brobridge';
@@ -27,6 +25,7 @@ import {
 } from '../spec/index.ts';
 
 import { activate } from './activate.ts';
+import { listApps, serving as servingChild } from './apps.ts';
 import { launcherContract, type LauncherContract } from './contract.ts';
 import type { Journal } from './journal.ts';
 import type { ChildHandle, Supervisor } from './supervisor.ts';
@@ -53,15 +52,6 @@ export interface LauncherApp {
 const DRAIN_DEADLINE_MS = 10_000;
 const STOP_DEADLINE_MS = 10_000;
 
-/** Every application that has a directory under the root. */
-function appIds(root: Layout): readonly string[] {
-  try {
-    return readdirSync(`${root.root}/apps`).sort();
-  } catch {
-    return [];
-  }
-}
-
 /** Build the launcher's host app. */
 export function createLauncherApp(options: CreateLauncherAppOptions): LauncherApp {
   const { layout: root, supervisor, journal, states, gate } = options;
@@ -75,32 +65,11 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   });
 
   /** The live child serving one application, if any. */
-  const serving = (appId: string): ChildHandle | null =>
-    supervisor.children.find((child) => child.appId === appId && child.mode === 'live') ?? null;
+  const serving = (appId: string): ChildHandle | null => servingChild(supervisor, appId);
 
+  // The same rows the engineer's `apps.list` gets, from the same helper.
   host.operation('launcher.appsList', () => ({
-    apps: appIds(root).map((appId) => {
-      const child = serving(appId);
-      const currentRelease = readCurrent(root, appId);
-      let name = appId;
-      if (currentRelease !== null) {
-        try {
-          name = readRelease(root, appId, currentRelease).manifest.name;
-        } catch {
-          // A release directory that will not parse is still an application
-          // somebody can look at; it just has no better name than its id.
-        }
-      }
-      return {
-        appId,
-        name,
-        currentRelease,
-        serving: child !== null,
-        pid: child?.pid ?? null,
-        schemaVersion: child?.schemaVersion ?? null,
-        activationPending: journal.unfinished().some((row) => row.appId === appId),
-      };
-    }),
+    apps: listApps(root, supervisor, journal).map((row) => ({ ...row })),
   }));
 
   host.operation('launcher.appOpen', async ({ appId }) => {
@@ -231,15 +200,29 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   };
 }
 
+/**
+ * How long one of the launcher's questions waits: ten minutes.
+ *
+ * Not the gate's own two minutes, which is right for an application: a
+ * question there comes from a person's own workflow run or an MCP call they
+ * are watching. The engineer's questions do not. Report 08b measured a local
+ * model spending seven to fourteen minutes composing a single `source.edit`
+ * and then handing the person two minutes to answer it; two of six attempts
+ * were lost to that arithmetic rather than to anything either of them did.
+ */
+export const LAUNCHER_CONFIRM_TIMEOUT_MS = 600_000;
+
 /** The launcher's own gate: its tab's clicks and its engineer's tools. */
 export function createLauncherGate(options: {
   releaseId: string;
   recorder?: Parameters<typeof createGate>[0]['recorder'];
+  confirmTimeoutMs?: number;
   logger?: HostLogger;
 }): Gate {
   return createGate({
     appId: 'launcher',
     releaseId: options.releaseId,
+    confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
     ...(options.recorder === undefined ? {} : { recorder: options.recorder }),
     ...(options.logger === undefined ? {} : { logger: options.logger }),
   });

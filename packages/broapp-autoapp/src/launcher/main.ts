@@ -18,7 +18,7 @@ import { join, resolve } from 'node:path';
 
 import { anthropic } from 'broapp-ai-anthropic';
 import { customServer, ollama, openai } from 'broapp-ai-compatible';
-import { createGate, ensureDataDir, openBrowser, startApp } from 'broapp/host';
+import { ensureDataDir, openBrowser, startApp } from 'broapp/host';
 
 import { createRunStore } from '../host/run-store.ts';
 
@@ -41,6 +41,7 @@ import { openJournal, type Journal } from './journal.ts';
 import { keepServing } from './keepalive.ts';
 import { recover } from './recover.ts';
 import { createSupervisor, type Supervisor } from './supervisor.ts';
+import { createLauncherGate } from './app.ts';
 import { createLauncherTab } from './tab.ts';
 
 /**
@@ -176,8 +177,7 @@ async function openLauncher(
     journal,
     // The launcher's own gate. Its tab's clicks are channel `user`; the
     // engineer's tools arrive on channel `ai` through the same door.
-    gate: createGate({
-      appId: 'launcher',
+    gate: createLauncherGate({
       releaseId: 'launcher',
       recorder: store.recorder(),
     }),

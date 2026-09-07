@@ -22,6 +22,8 @@ export interface ToolCallState {
   readonly input: unknown;
   readonly status: 'running' | 'awaiting-confirmation' | 'done' | 'denied';
   readonly output?: unknown;
+  /** While awaiting confirmation: when the question stops waiting. */
+  readonly expiresAt?: number;
 }
 
 /** One message in the transcript. */
@@ -153,7 +155,13 @@ export function useAiChat(options: AiChatOptions = {}): AiChatHook {
           patchPending((message) => ({
             ...message,
             toolCalls: message.toolCalls.map((call) =>
-              call.callId === event.callId ? { ...call, status: 'awaiting-confirmation' } : call,
+              call.callId === event.callId
+                ? {
+                    ...call,
+                    status: 'awaiting-confirmation',
+                    ...(event.expiresAt === undefined ? {} : { expiresAt: event.expiresAt }),
+                  }
+                : call,
             ),
           }));
           break;

@@ -20,6 +20,7 @@ import type { Gate, HostLogger } from 'broapp/host';
 import { s } from 'broapp/shared';
 
 import { activate } from '../launcher/activate.ts';
+import { listApps } from '../launcher/apps.ts';
 import { buildCandidate } from '../launcher/candidate.ts';
 import { connectToChild } from '../launcher/client.ts';
 import type { Journal } from '../launcher/journal.ts';
@@ -79,6 +80,27 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   const logger: HostLogger = options.logger ?? console;
 
   const tools: Record<string, GuardedTool> = {};
+
+  tools['apps.list'] = guardedTool(gate, {
+    name: 'apps.list',
+    description:
+      'Every application on this computer: its id, its name, the release it is on, whether it is running, and its data schema version. Start here when you were not told which application to change.',
+    inputSchema: s.void().toJsonSchema(),
+    effect: 'read',
+    // The same rows `launcher.appsList` shows the person, minus the process id:
+    // a model has nothing to do with a pid, and a number it cannot use is a
+    // number it will try to use.
+    run: () =>
+      Promise.resolve({
+        apps: listApps(root, supervisor, journal).map((row) => ({
+          appId: row.appId,
+          name: row.name,
+          currentRelease: row.currentRelease,
+          serving: row.serving,
+          schemaVersion: row.schemaVersion,
+        })),
+      }),
+  });
 
   tools['spec.read'] = guardedTool(gate, {
     name: 'spec.read',
@@ -197,7 +219,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   tools['source.edit'] = guardedTool(gate, {
     name: 'source.edit',
     description:
-      'Change files in an application’s source workspace by exact find-and-replace. Each hunk’s "find" must occur exactly once in its file, so include two or three lines of surrounding context. Every hunk is checked before any file is written. Only src/ and autoapp.json may be changed.',
+      'Change files in an application’s source workspace by find-and-replace. Each hunk’s "find" must match exactly one place in its file, so make it the smallest unique block — three to eight lines. Leading whitespace need not match: the file keeps its own indentation. Every hunk is checked before any file is written. Only src/ and autoapp.json may be changed.',
     inputSchema: editInput.toJsonSchema(),
     effect: 'write',
     run: (input) => {
@@ -207,7 +229,14 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       const applied = applyEdits(sourceDir, hunks, message);
       const summary = diffSummary(before, snapshot(sourceDir));
       states.update(appId, { changed: applied.changed });
-      return Promise.resolve({ changed: applied.changed, undo: applied.undo, diff: summary });
+      return Promise.resolve({
+        changed: applied.changed,
+        undo: applied.undo,
+        // Told rather than hidden: a hunk that only matched once whitespace was
+        // ignored is a hunk the model should write more carefully next time.
+        matchedBy: applied.matchedBy ?? [],
+        diff: summary,
+      });
     },
   });
 

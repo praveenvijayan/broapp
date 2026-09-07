@@ -13,11 +13,24 @@
 import * as React from 'react';
 
 import { useOperation } from 'broapp/react';
+import { countdown, isUrgent } from 'broapp/shared';
 
 import type { AutoappContract } from '../shared/contract.ts';
 
 /** How often to ask while anything is pending. */
 const POLL_MS = 2_000;
+
+/** Re-render once a second while `active`, so a countdown counts. */
+function useTick(active: boolean): number {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!active) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}
 
 /** One question, as the host describes it. */
 type Question = {
@@ -29,6 +42,8 @@ type Question = {
   effect: string;
   input?: unknown;
   argumentsHash: string;
+  askedAt: number;
+  expiresAt: number;
 };
 
 /**
@@ -64,6 +79,7 @@ export function ApprovalsStrip(): React.ReactElement | null {
   }, [refresh]);
 
   const pending = (list.data?.pending ?? []) as readonly Question[];
+  const now = useTick(pending.length > 0);
   if (pending.length === 0) return null;
 
   async function decide(question: Question, approved: boolean): Promise<void> {
@@ -86,10 +102,21 @@ export function ApprovalsStrip(): React.ReactElement | null {
         {pending.length === 1 ? 'Something is waiting for you' : `${String(pending.length)} things are waiting for you`}
       </h2>
       {pending.map((question) => (
-        <div className="autoapp-approvals__item" key={question.requestId}>
+        <div
+          className={`autoapp-approvals__item${
+            isUrgent(question.expiresAt, now) ? ' autoapp-approvals__item--urgent' : ''
+          }`}
+          key={question.requestId}
+        >
           <p className="autoapp-approvals__what">
             <strong>{who(question)}</strong> wants to run <code>{question.route}</code> (
             {question.effect}).
+            {/* Said rather than implied: an unanswered question is refused, and
+                a person who does not know that reads a stale card as a choice
+                still open to them. */}
+            <span className="autoapp-approvals__expires">
+              expires in {countdown(question.expiresAt, now)}
+            </span>
           </p>
           <pre className="autoapp-approvals__input">{JSON.stringify(question.input, null, 2)}</pre>
           <div className="autoapp-approvals__actions">

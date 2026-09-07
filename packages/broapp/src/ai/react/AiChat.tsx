@@ -10,6 +10,8 @@
  */
 import * as React from 'react';
 
+import { countdown, isUrgent } from '../../shared/countdown.ts';
+
 import { useAiChat, type AiChatOptions, type ToolCallState } from './use-ai-chat.ts';
 import { useAiSettings } from './use-ai-settings.ts';
 
@@ -21,6 +23,27 @@ export interface AiChatProps {
   readonly emptyText?: string;
   /** Called when a tool call settles, so the application can refetch. */
   readonly onToolResult?: AiChatOptions['onToolResult'];
+  /**
+   * How many tool calls are waiting for the person, whenever that changes.
+   *
+   * The panel does not act on this itself: a tab that renamed itself or raised
+   * a notification without being asked would do it in every application that
+   * embeds a chat. The launcher asks, because its questions arrive after ten
+   * minutes of silence and the person is not looking at the tab.
+   */
+  readonly onAwaiting?: (pending: number) => void;
+}
+
+/** Re-render once a second while `active`, so a countdown counts. */
+function useTick(active: boolean): number {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!active) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
 }
 
 function ToolCall({
@@ -30,6 +53,9 @@ function ToolCall({
   call: ToolCallState;
   onConfirm: (callId: string, approve: boolean) => void;
 }): React.ReactElement {
+  const waiting = call.status === 'awaiting-confirmation' && call.expiresAt !== undefined;
+  const now = useTick(waiting);
+  const urgent = call.expiresAt !== undefined && waiting && isUrgent(call.expiresAt, now);
   return (
     <div className="ai-chat__tool">
       <details>
@@ -42,8 +68,15 @@ function ToolCall({
         )}
       </details>
       {call.status !== 'awaiting-confirmation' ? null : (
-        <div className="ai-chat__confirm" role="group" aria-label={`Allow ${call.tool}?`}>
+        <div
+          className={`ai-chat__confirm${urgent ? ' ai-chat__confirm--urgent' : ''}`}
+          role="group"
+          aria-label={`Allow ${call.tool}?`}
+        >
           <span>Allow this?</span>
+          {call.expiresAt === undefined ? null : (
+            <span className="ai-chat__expires">expires in {countdown(call.expiresAt, now)}</span>
+          )}
           <button
             className="button button--primary"
             type="button"
@@ -65,6 +98,7 @@ export function AiChat({
   placeholder,
   emptyText,
   onToolResult,
+  onAwaiting,
 }: AiChatProps): React.ReactElement {
   const { settings } = useAiSettings();
   const chat = useAiChat({
@@ -74,6 +108,20 @@ export function AiChat({
   const [draft, setDraft] = React.useState('');
   const input = React.useRef<HTMLTextAreaElement | null>(null);
   const busy = chat.status === 'streaming' || chat.status === 'awaiting-confirmation';
+
+  const waiting = chat.messages.reduce(
+    (count, message) =>
+      message.role === 'assistant'
+        ? count +
+          message.toolCalls.filter((call) => call.status === 'awaiting-confirmation').length
+        : count,
+    0,
+  );
+  const announce = React.useRef(onAwaiting);
+  announce.current = onAwaiting;
+  React.useEffect(() => {
+    announce.current?.(waiting);
+  }, [waiting]);
 
   // Back to the box when the turn ends, so a conversation can be carried on
   // without reaching for the mouse.

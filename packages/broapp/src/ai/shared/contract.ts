@@ -75,6 +75,7 @@ const chatEvent = s.object({
   requestId: s.optional(s.string()),
   releaseId: s.optional(s.string()),
   argumentsHash: s.optional(s.string()),
+  expiresAt: s.optional(s.number()),
   inputTokens: s.optional(s.number()),
   outputTokens: s.optional(s.number()),
   code: s.optional(s.string()),

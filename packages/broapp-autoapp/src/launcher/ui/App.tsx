@@ -11,10 +11,11 @@
  * in React state would end up in a devtools inspection, a re-render trace and
  * anything else that walks the tree.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AiChat, AiSettings } from 'broapp/ai/react';
 import { useConnection, useOperation } from 'broapp/react';
+import { announcePending, browserSurface } from 'broapp-autoapp/react';
 
 import type { LauncherContract } from '../contract.ts';
 
@@ -33,6 +34,16 @@ export function App(): React.ReactElement {
   // Bumped whenever something the engineer did may have changed what the
   // panels below show.
   const [changed, setChanged] = useState(0);
+  // How many of the engineer's tool calls are waiting for an answer. The tab
+  // renames itself while any are, because a question that arrives after ten
+  // minutes of a model thinking arrives at a tab nobody is looking at.
+  const waiting = useRef(0);
+  const onAwaiting = useCallback((pending: number): void => {
+    const surface = browserSurface();
+    if (surface === null) return;
+    announcePending(surface, pending, waiting.current);
+    waiting.current = pending;
+  }, []);
 
   const { run: refreshApps } = apps;
   const ready = connection.phase === 'ready';
@@ -124,6 +135,7 @@ export function App(): React.ReactElement {
         <AiChat
           refs={selected === null ? [] : [`app:${selected}`]}
           placeholder="Ask for a change…"
+          onAwaiting={onAwaiting}
           onToolResult={(call) => {
             // Anything that built, previewed or activated changes what the
             // panels should be showing.

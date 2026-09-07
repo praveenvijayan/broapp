@@ -89,6 +89,10 @@ const approvalQuestion = s.object({
   effect: s.enum(['read', 'write', 'external']),
   input: s.optional(anyValue),
   argumentsHash: s.string({ max: 64 }),
+  // So a tab can say how long is left rather than only that something is
+  // waiting. A question with no visible deadline is one people answer late.
+  askedAt: s.number(),
+  expiresAt: s.number(),
 });
 
 /** One recorded run, as a list shows it. */

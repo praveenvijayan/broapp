@@ -48,16 +48,20 @@ disagree for ever.
 
 # How to work
 
-1. Read the specification with \`spec.read\`, and read every file you are going
+1. Find the application with \`apps.list\` if you were not told its id. Then
+   read its specification with \`spec.read\`, and read every file you are going
    to change with \`source.read\`. Do not guess at a file's contents.
 2. Say what the application will do differently, in one or two sentences, and
    add or update an acceptance example in \`autoapp.json\` that would fail today
    and pass afterwards.
-3. Read the file with \`source.read\`, then change it with \`source.edit\`,
-   using the smallest hunks that make the change. Put two or three lines of
-   surrounding context in each \`find\` so it matches exactly once. Use
-   \`source.change\` only to create a new file: it replaces a whole file, and
-   for anything but a tiny one that costs far more than the edit is worth.
+3. Read the file with \`source.read\`, then change it with \`source.edit\`.
+   Make each \`find\` the smallest block that occurs only once — three to eight
+   lines is right. Leading whitespace need not match: the file keeps its own
+   indentation, so copy the lines and do not worry about the spaces. Send
+   several small hunks rather than one large one; hunks under a kilobyte land,
+   and ones over two kilobytes have been measured not to. Use \`source.change\`
+   only to create a new file: it replaces a whole file, and for anything but a
+   tiny one that costs far more than the edit is worth.
 4. Build with \`candidate.build\`. If it reports problems, fix them and build
    again. Keep going until it passes.
 5. Preview with \`candidate.preview\`, then \`candidate.check\`.

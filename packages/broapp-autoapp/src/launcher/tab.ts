@@ -21,7 +21,7 @@ import { engineerTools } from '../engineer/tools.ts';
 import type { RunStore } from '../host/run-store.ts';
 import type { Layout } from '../spec/index.ts';
 
-import { createLauncherApp, type LauncherApp } from './app.ts';
+import { createLauncherApp, LAUNCHER_CONFIRM_TIMEOUT_MS, type LauncherApp } from './app.ts';
 import type { Journal } from './journal.ts';
 import type { Supervisor } from './supervisor.ts';
 
@@ -38,6 +38,8 @@ export interface CreateLauncherTabOptions {
   readonly providers: readonly ProviderAdapter[];
   /** Tests inject one that reaches nothing. */
   readonly fetch?: typeof fetch;
+  /** How long a question waits. Defaults to the launcher's ten minutes. */
+  readonly confirmTimeoutMs?: number;
   readonly logger?: HostLogger;
 }
 
@@ -70,6 +72,11 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
   const ai = createAi({
     dataDir: options.dataDir,
     providers: options.providers,
+    // The same window the gate was built with. The AI layer applies a deadline
+    // of its own (report 01, deviation 2), and a shorter one here would quietly
+    // undercut the gate's — the person would watch a countdown that was already
+    // over.
+    confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
     app: {
       name: 'Autoapp',
       purpose: PURPOSE,

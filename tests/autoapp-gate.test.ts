@@ -34,6 +34,10 @@ import { BroappError } from 'broapp/client';
 import { defineContract, INTERNAL_ERROR_MESSAGE, publicError, s } from 'broapp/shared';
 import type { Effect } from 'broapp/shared';
 
+import { countdown, isUrgent, remainingMs } from 'broapp/shared';
+import { announcePending, titleWithPending } from 'broapp-autoapp/react';
+import type { PendingSurface } from 'broapp-autoapp/react';
+
 import { harness, until, type Harness } from './harness.ts';
 
 /** A logger that keeps what it was told, so a test can count the lines. */
@@ -222,6 +226,56 @@ describe('guard', () => {
     expect(approvals.pending).toHaveLength(0);
   });
 
+  test('a question says when it was asked and when it stops waiting', async () => {
+    const { gate, records } = gateWith({ confirmTimeoutMs: 5_000 });
+    const approvals = createPendingApprovals(log());
+    const request = { ...envelope('ai', { approver: approvals }), route: 'notes.create' };
+    const running = gate.guard({ ...request, effect: 'write', input: {} }, () =>
+      Promise.resolve('done'),
+    );
+    await until(() => approvals.pending.length === 1, 1_000, 'the question');
+
+    const question = approvals.pending[0];
+    expect(question?.askedAt).toBeGreaterThan(0);
+    // The window is exactly the gate's own, so a card can count down from it
+    // without knowing how the gate was configured.
+    expect((question?.expiresAt ?? 0) - (question?.askedAt ?? 0)).toBe(5_000);
+
+    approvals.answer({ requestId: request.requestId, approved: true });
+    expect(await running).toBe('done');
+    expect(records[0]?.expiresAt).toBe(question?.expiresAt);
+  });
+
+  test('a launcher-sized window is the option, not a constant', async () => {
+    // Ten minutes is what the launcher builds its gate with, and a test that
+    // waited for it would take ten minutes. What has to be proved is that the
+    // number comes from the option: a gate given 40 ms expires in 40 ms.
+    const generous = gateWith({ confirmTimeoutMs: 600_000 });
+    const patient = createPendingApprovals(log());
+    const waiting = generous.gate.guard(
+      { ...envelope('ai', { approver: patient }), route: 'notes.create', effect: 'write', input: {} },
+      () => Promise.resolve('done'),
+    );
+    await until(() => patient.pending.length === 1, 1_000, 'the question');
+    expect((patient.pending[0]?.expiresAt ?? 0) - (patient.pending[0]?.askedAt ?? 0)).toBe(600_000);
+
+    const { gate } = gateWith({ confirmTimeoutMs: 40 });
+    const approvals = createPendingApprovals(log());
+    const started = Date.now();
+    await expect(
+      gate.guard(
+        { ...envelope('ai', { approver: approvals }), route: 'notes.create', effect: 'write', input: {} },
+        () => Promise.resolve(null),
+      ),
+    ).rejects.toMatchObject({ code: 'rejected' });
+    expect(Date.now() - started).toBeLessThan(5_000);
+
+    // The ten-minute one is still waiting, which is the whole point of it.
+    expect(patient.pending).toHaveLength(1);
+    patient.answer({ requestId: patient.pending[0]?.requestId ?? '', approved: true });
+    expect(await waiting).toBe('done');
+  });
+
   test('a cancelled request stops waiting and is recorded as cancelled', async () => {
     const { gate, records } = gateWith({ confirmTimeoutMs: 5_000 });
     const approvals = createPendingApprovals(log());
@@ -341,6 +395,8 @@ describe('guard', () => {
       effect: 'write' as const,
       input: {},
       argumentsHash: argumentsHash({}),
+      askedAt: Date.now(),
+      expiresAt: Date.now() + 50,
     };
     void approvals.ask(question, new AbortController().signal);
     expect(() => approvals.ask(question, new AbortController().signal)).toThrow(TypeError);
@@ -726,5 +782,63 @@ describe('the AI layer over the gate', () => {
     expect(
       Object.keys(fromContract(toolContract, app, { read: ['notes.list'], confirm: ['notes.create'] })),
     ).toEqual(['notes.list', 'notes.create']);
+  });
+});
+
+describe('what a waiting person is shown', () => {
+  test('a countdown reads as minutes and seconds, and rounds up', () => {
+    const now = 1_000_000;
+    expect(countdown(now + 581_000, now)).toBe('9:41');
+    expect(countdown(now + 600_000, now)).toBe('10:00');
+    // Anything still running says at least one second: a card that reads zero
+    // while its buttons work is a card people stop believing.
+    expect(countdown(now + 600, now)).toBe('0:01');
+    expect(countdown(now - 5_000, now)).toBe('0:00');
+    expect(remainingMs(now - 5_000, now)).toBe(0);
+  });
+
+  test('under a minute is urgent, and expired is not', () => {
+    const now = 1_000_000;
+    expect(isUrgent(now + 61_000, now)).toBe(false);
+    expect(isUrgent(now + 59_000, now)).toBe(true);
+    expect(isUrgent(now - 1, now)).toBe(false);
+  });
+
+  test('the tab renames itself while a question is pending, and back afterwards', () => {
+    expect(titleWithPending('Autoapp', 1)).toBe('(1) Autoapp');
+    expect(titleWithPending('(1) Autoapp', 2)).toBe('(2) Autoapp');
+    // Back to the plain title rather than to "(0) ", and never stacking.
+    expect(titleWithPending('(2) Autoapp', 0)).toBe('Autoapp');
+
+    const raised: string[] = [];
+    const surface: PendingSurface = {
+      title: 'Autoapp',
+      notify: { permission: 'granted', raise: (_title, body) => void raised.push(body) },
+    };
+    announcePending(surface, 1, 0);
+    expect(surface.title).toBe('(1) Autoapp');
+    expect(raised).toHaveLength(1);
+    // The same question, reported again by the next poll: no second notification.
+    announcePending(surface, 1, 1);
+    expect(raised).toHaveLength(1);
+    announcePending(surface, 0, 1);
+    expect(surface.title).toBe('Autoapp');
+  });
+
+  test('permission that was never granted is never asked for', () => {
+    const raised: string[] = [];
+    const denied: PendingSurface = {
+      title: 'Autoapp',
+      notify: { permission: 'default', raise: (_t, body) => void raised.push(body) },
+    };
+    announcePending(denied, 1, 0);
+    // The title still changes, because that costs the person nothing.
+    expect(denied.title).toBe('(1) Autoapp');
+    expect(raised).toHaveLength(0);
+
+    // A surface with no notifications at all is not an error.
+    const bare: PendingSurface = { title: 'Autoapp' };
+    announcePending(bare, 1, 0);
+    expect(bare.title).toBe('(1) Autoapp');
   });
 });

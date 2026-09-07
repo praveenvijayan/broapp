@@ -43,3 +43,5 @@ export {
 export type { PublicErrorCode } from './errors.ts';
 
 export { encodeEvent, MAX_EVENT_BYTES, NdjsonDecoder } from './ndjson.ts';
+
+export { countdown, isUrgent, remainingMs, URGENT_MS } from './countdown.ts';

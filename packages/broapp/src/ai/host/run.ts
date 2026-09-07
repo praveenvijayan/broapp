@@ -232,6 +232,9 @@ function createRunApprover(
         requestId: question.requestId,
         releaseId: question.releaseId,
         argumentsHash: question.argumentsHash,
+        // The narrower of the gate's window and the turn's, because the turn's
+        // is what actually stops the waiting below.
+        expiresAt: Math.min(question.expiresAt, Date.now() + deps.confirmTimeoutMs),
       });
       // A question nobody answers is a denial. The gate has a deadline of its
       // own, but it belongs to the application; this one belongs to the turn.

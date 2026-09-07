@@ -82,6 +82,18 @@ export interface ApprovalQuestion {
   readonly effect: Effect;
   readonly input: unknown;
   readonly argumentsHash: string;
+  /** When the gate started considering this call. */
+  readonly askedAt: number;
+  /**
+   * When an unanswered question stops waiting.
+   *
+   * Carried on the question rather than left to the asker so that every place
+   * a person is shown one — a strip in a tab, a card in a chat, an MCP
+   * client's own dialogue — can say how long they have without knowing which
+   * gate asked or how it was configured. A question with no visible deadline
+   * is one people answer after it has already been refused.
+   */
+  readonly expiresAt: number;
 }
 
 /** Somewhere a question can be put to a person. */
@@ -271,6 +283,7 @@ export function createGate(options: GateOptions): Gate {
       // envelope stays a preview.
       const mode: ExecutionMode =
         gateMode === 'preview' || request.mode === 'preview' ? 'preview' : 'live';
+      const at = Date.now();
       const question: ApprovalQuestion = {
         requestId: request.requestId,
         channel: request.channel,
@@ -281,8 +294,12 @@ export function createGate(options: GateOptions): Gate {
         effect: request.effect,
         input: request.input,
         argumentsHash: argumentsHash(request.input),
+        // Filled in for every call, not only the ones that ask. A record of an
+        // allowed call carries the window it would have had, which costs two
+        // numbers and saves a reader working out whether one was even offered.
+        askedAt: at,
+        expiresAt: at + confirmTimeoutMs,
       };
-      const at = Date.now();
 
       const verdict = decide(request.channel, request.effect, mode);
       if (verdict === 'refuse') {

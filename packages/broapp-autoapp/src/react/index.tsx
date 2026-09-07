@@ -19,6 +19,9 @@ export type { PageProps } from './Page.tsx';
 export { buildHash, parseHash, PageProvider, usePage } from './context.tsx';
 export type { PageContextValue, SourceState } from './context.tsx';
 
+export { announcePending, browserSurface, titleWithPending } from './pending.ts';
+export type { PendingSurface } from './pending.ts';
+
 export { readPath, resolveInput, resolveValue } from './bind.ts';
 export type { Scope } from './bind.ts';
 export { formatValue } from './format.ts';

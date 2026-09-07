@@ -109,6 +109,20 @@
   color: var(--text, #1b1a18);
 }
 
+/* Under a minute left. Amber and a little heavier, so a card that is about to
+   expire is not the same shape as one with nine minutes on it. */
+.ai-chat__confirm--urgent {
+  border-color: var(--warning, #b4690e);
+  background: var(--warning-bg, #fdf3e3);
+}
+
+.ai-chat__expires {
+  margin-left: auto;
+  color: var(--text-muted, #6b6862);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .ai-chat__typing {
   display: inline-block;
   margin-left: 0.25rem;

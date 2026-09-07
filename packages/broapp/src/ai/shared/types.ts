@@ -68,8 +68,8 @@ export interface ChatTurn {
  *
  *   text        text
  *   tool-call   callId, tool, input, permission
- *   confirm     callId, tool, input, requestId, releaseId, argumentsHash
- *                                            (waits for ai.chatConfirm)
+ *   confirm     callId, tool, input, requestId, releaseId, argumentsHash,
+ *               expiresAt                    (waits for ai.chatConfirm)
  *   tool-result callId, tool, output, denied?
  *   usage       inputTokens, outputTokens
  *   done        —
@@ -88,6 +88,8 @@ export interface ChatEvent {
   requestId?: string;
   releaseId?: string;
   argumentsHash?: string;
+  /** On `confirm`: when the question stops waiting, so the card can count down. */
+  expiresAt?: number;
   inputTokens?: number;
   outputTokens?: number;
   code?: string;

@@ -78,6 +78,10 @@ Without that binding, an answer meant for one call could approve another that
 happened to be pending under the same identifier after a rebuild, or after a
 model changed its arguments between the question and the click.
 
+**How long a question waits.** 120 s for an application's own gate, 600 s for
+the launcher's, because the engineer's questions arrive after minutes of a
+model thinking. Both are in [security.md](security.md) under approvals.
+
 **What the gate does not protect against.** It decides whether generated host
 code is *asked to run*. It does not constrain what that code does once it is
 running. See "Trusted local code" below.
