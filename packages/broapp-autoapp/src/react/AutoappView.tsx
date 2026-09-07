@@ -17,8 +17,11 @@ import type { AutoappContract } from '../shared/contract.ts';
 import type { Conflict } from '../views/overrides.ts';
 import type { ViewsSpec } from '../views/types.ts';
 
+import { ApprovalsStrip } from './ApprovalsStrip.tsx';
 import { buildHash, parseHash, type RouteInfo } from './context.tsx';
 import { Page } from './Page.tsx';
+import { RunsPage } from './RunsPage.tsx';
+import { WorkflowsPage } from './WorkflowsPage.tsx';
 
 /** Props for {@link AutoappView}. */
 export interface AutoappViewProps {
@@ -123,9 +126,15 @@ export function AutoappView({ confirm, reloadToken }: AutoappViewProps = {}): Re
 
   const { pageId, params } = parseHash(hash, views);
   const page = views.pages.find((candidate) => candidate.id === pageId);
+  // Two pages every application has and none of them describes. A person is
+  // entitled to see what was done on their behalf, so an application cannot
+  // decline to offer it.
+  const builtIn =
+    pageId === 'autoapp' ? (params[0] === 'workflows' ? 'workflows' : 'runs') : null;
 
   return (
     <div className="autoapp" data-autoapp-state="ready">
+      <ApprovalsStrip />
       {conflicts.length > 0 && (
         <ul className="autoapp-conflicts" data-autoapp-conflicts={String(conflicts.length)}>
           {conflicts.map((conflict) => (
@@ -135,7 +144,11 @@ export function AutoappView({ confirm, reloadToken }: AutoappViewProps = {}): Re
           ))}
         </ul>
       )}
-      {page === undefined ? (
+      {builtIn === 'runs' ? (
+        <RunsPage />
+      ) : builtIn === 'workflows' ? (
+        <WorkflowsPage />
+      ) : page === undefined ? (
         <section className="autoapp-section" data-autoapp-state="not-found">
           <h2 className="autoapp-section__title">That page is not here</h2>
           <p className="autoapp-text">

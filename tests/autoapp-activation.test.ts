@@ -257,9 +257,15 @@ describe.skipIf(!available)('snapshots', () => {
     await writer;
     await client.close();
 
-    expect(entries.some((entry) => entry.path === 'items.sqlite' && entry.method === 'vacuum')).toBe(true);
-    // No sidecar came across: `VACUUM INTO` folded it in.
-    expect(readdirSync(target)).toEqual(['items.sqlite']);
+    // Both databases came across, each through `VACUUM INTO`. The run store
+    // lives in the data directory too, so the history of what agents did
+    // travels with the data it was done to.
+    expect(entries.map((entry) => `${entry.path}:${entry.method}`).sort()).toEqual([
+      'items.sqlite:vacuum',
+      'runs.sqlite:vacuum',
+    ]);
+    // No sidecar came across: `VACUUM INTO` folded each one in.
+    expect(readdirSync(target).sort()).toEqual(['items.sqlite', 'runs.sqlite']);
 
     const copy = new Database(join(target, 'items.sqlite'), { readonly: true });
     try {

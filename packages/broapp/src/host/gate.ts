@@ -98,6 +98,15 @@ export interface ExecutionRecord extends ApprovalQuestion {
   readonly mode: ExecutionMode;
   readonly decision: Decision;
   readonly outcome?: Outcome;
+  /**
+   * What the call returned, present only when it succeeded.
+   *
+   * A recorder that keeps this can show a person what actually happened, and
+   * can draft a workflow from a run that worked. It is host-controlled output,
+   * not something a caller supplied — but a recorder that persists it is
+   * storing application data and owns whatever redaction that needs.
+   */
+  readonly output?: unknown;
   /** A sentence safe to show. Never a stack, never a secret. */
   readonly error?: string;
   readonly startedAt: number;
@@ -322,7 +331,15 @@ export function createGate(options: GateOptions): Gate {
       const startedAt = Date.now();
       try {
         const value = await run(signal);
-        write({ ...question, mode, decision, outcome: 'succeeded', startedAt, endedAt: Date.now() });
+        write({
+          ...question,
+          mode,
+          decision,
+          outcome: 'succeeded',
+          output: value,
+          startedAt,
+          endedAt: Date.now(),
+        });
         return value;
       } catch (cause) {
         // A `PublicError` was written for whoever is watching and keeps its

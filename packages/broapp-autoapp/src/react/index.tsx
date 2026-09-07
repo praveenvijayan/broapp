@@ -9,6 +9,10 @@
 export { AutoappView, useViews } from './AutoappView.tsx';
 export type { AutoappViewProps, ViewsState } from './AutoappView.tsx';
 
+export { ApprovalsStrip } from './ApprovalsStrip.tsx';
+export { RunsPage } from './RunsPage.tsx';
+export { WorkflowsPage } from './WorkflowsPage.tsx';
+
 export { Page } from './Page.tsx';
 export type { PageProps } from './Page.tsx';
 
@@ -21,5 +25,12 @@ export { formatValue } from './format.ts';
 
 export { autoappContract } from '../shared/contract.ts';
 export type { AutoappContract } from '../shared/contract.ts';
-export type { Conflict, Override, Overrides } from '../views/overrides.ts';
+export type { Addition, Conflict, Override, Overrides } from '../views/overrides.ts';
+export type {
+  WorkflowDefinition,
+  WorkflowParam,
+  WorkflowRunResult,
+  WorkflowStep,
+  WorkflowStepResult,
+} from '../workflows/types.ts';
 export type { ViewsSpec } from '../views/types.ts';

@@ -16,8 +16,10 @@ import { Database } from 'bun:sqlite';
 import { join } from 'node:path';
 
 import type { AppInstance, AppModule, AppStartContext } from 'broapp-autoapp/child';
-import { createViewsHost } from 'broapp-autoapp/host';
+import { createAutoappHost, createRunStore } from 'broapp-autoapp/host';
+import { exportContract } from 'broapp-autoapp/spec';
 
+import { contract } from '../shared/contract.ts';
 import { notesViews } from '../shared/views.ts';
 
 import { createNotesAi } from './ai.ts';
@@ -46,22 +48,42 @@ export function openState(
 }
 
 /** Build everything that mounts on a bridge, given an open (or unopenable) store. */
-export function assemble(
-  state: StoreState,
-  context: AppStartContext,
-): AppInstance {
+export function assemble(state: StoreState, context: AppStartContext): AppInstance {
   const app = createApp(state, context.gate);
-  const views = createViewsHost({ dataDir: context.dataDir, views: notesViews, logger: context.logger });
+
+  // Set once the bridge exists. An agent asking permission when no tab is open
+  // is asking a question nobody will see, and the approver refuses at once.
+  let attached: () => boolean = () => false;
+
+  // The history of what agents did, inside the data directory — so a preview
+  // child records into the copy it is previewing.
+  const runs = createRunStore(context.dataDir, context.logger);
+  runs.markUnknownOnStart();
+
+  const autoapp = createAutoappHost({
+    dataDir: context.dataDir,
+    views: notesViews,
+    store: runs,
+    contract: exportContract(contract),
+    app,
+    isAttached: () => attached(),
+    logger: context.logger,
+  });
+
   // Built unconditionally and costs nothing until somebody chooses a provider:
-  // no key, no provider, no requests.
-  const ai = createNotesAi(app, state, context.dataDir);
+  // no key, no provider, no requests. `onRunEnd` is what closes the record the
+  // gate has been writing steps into for this turn.
+  const ai = createNotesAi(app, state, context.dataDir, (runId, status, summary) =>
+    runs.finishRun(runId, status, summary),
+  );
 
   return {
     schemaVersion: state.ok ? state.store.schemaVersion : 0,
     register: (bridge) => {
       app.mount(bridge);
       ai.mount(bridge);
-      views.mount(bridge);
+      autoapp.mount(bridge);
+      attached = () => bridge.sessions.some((session) => session.endpoint.state === 'open');
     },
     // An idle exit, or a drain, must not throw away a computation somebody is
     // watching. A chat turn in progress is exactly that.
@@ -69,6 +91,7 @@ export function assemble(
     shutdown: () => {
       ai.abortAll('the application is shutting down');
       app.abortAll('the application is shutting down');
+      runs.close();
       // Checkpoint the WAL and close the handle. Skipping this leaves a
       // database that needs its sidecar files to be readable.
       if (state.ok) state.store.close();

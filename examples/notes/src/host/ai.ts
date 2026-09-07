@@ -52,9 +52,12 @@ export function createNotesAi(
   app: HostApp<typeof contract>,
   state: StoreState,
   dataDir: string,
+  onRunEnd?: (runId: string, status: 'succeeded' | 'failed' | 'cancelled', summary: string) => void,
 ): Ai {
   return createAi({
     dataDir,
+    // Autoapp's run store closes the record the gate wrote for this turn.
+    ...(onRunEnd === undefined ? {} : { onRunEnd }),
     providers: [anthropic(), ollama(), openai(), customServer()],
     app: {
       name: 'Notes',

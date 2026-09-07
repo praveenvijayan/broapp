@@ -53,6 +53,19 @@ export interface CreateAiOptions {
   readonly maxSteps?: number;
   /** How long a `confirm` tool waits for the user. Default 300_000 ms. */
   readonly confirmTimeoutMs?: number;
+  /**
+   * Called once when a chat turn ends, however it ends.
+   *
+   * Autoapp's run store uses it to close the record the gate has been writing
+   * steps into: the browser's run identifier is the prefix of every request
+   * identifier the turn produced, so this is the one signal that ties the two
+   * together. An application that does not record runs leaves it unset.
+   */
+  readonly onRunEnd?: (
+    runId: string,
+    status: 'succeeded' | 'failed' | 'cancelled',
+    summary: string,
+  ) => void;
 }
 
 /**
@@ -181,6 +194,7 @@ export function createAi(options: CreateAiOptions): Ai {
     maxSteps: options.maxSteps ?? DEFAULT_MAX_STEPS,
     confirmTimeoutMs: options.confirmTimeoutMs ?? DEFAULT_CONFIRM_TIMEOUT_MS,
     approvals,
+    ...(options.onRunEnd === undefined ? {} : { onRunEnd: options.onRunEnd }),
     logger: options.logger ?? console,
   };
 

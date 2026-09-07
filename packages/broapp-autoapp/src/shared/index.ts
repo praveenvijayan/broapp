@@ -24,5 +24,6 @@ export type {
 
 export { parseViews, walkComponents } from '../views/validate.ts';
 export { checkViewsAgainstContract } from '../views/check.ts';
+export { autoappContractExport, withAutoappRoutes } from '../views/merge-contract.ts';
 export { applyOverrides, NO_OVERRIDES } from '../views/overrides.ts';
 export type { Conflict, Override, Overrides } from '../views/overrides.ts';

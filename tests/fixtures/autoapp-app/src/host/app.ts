@@ -7,7 +7,8 @@
  */
 import { createHostApp } from 'broapp/host';
 import type { AppInstance, AppModule, AppStartContext } from 'broapp-autoapp/child';
-import { createViewsHost } from 'broapp-autoapp/host';
+import { createAutoappHost, createRunStore } from 'broapp-autoapp/host';
+import { exportContract } from 'broapp-autoapp/spec';
 
 import { contract } from '../shared/contract.ts';
 import { views } from '../shared/views.ts';
@@ -32,17 +33,35 @@ export function start(context: AppStartContext): Promise<AppInstance> {
     }
   });
 
-  const viewsHost = createViewsHost({ dataDir: context.dataDir, views, logger: context.logger });
+  // Set once the bridge exists. A tab is attached when Brobridge says an
+  // endpoint is open; a real application reads the same thing off `RunningApp`.
+  let attached: () => boolean = () => false;
+
+  // The run store lives inside the data directory, so a preview child records
+  // into the copy it is previewing and a live child into the real one.
+  const runs = createRunStore(context.dataDir, context.logger);
+  runs.markUnknownOnStart();
+  const autoapp = createAutoappHost({
+    dataDir: context.dataDir,
+    views,
+    store: runs,
+    contract: exportContract(contract),
+    app,
+    isAttached: () => attached(),
+    logger: context.logger,
+  });
 
   return Promise.resolve({
     schemaVersion: store.schemaVersion,
     register: (bridge) => {
       app.mount(bridge);
-      viewsHost.mount(bridge);
+      autoapp.mount(bridge);
+      attached = () => bridge.sessions.some((session) => session.endpoint.state === 'open');
     },
     isBusy: () => app.activeStreams > 0,
     shutdown: () => {
       app.abortAll('the application is shutting down');
+      runs.close();
       store.close();
     },
   });

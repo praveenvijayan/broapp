@@ -210,3 +210,80 @@
 .autoapp-conflicts__item + .autoapp-conflicts__item {
   margin-top: 0.25rem;
 }
+
+/* Approvals, runs and workflows: the parts of the interface that are the same
+   for every application and are not described by any view specification. */
+
+.autoapp-approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--autoapp-notice-border, #f0d9a8);
+  border-radius: 10px;
+  background: var(--autoapp-notice-surface, #fdf6e7);
+}
+
+.autoapp-approvals__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--autoapp-notice-text, #6b5312);
+}
+
+.autoapp-approvals__what {
+  margin: 0 0 0.4rem;
+  color: var(--autoapp-text, #33383f);
+}
+
+.autoapp-approvals__input {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 7px;
+  background: var(--autoapp-code-surface, #f4f5f8);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  overflow-x: auto;
+}
+
+.autoapp-approvals__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.autoapp-approvals__item + .autoapp-approvals__item {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--autoapp-notice-border, #f0d9a8);
+}
+
+.autoapp-run-step,
+.autoapp-draft__step {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--autoapp-border, #dfe3ea);
+  font-size: 0.9rem;
+}
+
+.autoapp-draft__leaf {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0;
+}
+
+.autoapp-draft__path {
+  min-width: 8rem;
+  color: var(--autoapp-muted, #6b7280);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.autoapp-draft__value {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.autoapp-run-result {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--autoapp-border, #dfe3ea);
+}

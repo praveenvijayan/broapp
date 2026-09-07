@@ -24,10 +24,26 @@ export interface Override {
   readonly columnOrder?: readonly string[];
 }
 
+/**
+ * A component this person added, which the release does not have.
+ *
+ * Promotion writes one of these. It is how a saved workflow becomes a button
+ * without a new release: the workflow lives in the application's own data, and
+ * the thing that runs it is one more entry in the same per-user overrides file
+ * as a renamed column.
+ */
+export interface Addition {
+  readonly id: string;
+  readonly page: string;
+  readonly afterComponentId: string;
+  readonly component: Component;
+}
+
 /** Everything one person changed. */
 export interface Overrides {
   readonly version: 1;
   readonly items: readonly Override[];
+  readonly additions?: readonly Addition[];
 }
 
 /** An override that names something the current release does not have. */
@@ -37,7 +53,7 @@ export interface Conflict {
 }
 
 /** Nothing overridden. The shape `overridesGet` returns before anybody has changed anything. */
-export const NO_OVERRIDES: Overrides = { version: 1, items: [] };
+export const NO_OVERRIDES: Overrides = { version: 1, items: [], additions: [] };
 
 /** Reorder columns by `columnOrder`, keeping unnamed ones in their original places. */
 function reorder(columns: readonly Column[], order: readonly string[]): readonly Column[] {
@@ -84,6 +100,33 @@ function applyTo(member: Component, override: Override, conflicts: Conflict[]): 
   return next;
 }
 
+/**
+ * Put `component` straight after `anchorId`, wherever that is in the tree.
+ *
+ * `null` when the anchor is not there — an added component with nothing to
+ * anchor to is a conflict rather than something to append hopefully at the end,
+ * because the position was part of what the person chose.
+ */
+function insertAfter(
+  components: readonly Component[],
+  anchorId: string,
+  component: Component,
+): readonly Component[] | null {
+  const at = components.findIndex((member) => member.id === anchorId);
+  if (at >= 0) {
+    return [...components.slice(0, at + 1), component, ...components.slice(at + 1)];
+  }
+  for (const [index, member] of components.entries()) {
+    if (member.children === undefined) continue;
+    const inner = insertAfter(member.children, anchorId, component);
+    if (inner === null) continue;
+    return components.map((candidate, at2) =>
+      at2 === index ? { ...candidate, children: inner } : candidate,
+    );
+  }
+  return null;
+}
+
 /** Rebuild a component tree, applying whatever override names each component. */
 function rewrite(
   components: readonly Component[],
@@ -119,10 +162,29 @@ export function applyOverrides(
   const conflicts: Conflict[] = [];
   const seen = new Set<string>();
 
-  const pages = views.pages.map((screen) => ({
+  let pages = views.pages.map((screen) => ({
     ...screen,
     children: rewrite(screen.children, byId, seen, conflicts),
   }));
+
+  for (const addition of overrides.additions ?? []) {
+    const screen = pages.find((candidate) => candidate.id === addition.page);
+    if (screen === undefined) {
+      conflicts.push({ componentId: addition.id, reason: `page ${addition.page} no longer exists` });
+      continue;
+    }
+    const inserted = insertAfter(screen.children, addition.afterComponentId, addition.component);
+    if (inserted === null) {
+      conflicts.push({
+        componentId: addition.id,
+        reason: `component ${addition.afterComponentId} no longer exists`,
+      });
+      continue;
+    }
+    pages = pages.map((candidate) =>
+      candidate.id === screen.id ? { ...candidate, children: inserted } : candidate,
+    );
+  }
 
   for (const item of overrides.items) {
     if (!seen.has(item.componentId)) {

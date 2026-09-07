@@ -23,6 +23,7 @@ import type { Gate, HostLogger, RunningApp } from 'broapp/host';
 import { parseMessage } from '../ipc/codec.ts';
 import { IPC_VERSION, type Message } from '../ipc/messages.ts';
 import { layout, readRelease } from '../spec/index.ts';
+import { createRunStore, type RunStore } from '../host/run-store.ts';
 
 import { assertAppModule, type AppInstance } from './module.ts';
 
@@ -51,6 +52,7 @@ interface ChildState {
   running: RunningApp | null;
   instance: AppInstance | null;
   gate: Gate | null;
+  store: RunStore | null;
 }
 
 /** A logger that writes to stderr, which the launcher pipes and drains. */
@@ -153,7 +155,13 @@ export async function runChild(argv: readonly string[]): Promise<number> {
     pid: process.pid,
   });
 
-  const child: ChildState = { state: 'starting', running: null, instance: null, gate: null };
+  const child: ChildState = {
+    state: 'starting',
+    running: null,
+    instance: null,
+    gate: null,
+    store: null,
+  };
 
   let finish: (code: number) => void = () => undefined;
   const exiting = new Promise<number>((resolve) => {
@@ -172,10 +180,24 @@ export async function runChild(argv: readonly string[]): Promise<number> {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     const { spec, module } = await loadRelease(releaseDir, rootOf(releaseDir), appId, releaseId);
 
-    // Prompt 06 supplies a recorder that writes into `runs.sqlite` inside the
-    // data directory — which is how a preview child records into the copy and a
-    // live child into the real one, without either of them deciding where.
-    const gate = createGate({ appId, releaseId, mode: executionMode, logger });
+    // The store lives inside the data directory, which is how a preview child
+    // records into the copy it is previewing and a live child into the real one
+    // without either of them having to decide where.
+    //
+    // `markUnknownOnStart` runs before the first request is admitted: whatever
+    // was in flight when the last process died is marked `unknown` now, while
+    // there is no chance of confusing it with something this process started.
+    const store = createRunStore(dataDir, logger);
+    store.markUnknownOnStart();
+    child.store = store;
+
+    const gate = createGate({
+      appId,
+      releaseId,
+      mode: executionMode,
+      recorder: store.recorder(),
+      logger,
+    });
     child.gate = gate;
     // An activation starts its candidate paused: it has to be checked against
     // the migrated data before anything is allowed to change it.
@@ -192,7 +214,10 @@ export async function runChild(argv: readonly string[]): Promise<number> {
       openBrowser: false,
       register: (bridge) => instance.register(bridge),
       isBusy: () => instance.isBusy(),
-      onShutdown: (reason) => instance.shutdown(reason),
+      onShutdown: async (reason) => {
+        await instance.shutdown(reason);
+        store.close();
+      },
       // The launch URL is a credential. The launcher gets it over IPC and shows
       // it once; a child that also printed it would put it in whatever captures
       // this process's output.

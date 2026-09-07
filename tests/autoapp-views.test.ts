@@ -25,7 +25,7 @@ import {
   parseViews,
 } from 'broapp-autoapp/shared';
 import type { Overrides, ViewsSpec } from 'broapp-autoapp/shared';
-import { createViewsHost } from 'broapp-autoapp/host';
+import { createAutoappHost, createRunStore } from 'broapp-autoapp/host';
 import { readPath, resolveInput, resolveValue } from 'broapp-autoapp/react';
 
 import { contract as notesContract } from '../examples/notes/src/shared/contract.ts';
@@ -380,10 +380,16 @@ describe('the autoapp host routes', () => {
 
   async function start(): Promise<Harness> {
     directory = await mkdtemp(join(tmpdir(), 'autoapp-views-'));
-    const host = createViewsHost({
+    const quiet = { warn: () => undefined, error: () => undefined };
+    const app = createReservedHostApp<typeof autoappContract>(autoappContract, { logger: quiet });
+    const host = createAutoappHost({
       dataDir: directory,
       views,
-      logger: { warn: () => undefined, error: () => undefined },
+      store: createRunStore(directory, quiet),
+      contract: { operations: {}, streams: {} },
+      app: app as never,
+      isAttached: () => true,
+      logger: quiet,
     });
     live = await harness((bridge) => host.mount(bridge));
     return live;
@@ -513,7 +519,7 @@ describe('the browser boundary', () => {
        document.title = String(typeof AutoappView);`,
     );
     expect(html).toContain('autoapp-page');
-    for (const symbol of ['node:fs', 'node:os', 'bun:sqlite', 'Bun.spawn', 'createViewsHost']) {
+    for (const symbol of ['node:fs', 'node:os', 'bun:sqlite', 'Bun.spawn', 'createAutoappHost']) {
       expect(html).not.toContain(symbol);
     }
   });
@@ -521,7 +527,7 @@ describe('the browser boundary', () => {
   test('a page that imports the Autoapp host fails to build', async () => {
     await writeFile(
       join(root, 'src', 'leak.ts'),
-      `import { createViewsHost } from 'broapp-autoapp/host';\nconsole.log(createViewsHost);`,
+      `import { createAutoappHost } from 'broapp-autoapp/host';\nconsole.log(createAutoappHost);`,
       'utf8',
     );
     await expect(

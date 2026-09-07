@@ -39,6 +39,15 @@ export interface RunDeps {
   readonly confirmTimeoutMs: number;
   readonly approvals: PendingApprovals;
   readonly logger: HostLogger;
+  /**
+   * Called once when a turn ends, however it ends.
+   *
+   * The run identifier is chosen by the browser and used as the prefix of every
+   * request identifier the turn produces, so this is what lets something
+   * outside the AI layer — Autoapp's run store — close the record the gate has
+   * been writing steps into.
+   */
+  readonly onRunEnd?: (runId: string, status: 'succeeded' | 'failed' | 'cancelled', summary: string) => void;
 }
 
 /**
@@ -328,11 +337,39 @@ function safeToolMessage(cause: unknown, name: string, logger: HostLogger): stri
   return 'The tool failed.';
 }
 
-/** Run one `ai.chat` turn. */
+/** How much of the person's message stands in for the whole turn. */
+const SUMMARY_CHARS = 200;
+
+/** Run one `ai.chat` turn, and tell whoever is listening how it ended. */
 export async function runChat(
   params: StreamChatParams,
   sink: StreamSink<ChatEvent>,
   deps: RunDeps,
+): Promise<void> {
+  // Reported exactly once, whatever happens: a turn that threw, a turn the
+  // browser cancelled and a turn that finished all have to close their record,
+  // or a run store is left with something that looks like it is still running.
+  let ended = false;
+  const end = (status: 'succeeded' | 'failed' | 'cancelled'): void => {
+    if (ended) return;
+    ended = true;
+    deps.onRunEnd?.(params.runId, status, params.message.slice(0, SUMMARY_CHARS));
+  };
+  try {
+    await runTurn(params, sink, deps, end);
+    end(sink.signal.aborted ? 'cancelled' : 'succeeded');
+  } catch (cause) {
+    end(sink.signal.aborted ? 'cancelled' : 'failed');
+    throw cause;
+  }
+}
+
+/** The turn itself. */
+async function runTurn(
+  params: StreamChatParams,
+  sink: StreamSink<ChatEvent>,
+  deps: RunDeps,
+  end: (status: 'succeeded' | 'failed' | 'cancelled') => void,
 ): Promise<void> {
   // Throws a PublicError when nothing is configured. `runStream` in host/app.ts
   // turns that into the right thing on the wire, so it is not caught here.
@@ -383,6 +420,9 @@ export async function runChat(
           code: 'provider',
           message: safeMessage(part.error, deps.logger),
         });
+        // The stream ends here rather than at `done`, so the turn's outcome is
+        // settled here too.
+        end('failed');
         return;
       case 'tool-error': {
         // `execute` never throws, so this means the SDK failed before the tool
@@ -398,6 +438,7 @@ export async function runChat(
         break;
       }
       case 'abort':
+        end('cancelled');
         return;
       default:
         // tool-call, tool-result, text-start, finish-step, reasoning, source,
