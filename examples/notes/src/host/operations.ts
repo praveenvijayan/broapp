@@ -6,6 +6,7 @@
  * for this layer is the application's own rules and its failure behaviour.
  */
 import { createHostApp, publicError } from 'broapp/host';
+import type { Gate } from 'broapp/host';
 
 import { contract } from '../shared/contract.ts';
 import { LATEST_SCHEMA_VERSION, type Store } from './db.ts';
@@ -22,8 +23,15 @@ export type StoreState =
   | { readonly ok: true; readonly store: Store }
   | { readonly ok: false; readonly path: string; readonly reason: string };
 
-export function createApp(state: StoreState) {
-  const app = createHostApp(contract);
+/**
+ * Build the host app.
+ *
+ * The gate is passed in rather than made here. A preview child supplies one in
+ * `preview` mode and an activation supplies one that is paused, and neither of
+ * those is something this file should have to know about.
+ */
+export function createApp(state: StoreState, gate?: Gate) {
+  const app = createHostApp(contract, gate === undefined ? {} : { gate });
 
   /** The store, or a public failure. Every data operation starts here. */
   function store(): Store {

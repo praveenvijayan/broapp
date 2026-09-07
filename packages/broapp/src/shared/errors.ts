@@ -80,6 +80,28 @@ export class PublicError extends Error {
   }
 }
 
+/**
+ * True when `error` is a {@link PublicError}, including one from another copy
+ * of this module.
+ *
+ * `instanceof` is not enough, and the reason is architectural rather than
+ * pedantic. An Autoapp release bundles its own copy of `broapp`, while the
+ * child runtime that supervises it has the copy compiled into the launcher —
+ * so a `PublicError` thrown by the gate in one and caught by `runOperation` in
+ * the other is a different class object with the same shape. Reducing it to
+ * "internal error" would silently turn every deliberate refusal, the preview
+ * policy's included, into a mystery.
+ *
+ * The check is deliberately narrow: the name, and a `code` from the known set.
+ * Nothing an untrusted value could set by accident.
+ */
+export function isPublicError(error: unknown): error is PublicError {
+  if (error instanceof PublicError) return true;
+  if (!(error instanceof Error) || error.name !== 'PublicError') return false;
+  const code: unknown = (error as { code?: unknown }).code;
+  return typeof code === 'string' && (PUBLIC_CODES as readonly string[]).includes(code);
+}
+
 /** The message every unhandled host failure becomes, on both sides. */
 export const INTERNAL_ERROR_MESSAGE = 'The application could not complete that operation.';
 

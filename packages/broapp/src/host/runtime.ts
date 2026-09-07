@@ -66,6 +66,16 @@ export interface RunningApp {
   readonly done: Promise<number>;
   /** Stop it. Safe to call more than once. */
   stop(reason?: ShutdownReason): Promise<void>;
+  /**
+   * True while at least one tab is actually connected.
+   *
+   * The same question the idle logic asks, exposed for a supervisor that has to
+   * report whether anybody is looking at this application. Deliberately not
+   * "a session exists": Brobridge retains a session for a minute after its
+   * socket drops so a reconnecting tab can resume, and a closed tab would go on
+   * looking attached for that whole minute.
+   */
+  readonly attached: boolean;
 }
 
 const POLL_INTERVAL_MS = 1_000;
@@ -159,12 +169,16 @@ export async function startApp(options: StartAppOptions): Promise<RunningApp> {
     });
   }
 
+  /** Whether any endpoint is open right now. One definition, two readers. */
+  const isAttached = (): boolean =>
+    bridge.sessions.some((session) => session.endpoint.state === 'open');
+
   if (mode === 'interactive') {
     const startedAt = Date.now();
     let idleSince: number | null = null;
 
     poll = setInterval(() => {
-      const attached = bridge.sessions.some((session) => session.endpoint.state === 'open');
+      const attached = isAttached();
       const now = Date.now();
 
       if (attached) {
@@ -194,5 +208,12 @@ export async function startApp(options: StartAppOptions): Promise<RunningApp> {
     poll.unref?.();
   }
 
-  return { bridge, done, stop };
+  return {
+    bridge,
+    done,
+    stop,
+    get attached() {
+      return isAttached();
+    },
+  };
 }

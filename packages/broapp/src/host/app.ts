@@ -25,7 +25,12 @@ import type {
   StreamParams,
 } from '../shared/contract.ts';
 import { assertNoReservedRoutes, effectOf, splitRoute } from '../shared/contract.ts';
-import { INTERNAL_ERROR_MESSAGE, isPublicBridgeError, PublicError } from '../shared/errors.ts';
+import {
+  INTERNAL_ERROR_MESSAGE,
+  isPublicBridgeError,
+  isPublicError,
+  PublicError,
+} from '../shared/errors.ts';
 import { encodeEvent } from '../shared/ndjson.ts';
 import { ValidationError } from '../shared/schema.ts';
 
@@ -333,7 +338,7 @@ export function createReservedHostApp<C extends AnyContract>(
  * accidentally undo the reduction by wrapping the message.
  */
 function wrap(cause: unknown, route: string, logger: HostLogger): unknown {
-  if (cause instanceof PublicError) return cause.toBridgeError();
+  if (isPublicError(cause)) return cause.toBridgeError();
   logger.error(`[broapp] ${route} failed: ${String(cause instanceof Error ? cause.stack ?? cause.message : cause)}`);
   return cause;
 }

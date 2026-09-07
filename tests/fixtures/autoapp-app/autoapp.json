@@ -1,0 +1,36 @@
+{
+  "appId": "items",
+  "name": "Items",
+  "schemaVersion": 3,
+  "capabilities": [],
+  "migrations": [
+    {
+      "id": "001-create-items",
+      "fromSchemaVersion": 0,
+      "toSchemaVersion": 1,
+      "checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+      "description": "Create the items table."
+    },
+    {
+      "id": "002-index-created-at",
+      "fromSchemaVersion": 1,
+      "toSchemaVersion": 2,
+      "checksum": "2222222222222222222222222222222222222222222222222222222222222222",
+      "description": "Index items by when they were added."
+    },
+    {
+      "id": "003-add-note",
+      "fromSchemaVersion": 2,
+      "toSchemaVersion": 3,
+      "checksum": "3333333333333333333333333333333333333333333333333333333333333333",
+      "description": "Add a note column."
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "list-works",
+      "title": "The list can be read",
+      "steps": [{ "route": "items.list", "input": null }]
+    }
+  ]
+}

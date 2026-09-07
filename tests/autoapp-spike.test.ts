@@ -186,13 +186,14 @@ describe('parseMessage', () => {
   /** A well-formed message, for a test to spoil one field at a time. */
   const hello = { v: 1, id: 'c1', type: 'hello', appId: 'a', releaseId: 'r', pid: 42 };
 
-  test('accepts each of the six message types', () => {
+  test('accepts each of the seven message types', () => {
     expect(parseMessage(hello).type).toBe('hello');
     expect(parseMessage({ v: 1, id: 'c2', type: 'ready', url: 'x://y', schemaVersion: 1 }).type).toBe('ready');
     expect(parseMessage({ v: 1, id: 'c3', type: 'health', state: 'serving', activeWork: 0 }).type).toBe('health');
     expect(parseMessage({ v: 1, id: 'c4', type: 'drain', deadlineMs: 10, drained: true }).type).toBe('drain');
     expect(parseMessage({ v: 1, id: 'c5', type: 'shutdown', deadlineMs: 10 }).type).toBe('shutdown');
     expect(parseMessage({ v: 1, id: 'c6', type: 'fatal', reason: 'gone' }).type).toBe('fatal');
+    expect(parseMessage({ v: 1, id: 'c7', type: 'migrate', dataDir: '/tmp/x' }).type).toBe('migrate');
   });
 
   test('a reply keeps the identifier it answers', () => {
@@ -212,7 +213,9 @@ describe('parseMessage', () => {
   });
 
   test('refuses an unknown type', () => {
-    expect(() => parseMessage({ ...hello, type: 'migrate' })).toThrow(/type/);
+    expect(() => parseMessage({ ...hello, type: 'reticulate' })).toThrow(/type/);
+    // A known type is still refused when what it needs is missing.
+    expect(() => parseMessage({ v: 1, id: 'c8', type: 'migrate' })).toThrow(/"dataDir"/);
   });
 
   test('refuses a missing or empty id', () => {

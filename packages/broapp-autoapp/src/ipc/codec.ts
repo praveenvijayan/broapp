@@ -12,7 +12,7 @@
 import { IPC_VERSION, MAX_MESSAGE_BYTES, type Message } from './messages.ts';
 
 /** Every `type` a message may have. */
-const TYPES = ['hello', 'ready', 'health', 'drain', 'shutdown', 'fatal'] as const;
+const TYPES = ['hello', 'ready', 'health', 'drain', 'shutdown', 'fatal', 'migrate'] as const;
 
 /** The states a child may report. */
 const STATES = ['starting', 'serving', 'draining', 'stopping'] as const;
@@ -133,6 +133,17 @@ export function parseMessage(raw: unknown): Message {
       return { ...base, type: 'shutdown', deadlineMs: requireNumber(record, 'deadlineMs') };
     case 'fatal':
       return { ...base, type: 'fatal', reason: requireString(record, 'reason') };
+    case 'migrate': {
+      const from = optionalNumber(record, 'from');
+      const to = optionalNumber(record, 'to');
+      return {
+        ...base,
+        type: 'migrate',
+        dataDir: requireString(record, 'dataDir'),
+        ...(from === undefined ? {} : { from }),
+        ...(to === undefined ? {} : { to }),
+      };
+    }
   }
 }
 

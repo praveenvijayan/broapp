@@ -1,0 +1,12 @@
+{
+  "name": "autoapp-fixture-items",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "broapp": "workspace:*",
+    "broapp-autoapp": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

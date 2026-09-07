@@ -1,0 +1,34 @@
+{
+  "appId": "notes",
+  "name": "Notes",
+  "schemaVersion": 2,
+  "capabilities": [],
+  "migrations": [
+    {
+      "id": "001-create-notes",
+      "fromSchemaVersion": 0,
+      "toSchemaVersion": 1,
+      "checksum": "0000000000000000000000000000000000000000000000000000000000000001",
+      "description": "Create the notes table and its updated_at index."
+    },
+    {
+      "id": "002-add-pinned",
+      "fromSchemaVersion": 1,
+      "toSchemaVersion": 2,
+      "checksum": "0000000000000000000000000000000000000000000000000000000000000002",
+      "description": "Add the pinned column and its index."
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "list-works",
+      "title": "The note list can be read",
+      "steps": [{ "route": "notes.list", "input": {} }]
+    },
+    {
+      "id": "status-works",
+      "title": "The database reports itself healthy",
+      "steps": [{ "route": "notes.status", "input": null }]
+    }
+  ]
+}

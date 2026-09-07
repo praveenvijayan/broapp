@@ -1,7 +1,7 @@
 /**
- * The six messages a launcher and an application child exchange.
+ * The messages a launcher and an application child exchange.
  *
- * There are six and there will not quietly be a seventh: the set is small
+ * There are seven and there will not quietly be an eighth: the set is small
  * enough to reason about, and every one of them is about the child's lifecycle
  * rather than about the application's work. An application's operations never
  * travel this channel — the launcher supervises, it does not proxy.
@@ -59,6 +59,20 @@ export interface Shutdown extends Base {
   readonly deadlineMs: number;
 }
 
+/**
+ * Launcher → child request, and child → launcher reply with the same type and `re`.
+ *
+ * Sent to a child started in migrate mode, which never serves anything. The
+ * reply says where the data started and where it ended up, so an activation can
+ * record what actually happened rather than what was expected to.
+ */
+export interface Migrate extends Base {
+  readonly type: 'migrate';
+  readonly dataDir: string;
+  readonly from?: number;
+  readonly to?: number;
+}
+
 /** Child → launcher: something unrecoverable; the child exits after sending. */
 export interface Fatal extends Base {
   readonly type: 'fatal';
@@ -67,7 +81,7 @@ export interface Fatal extends Base {
 }
 
 /** Anything that may legitimately cross the channel. */
-export type Message = Hello | Ready | Health | Drain | Shutdown | Fatal;
+export type Message = Hello | Ready | Health | Drain | Shutdown | Fatal | Migrate;
 
 /**
  * The most a single message may weigh.

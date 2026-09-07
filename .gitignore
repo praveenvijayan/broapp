@@ -9,5 +9,7 @@ site/dist/
 .obsidian/
 packages/create-broapp/template/
 tests/.build-fixture/
+tests/.autoapp-run/
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+.autoapp-manual/

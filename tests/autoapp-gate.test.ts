@@ -405,6 +405,75 @@ describe('guard', () => {
     expect(records[1]).toMatchObject({ outcome: 'failed', error: INTERNAL_ERROR_MESSAGE });
   });
 
+  test('a paused gate holds back writes and still answers reads', async () => {
+    const { gate, records } = gateWith();
+    expect(gate.paused).toBe(false);
+    gate.pause('the application is being updated');
+    expect(gate.paused).toBe(true);
+
+    let ran = 0;
+    const write = gate.guard(
+      { ...envelope('user'), route: 'notes.create', effect: 'write', input: {} },
+      () => {
+        ran += 1;
+        return Promise.resolve(null);
+      },
+    );
+    // `unavailable`, not `rejected`: nobody decided against this call, the
+    // application simply declined to be asked for a moment.
+    await expect(write).rejects.toMatchObject({ code: 'unavailable' });
+    await expect(write).rejects.toThrow('the application is being updated');
+    expect(ran).toBe(0);
+    // A pause is not a decision, so there is nothing to write down.
+    expect(records).toEqual([]);
+
+    expect(
+      await gate.guard(
+        { ...envelope('user'), route: 'notes.list', effect: 'read', input: {} },
+        () => Promise.resolve('still here'),
+      ),
+    ).toBe('still here');
+    expect(records[0]).toMatchObject({ decision: 'allowed', outcome: 'succeeded' });
+  });
+
+  test('resume admits writes again', async () => {
+    const { gate } = gateWith();
+    gate.pause('updating');
+    await expect(
+      gate.guard({ ...envelope('user'), route: 'notes.create', effect: 'write', input: {} }, () =>
+        Promise.resolve(null),
+      ),
+    ).rejects.toMatchObject({ code: 'unavailable' });
+    gate.resume();
+    expect(gate.paused).toBe(false);
+    expect(
+      await gate.guard(
+        { ...envelope('user'), route: 'notes.create', effect: 'write', input: {} },
+        () => Promise.resolve('through'),
+      ),
+    ).toBe('through');
+  });
+
+  test('pausing does not disturb an approval already being waited on', async () => {
+    const { gate, records } = gateWith({ confirmTimeoutMs: 5_000 });
+    const approvals = createPendingApprovals(log());
+    let ran = 0;
+    const request = { ...envelope('ai', { approver: approvals }), route: 'notes.create' };
+    const running = gate.guard({ ...request, effect: 'write', input: {} }, () => {
+      ran += 1;
+      return Promise.resolve('done anyway');
+    });
+    await until(() => approvals.pending.length === 1, 1_000, 'the question');
+
+    // The pause arrives while somebody is deciding. The question was already
+    // admitted; taking it back now would be a confusing way to answer it.
+    gate.pause('updating');
+    approvals.answer({ requestId: request.requestId, approved: true });
+    expect(await running).toBe('done anyway');
+    expect(ran).toBe(1);
+    expect(records[0]).toMatchObject({ decision: 'confirmed', outcome: 'succeeded' });
+  });
+
   test('a broken recorder does not break the application', async () => {
     const logger = log();
     const { gate } = gateWith({

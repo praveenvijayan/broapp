@@ -20,7 +20,7 @@ import type { HostLogger, StreamSink } from '../../host/app.ts';
 import type { PendingApprovals } from '../../host/approvals.ts';
 import type { ApprovalQuestion, Approver } from '../../host/gate.ts';
 import type { Effect } from '../../shared/contract.ts';
-import { fromTransportError, PublicError } from '../../shared/errors.ts';
+import { fromTransportError, isPublicError } from '../../shared/errors.ts';
 import type { ToolPermission } from '../shared/types.ts';
 import type { ChatEvent, StreamChatParams } from './run-types.ts';
 
@@ -180,7 +180,7 @@ function toModelMessages(params: StreamChatParams): ModelMessage[] {
  * URL, or an echo of the prompt.
  */
 function safeMessage(cause: unknown, logger: HostLogger): string {
-  if (cause instanceof AdapterError || cause instanceof PublicError) return cause.message;
+  if (cause instanceof AdapterError || isPublicError(cause)) return cause.message;
   logger.error(
     `[broapp] ai.chat provider error: ${String(cause instanceof Error ? (cause.stack ?? cause.message) : cause)}`,
   );
@@ -242,7 +242,7 @@ function createRunApprover(
  * both have to become an ordinary tool result rather than a failure.
  */
 function wasDeclined(cause: unknown): boolean {
-  if (cause instanceof PublicError) return cause.code === 'rejected';
+  if (isPublicError(cause)) return cause.code === 'rejected';
   return fromTransportError(cause).code === 'rejected';
 }
 
@@ -319,7 +319,7 @@ function buildTools(
  * failure and is logged rather than shown.
  */
 function safeToolMessage(cause: unknown, name: string, logger: HostLogger): string {
-  if (cause instanceof PublicError) return cause.message;
+  if (isPublicError(cause)) return cause.message;
   const reduced = fromTransportError(cause);
   if (reduced.code !== 'internal') return reduced.message;
   logger.error(

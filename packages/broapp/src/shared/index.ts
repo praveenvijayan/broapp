@@ -37,6 +37,7 @@ export {
   INTERNAL_ERROR_MESSAGE,
   PublicError,
   fromTransportError,
+  isPublicError,
   publicError,
 } from './errors.ts';
 export type { PublicErrorCode } from './errors.ts';

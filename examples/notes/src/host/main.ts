@@ -1,6 +1,12 @@
 /**
- * The host entry point. This is what `bun build --compile` turns into an
- * executable.
+ * The standalone host entry point. This is what `bun build --compile` turns
+ * into an executable.
+ *
+ * It is deliberately thin: everything the application *is* lives in `app.ts`,
+ * as an Autoapp application module, and this file is one of the two things that
+ * can run one. The other is Autoapp's child runtime. Keeping the application
+ * identical under both is what makes "the same Notes, supervised" true rather
+ * than approximately true.
  *
  * The UI arrives as an ordinary import of the document `broapp build` produced.
  * `with { type: "text" }` makes Bun inline its contents into the bundle, so the
@@ -16,16 +22,9 @@
 import pageAsset from '../../dist/ui.html' with { type: 'text' };
 import manifest from '../../package.json' with { type: 'json' };
 
-import { join } from 'node:path';
+import { createGate, ensureDataDir, startApp } from 'broapp/host';
 
-import { ensureDataDir, startApp } from 'broapp/host';
-import { createViewsHost } from 'broapp-autoapp/host';
-
-import { notesViews } from '../shared/views.ts';
-
-import { createNotesAi } from './ai.ts';
-import { createApp, type StoreState } from './operations.ts';
-import { openStore } from './db.ts';
+import { start } from './app.ts';
 
 const page = pageAsset as unknown as string;
 
@@ -74,31 +73,15 @@ async function main(): Promise<number> {
       ? 'background'
       : 'interactive';
 
-  // Opened once, at startup, so a migration runs before the first request and
-  // a failure is reportable rather than a mystery under a click.
-  let state: StoreState;
-  try {
-    state = { ok: true, store: openStore(dataDir) };
-  } catch (cause) {
-    // Logged here with detail; the browser gets the path and a plain sentence.
-    console.error(
-      `could not open the notes database: ${String(cause instanceof Error ? cause.message : cause)}`,
-    );
-    state = {
-      ok: false,
-      path: join(dataDir, 'notes.sqlite'),
-      reason: 'could not be opened',
-    };
-  }
-
-  const app = createApp(state);
-  // The renderer's own routes, in the reserved `autoapp` group: the release's
-  // views, plus whatever this person has changed about them.
-  const views = createViewsHost({ dataDir, views: notesViews });
-  // The AI layer is a second host app on the same bridge. It is built
-  // unconditionally and costs nothing until the user chooses a provider: no
-  // key, no provider, no requests.
-  const ai = createNotesAi(app, state, dataDir);
+  // Run standalone there is no release and no launcher, so the gate is the
+  // ordinary live one. Everything else about the application is the same as
+  // when Autoapp supervises it.
+  const instance = await start({
+    dataDir,
+    mode: 'live',
+    gate: createGate({ appId: APP_NAME, releaseId: 'standalone', mode: 'live' }),
+    logger: console,
+  });
 
   const running = await startApp({
     page,
@@ -106,22 +89,9 @@ async function main(): Promise<number> {
     version: VERSION,
     mode: lifecycle,
     openBrowser: !argv.includes('--no-open') && process.env['BROAPP_OPEN_BROWSER'] !== '0',
-    register: (bridge) => {
-      app.mount(bridge);
-      ai.mount(bridge);
-      views.mount(bridge);
-    },
-    // An idle exit must not throw away a computation someone is watching. The
-    // grace period is for a closed tab, not for a busy host — and a chat turn
-    // in progress is exactly that.
-    isBusy: () => app.activeStreams > 0 || ai.activeStreams > 0,
-    onShutdown: () => {
-      ai.abortAll('the application is shutting down');
-      app.abortAll('the application is shutting down');
-      // Checkpoint the WAL and close the handle. Skipping this leaves a
-      // database that needs its sidecar files to be readable.
-      if (state.ok) state.store.close();
-    },
+    register: (bridge) => instance.register(bridge),
+    isBusy: () => instance.isBusy(),
+    onShutdown: () => instance.shutdown('the application is shutting down'),
   });
 
   return await running.done;

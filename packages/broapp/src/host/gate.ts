@@ -17,7 +17,7 @@
 import { createHash } from 'node:crypto';
 
 import type { Effect } from '../shared/contract.ts';
-import { INTERNAL_ERROR_MESSAGE, PublicError, publicError } from '../shared/errors.ts';
+import { INTERNAL_ERROR_MESSAGE, isPublicError, publicError } from '../shared/errors.ts';
 
 import type { HostLogger } from './app.ts';
 
@@ -126,6 +126,19 @@ export interface Gate {
   readonly appId: string;
   readonly releaseId: string;
   readonly mode: ExecutionMode;
+  /** True while the gate is holding back everything that changes anything. */
+  readonly paused: boolean;
+  /**
+   * Stop admitting work that changes anything.
+   *
+   * For draining before an update: the application goes on answering questions
+   * while it is being replaced, and stops accepting new writes. `reason` is
+   * shown to whoever asked, so it should say what is happening rather than
+   * that something went wrong.
+   */
+  pause(reason: string): void;
+  /** Admit everything again. */
+  resume(): void;
   /**
    * Decide, ask if needed, record, run.
    *
@@ -197,6 +210,8 @@ export function createGate(options: GateOptions): Gate {
   const confirmTimeoutMs = options.confirmTimeoutMs ?? DEFAULT_CONFIRM_TIMEOUT_MS;
   const gateMode: ExecutionMode = options.mode ?? 'live';
   const recorder = options.recorder;
+  /** The reason writes are being held back, or `null` when they are not. */
+  let pausedReason: string | null = null;
 
   /**
    * Write one record.
@@ -220,7 +235,28 @@ export function createGate(options: GateOptions): Gate {
     releaseId: options.releaseId,
     mode: gateMode,
 
+    get paused() {
+      return pausedReason !== null;
+    },
+
+    pause(reason: string) {
+      pausedReason = reason;
+    },
+
+    resume() {
+      pausedReason = null;
+    },
+
     async guard<T>(request: GuardRequest, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+      // A pause is not a decision about this call — it is the application
+      // declining to be asked at all for a moment — so nothing is recorded and
+      // the code is `unavailable` rather than `rejected`. Reads still run: a
+      // draining application that stopped answering questions would look
+      // broken to whoever is still looking at it.
+      if (pausedReason !== null && request.effect !== 'read') {
+        throw publicError.unavailable(pausedReason);
+      }
+
       // Either side may tighten to `preview`; neither may loosen back. A live
       // gate asked to preview obeys, and a preview gate handed `live` in an
       // envelope stays a preview.
@@ -297,7 +333,7 @@ export function createGate(options: GateOptions): Gate {
           mode,
           decision,
           outcome: signal.aborted ? 'cancelled' : 'failed',
-          error: cause instanceof PublicError ? cause.message : INTERNAL_ERROR_MESSAGE,
+          error: isPublicError(cause) ? cause.message : INTERNAL_ERROR_MESSAGE,
           startedAt,
           endedAt: Date.now(),
         });
