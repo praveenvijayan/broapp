@@ -15,7 +15,7 @@
  * should be read as one.
  */
 import { mkdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { createGate, createPendingApprovals, startApp } from 'broapp/host';
 import type { Approver, Gate, HostLogger, RunningApp } from 'broapp/host';
@@ -29,6 +29,9 @@ import { createRunStore, type RunStore } from '../host/run-store.ts';
 import { attachedOnly } from '../host/autoapp.ts';
 
 import { assertAppInstance, assertAppModule, type AppInstance } from './module.ts';
+
+/** Eight hours: Brobridge's default session cookie lifetime. */
+const SUPERVISED_LAUNCH_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 
 /** Exit codes this runtime uses, so a launcher can tell the cases apart. */
 const EXIT = {
@@ -84,7 +87,8 @@ async function loadRelease(
   if (!releaseDir.endsWith(releaseId)) {
     throw new Error(`the release directory ${releaseDir} is not release ${releaseId}`);
   }
-  const entry = join(releaseDir, spec.manifest.entry.host);
+  // Absolute: a relative specifier without `./` is a package name to `import()`.
+  const entry = resolve(releaseDir, spec.manifest.entry.host);
   const module = assertAppModule(await import(entry));
   return { spec, module };
 }
@@ -232,6 +236,14 @@ export async function runChild(argv: readonly string[]): Promise<number> {
       version: releaseId,
       mode: 'background',
       openBrowser: false,
+      // A supervised child's launch URL is not printed anywhere: the launcher
+      // holds it in memory and hands it to the operating system's browser
+      // opener when a person clicks. Brobridge's two-minute default guards a
+      // URL sitting in shell scrollback, which this one never is, and it made
+      // a preview or an activated release unreachable to anyone who clicked
+      // Open more than two minutes after it started. So the token lives as
+      // long as the session cookie it mints.
+      bridge: { launchTokenTtlMs: SUPERVISED_LAUNCH_TOKEN_TTL_MS },
       register: (bridge) => instance.register(bridge),
       isBusy: () => instance.isBusy(),
       onShutdown: async (reason) => {

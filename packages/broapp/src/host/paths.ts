@@ -9,7 +9,7 @@
  * it to the application.
  */
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
 /** The environment variable that overrides the resolved directory. */
@@ -31,7 +31,11 @@ export const DATA_DIR_ENV = 'BROAPP_DATA_DIR';
  */
 export function dataDir(appName: string, env: NodeJS.ProcessEnv = process.env): string {
   const override = env[DATA_DIR_ENV];
-  if (override !== undefined && override !== '') return override;
+  // Absolute, whatever was given. A relative override is convenient at a shell
+  // (`BROAPP_DATA_DIR=./run`), but paths under it are handed to child
+  // processes and to `import()`, and a relative path in an import specifier is
+  // a package name, not a file.
+  if (override !== undefined && override !== '') return resolve(override);
 
   const platform = process.platform;
   if (platform === 'win32') {

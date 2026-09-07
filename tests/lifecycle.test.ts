@@ -38,6 +38,9 @@ const silent = { log: () => undefined };
 describe('data directory', () => {
   test('an override is used verbatim', () => {
     expect(dataDir('demo', { [DATA_DIR_ENV]: '/somewhere/custom' })).toBe('/somewhere/custom');
+    // Relative at the shell is fine; what comes out is absolute, because paths
+    // under it reach child processes and `import()`.
+    expect(dataDir('demo', { [DATA_DIR_ENV]: './run' })).toBe(join(process.cwd(), 'run'));
   });
 
   test('an empty override falls back to the platform location', () => {
