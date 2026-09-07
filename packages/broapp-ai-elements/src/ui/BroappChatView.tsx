@@ -65,6 +65,12 @@ export interface BroappChatViewProps {
   readonly markdown: boolean;
   readonly placeholder: string;
   readonly emptyText: string;
+  /** Offered while the transcript is empty; clicking one sends it. */
+  readonly suggestions?: readonly string[];
+  /** One line under the suggestions, e.g. the keyboard shortcut. */
+  readonly suggestionTip?: string;
+  /** Characters allowed in one message. Default {@link MESSAGE_MAX_LENGTH}. */
+  readonly maxLength?: number;
   onSend(message: { text: string; files: FileUIPart[] }): void;
   onStop(): void;
   onConfirm(callId: string, approve: boolean): void;
@@ -260,6 +266,15 @@ function Pending(): React.ReactElement | null {
   );
 }
 
+/**
+ * What `ai.chat` accepts in one message.
+ *
+ * The contract caps `message` at 20,000 characters, and a person who has typed
+ * that much should learn it from the counter rather than from a refusal after
+ * they press Enter.
+ */
+export const MESSAGE_MAX_LENGTH = 20_000;
+
 /** The sentences an attachment is refused with, by the code the input reports. */
 const ATTACHMENT_ERRORS: Record<'max_files' | 'max_file_size' | 'accept', string> = {
   max_files: 'Up to four images per message.',
@@ -276,11 +291,17 @@ export function BroappChatView({
   markdown,
   placeholder,
   emptyText,
+  suggestions,
+  suggestionTip,
+  maxLength = MESSAGE_MAX_LENGTH,
   onSend,
   onStop,
   onConfirm,
 }: BroappChatViewProps): React.ReactElement {
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
+  // The textarea is uncontrolled — the form is what reads it on submit — so
+  // the count is kept beside it rather than derived from a value in state.
+  const [typed, setTyped] = React.useState(0);
   const busy = status === 'submitted' || status === 'streaming';
   // The loader stands in for the reply until the first word of it arrives.
   const writing = messages.at(-1)?.parts.some((part) => part.type === 'text') === true;
@@ -295,7 +316,26 @@ export function BroappChatView({
           {messages.length === 0 ? (
             // The caller's sentence is the whole empty state; the component's
             // own second line would say the same thing twice.
-            <ConversationEmptyState description="" title={emptyText} />
+            <>
+              <ConversationEmptyState description="" title={emptyText} />
+              {suggestions === undefined || suggestions.length === 0 ? null : (
+                <div className="broapp-chat__suggestions">
+                  {suggestions.map((suggestion) => (
+                    <button
+                      className="broapp-chat__suggestion"
+                      key={suggestion}
+                      onClick={() => onSend({ text: suggestion, files: [] })}
+                      type="button"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                  {suggestionTip === undefined ? null : (
+                    <p className="broapp-chat__tip">{suggestionTip}</p>
+                  )}
+                </div>
+              )}
+            </>
           ) : null}
           {messages.map((message) => (
             <Message from={message.role} key={message.id}>
@@ -342,17 +382,28 @@ export function BroappChatView({
         }
         onSubmit={(submitted) => {
           setAttachmentError(null);
+          // The form resets itself on submit, so the count has to follow it.
+          setTyped(0);
           onSend({ text: submitted.text, files: submitted.files });
         }}
       >
         <Pending />
         <PromptInputBody>
-          <PromptInputTextarea placeholder={placeholder} />
+          <PromptInputTextarea
+            maxLength={maxLength}
+            onChange={(event) => setTyped(event.currentTarget.value.length)}
+            placeholder={placeholder}
+          />
         </PromptInputBody>
         <PromptInputFooter>
           <PromptInputTools>
             <AddImages />
           </PromptInputTools>
+          <span
+            className={`broapp-chat__counter${typed >= maxLength ? ' broapp-chat__counter--full' : ''}`}
+          >
+            {typed} / {maxLength}
+          </span>
           <PromptInputSubmit onStop={onStop} status={status} />
         </PromptInputFooter>
       </PromptInput>

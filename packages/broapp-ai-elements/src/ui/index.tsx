@@ -7,9 +7,17 @@
  * `broapp-ai-elements/styles.css`.
  */
 export { BroappChat } from './BroappChat.tsx';
-export type { BroappChatProps } from './BroappChat.tsx';
+export type { BroappChatControls, BroappChatProps } from './BroappChat.tsx';
 
-export { BroappChatView, Response, ToolApproval } from './BroappChatView.tsx';
+export { BroappChatDrawer, BroappChatToggle } from './BroappChatDrawer.tsx';
+export type {
+  BroappChatDrawerProps,
+  BroappChatToggleProps,
+} from './BroappChatDrawer.tsx';
+
+export { transcriptOf } from './transcript.ts';
+
+export { BroappChatView, MESSAGE_MAX_LENGTH, Response, ToolApproval } from './BroappChatView.tsx';
 export type { BroappChatViewProps, ToolApprovalProps } from './BroappChatView.tsx';
 
 export { Loader } from './Loader.tsx';

@@ -31,8 +31,26 @@ describe('styles.css', () => {
     expect(committed).not.toContain('https:');
   });
 
-  test('is scoped to the panel and follows the scheme', () => {
+  test('is scoped to the panel, and to the drawer around it', () => {
     expect(committed).toContain('.broapp-chat');
-    expect(committed).toContain('prefers-color-scheme');
+    expect(committed).toContain('.broapp-chat-drawer');
+    expect(committed).toContain('.broapp-chat-toggle');
+  });
+
+  test('follows the page\'s colour scheme, never the operating system\'s', () => {
+    // `light-dark()` resolves against the inherited `color-scheme`, so the
+    // panel is light inside a light page even on a machine set to dark. A
+    // `prefers-color-scheme` query anywhere in here would ask the machine
+    // instead — including the ones Tailwind's `dark:` variant generates.
+    expect(committed).toContain('light-dark(');
+    expect(committed).not.toContain('prefers-color-scheme');
+    // The one media query that should still be here.
+    expect(committed).toContain('prefers-reduced-motion');
+  });
+
+  test('reproduces the part of preflight a form control needs', () => {
+    // Without this the textarea takes the page's colour on the panel's ground,
+    // which in a dark page meant typing invisibly.
+    expect(committed).toContain('.broapp-chat :where(input,textarea,select,button)');
   });
 });

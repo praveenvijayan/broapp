@@ -23,6 +23,7 @@ stays as the no-dependency option.
 | 04 | `04-adoption-docs-release.md` | Notes example and launcher on `BroappChat`; docs, skill, site, packing, dry runs; manual run with a pasted screenshot. | Full `bun run check`, notes build + smoke, launcher build, both dry runs; the manual-run table filled in. |
 | 04b | `04b-vision-capability.md` | Fix-up from report 04: the compatible adapter learns vision from Ollama's `/api/show` or a known OpenAI id; custom servers are assumed able. | Provider tests green; rows 8–11 and 13 re-run with a vision model. |
 | 04c | `04c-attachment-race.md` | Fix-up from report 04b: a send waits for pending `FileReader` reads; the chip shows immediately; submit disabled while pending. | Helper tests green; manual rows A–D pass. |
+| 04d | `04d-drawer-and-scheme.md` | Panel follows the page's `color-scheme` via `light-dark()`; scoped form-control reset; `BroappChatDrawer` + `BroappChatToggle`; launcher moves Engineer into the drawer. | View/CSS tests green; manual rows 1–10 pass with macOS in dark mode. |
 | 05 | `05-backlog.md` | Not a build prompt. What comes next and why it waited. | — |
 
 ## How to run one prompt

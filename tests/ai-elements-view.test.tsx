@@ -9,7 +9,10 @@ import { describe, expect, test } from 'bun:test';
 import { renderToString } from 'react-dom/server';
 
 import type { ToolUIPart } from 'ai';
-import { BroappChatView } from 'broapp-ai-elements/ui';
+import { aiContract } from 'broapp/ai';
+import { AiProvider } from 'broapp/ai/react';
+import { BroappProvider } from 'broapp/react';
+import { BroappChatDrawer, BroappChatToggle, BroappChatView, transcriptOf } from 'broapp-ai-elements/ui';
 import type { BroappUIMessage } from 'broapp-ai-elements';
 
 const NOW = 1_700_000_000_000;
@@ -175,5 +178,124 @@ describe('the rest of the panel', () => {
 
   test('carries the placeholder into the box', () => {
     expect(render()).toContain('Ask about these notes');
+  });
+});
+
+describe('suggestions', () => {
+  const three = ['What applications do I have?', 'Add a field to notes', 'Show me the last run'];
+
+  test('are offered while nothing has been said, each as a button', () => {
+    const html = render({ suggestions: three, suggestionTip: 'Tip: you can open and close chat with \u2318 I' });
+
+    for (const suggestion of three) expect(html).toContain(`>${suggestion}</button>`);
+    expect(html).toContain('Tip: you can open and close chat with \u2318 I');
+  });
+
+  test('are gone once the conversation has started', () => {
+    const html = render({ messages: [assistant('hello')], suggestions: three });
+
+    expect(html).not.toContain(three[0] ?? '');
+  });
+
+  test('carry no tip when there is no shortcut', () => {
+    const html = render({ suggestions: three });
+
+    expect(html).toContain(three[0] ?? '');
+    expect(html).not.toContain('Tip:');
+  });
+});
+
+describe('the character counter', () => {
+  test("starts at nothing, out of the contract's cap", () => {
+    expect(render()).toContain('0 / 20000');
+  });
+
+  test('counts against whatever cap the caller set', () => {
+    const html = render({ maxLength: 1000 });
+
+    expect(html).toContain('0 / 1000');
+    expect(html).toContain('maxLength="1000"');
+  });
+});
+
+describe('the drawer', () => {
+  /**
+   * The drawer, inside the providers `BroappChat` needs.
+   *
+   * `renderToString` runs no effects, so no connection is opened and the AI
+   * settings are never fetched: the chat below the header renders its
+   * "checking" state. The header, the aside and the shortcut are what this
+   * file can see, and they are what these cases are about.
+   */
+  function drawer(overrides: Partial<Parameters<typeof BroappChatDrawer>[0]> = {}): string {
+    return renderToString(
+      <BroappProvider contract={aiContract}>
+        <AiProvider>
+          <BroappChatDrawer onOpenChange={() => undefined} open title="Engineer" {...overrides} />
+        </AiProvider>
+      </BroappProvider>,
+    ).replaceAll('<!-- -->', '');
+  }
+
+  test('is hidden when closed and shown when open', () => {
+    expect(drawer({ open: false })).toContain('hidden=""');
+    expect(drawer()).not.toContain('hidden=""');
+  });
+
+  test('names itself, and offers the three header actions', () => {
+    const html = drawer();
+
+    expect(html).toContain('aria-label="Engineer"');
+    expect(html).toContain('role="complementary"');
+    expect(html).toContain('aria-label="Copy transcript"');
+    expect(html).toContain('aria-label="Clear conversation"');
+    expect(html).toContain('aria-label="Close"');
+  });
+
+  test('shows the description it was given', () => {
+    const html = drawer({ description: 'Ask for a change to notes.' });
+
+    expect(html).toContain('Ask for a change to notes.');
+  });
+
+  test('takes its width from a custom property, so a narrow window can win', () => {
+    expect(drawer({ width: '30rem' })).toContain('--broapp-chat-drawer-width:30rem');
+  });
+});
+
+describe('the toggle', () => {
+  test('says whether the drawer is open, and how to open it', () => {
+    const html = renderToString(<BroappChatToggle onToggle={() => undefined} open />);
+
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('<kbd>\u2318 I</kbd>');
+    expect(html).toContain('Ask AI');
+  });
+
+  test('shows no key when there is no shortcut', () => {
+    const html = renderToString(
+      <BroappChatToggle onToggle={() => undefined} open={false} shortcutKey={null} />,
+    );
+
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain('<kbd>');
+  });
+});
+
+describe('the transcript', () => {
+  test('is who said what, with a line for each tool call', () => {
+    const tool: ToolUIPart = {
+      type: 'tool-notes.create',
+      toolCallId: 'call-1',
+      state: 'output-available',
+      input: { title: 'New' },
+      output: { id: 'n1' },
+    };
+    const text = transcriptOf([
+      { id: 'm1', role: 'user', parts: [{ type: 'text', text: 'add a note' }] },
+      { id: 'm2', role: 'assistant', parts: [tool, { type: 'text', text: 'Added it.' }] },
+    ]);
+
+    expect(text).toBe('You: add a note\n\nAssistant: Used notes.create\nAdded it.');
   });
 });

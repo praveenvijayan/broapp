@@ -1,11 +1,12 @@
 /*
  * The panel's stylesheet.
  *
- * Everything is scoped to `.broapp-chat`, and every colour is a shadcn token
- * mapped onto the custom properties an application already defines for its own
- * interface — so the panel takes on the application's colours instead of
- * imposing its own. Each mapping carries a literal fallback, in light and in
- * dark, because an application that defines none must still be legible.
+ * Everything is scoped to `.broapp-chat`, `.broapp-chat-drawer` and
+ * `.broapp-chat-toggle`, and every colour is a shadcn token mapped onto the
+ * custom properties an application already defines for its own interface — so
+ * the panel takes on the application's colours instead of imposing its own.
+ * Each mapping carries a literal fallback, in light and in dark, because an
+ * application that defines none must still be legible.
  *
  * No preflight: this file styles one panel inside somebody else's page, and a
  * reset that reached the rest of that page would be a bug. No `@import` of a
@@ -17,6 +18,18 @@
 
 @source "./";
 @source "../../node_modules/streamdown/dist";
+
+/*
+ * Tailwind's `dark:` variant asks the operating system. Nothing here may.
+ *
+ * The utilities it generates come from streamdown's own markup, and every
+ * token they would set — `--background`, `--input`, `--destructive` — is
+ * already a `light-dark()` pair below, so the panel is right in either scheme
+ * without them. Pointed at an attribute nothing sets, the variant compiles to
+ * a selector instead of a `prefers-color-scheme` query, and the built
+ * stylesheet carries no reference to the OS scheme at all.
+ */
+@custom-variant dark (&:where([data-broapp-chat-dark] *));
 
 @theme inline {
   --color-background: var(--background);
@@ -45,7 +58,21 @@
 }
 
 @layer base {
-  .broapp-chat {
+  /*
+   * The scheme is the page's, never the operating system's.
+   *
+   * `light-dark()` resolves against the element's own `color-scheme`, which is
+   * inherited: a page that declares nothing is light, one that declares
+   * `color-scheme: light dark` follows the OS, one that forces `dark` is dark.
+   * A `prefers-color-scheme` query here would ask the OS instead, and paint a
+   * dark panel into a light page — which is what the launcher did. Nothing
+   * below sets `color-scheme`; inheriting it is the whole mechanism, and it is
+   * what makes the panel match the launcher (light) and the notes example
+   * (either) without knowing anything about either one.
+   */
+  .broapp-chat,
+  .broapp-chat-drawer,
+  .broapp-chat-toggle {
     /*
      * `--accent` and `--border` already mean something in a Broapp
      * application — the brand colour and the hairline — so the shadcn tokens
@@ -53,63 +80,73 @@
      * `--border-color`. Mapping them directly would make every hover state
      * the brand colour.
      */
-    --background: var(--bg, #ffffff);
-    --foreground: var(--text, #1a1a1a);
-    --card: var(--surface, #ffffff);
-    --card-foreground: var(--text, #1a1a1a);
-    --popover: var(--surface, #ffffff);
-    --popover-foreground: var(--text, #1a1a1a);
-    --primary: var(--accent, #2563eb);
-    --primary-foreground: var(--accent-contrast, #ffffff);
-    --secondary: var(--bg, #f3f4f6);
-    --secondary-foreground: var(--text, #1a1a1a);
-    --muted: var(--bg, #f3f4f6);
-    --muted-foreground: var(--text-muted, #666666);
-    --accent-surface: var(--bg, #f3f4f6);
-    --accent-foreground: var(--text, #1a1a1a);
-    --destructive: var(--bad, #b3261e);
-    --destructive-foreground: #ffffff;
-    --border-color: var(--border, #dddddd);
-    --input: var(--border, #dddddd);
-    --ring: var(--focus, var(--accent, #2563eb));
+    --background: var(--bg, light-dark(#ffffff, #16171a));
+    --foreground: var(--text, light-dark(#1a1a1a, #eceef1));
+    --card: var(--surface, light-dark(#ffffff, #1e2024));
+    --card-foreground: var(--text, light-dark(#1a1a1a, #eceef1));
+    --popover: var(--surface, light-dark(#ffffff, #1e2024));
+    --popover-foreground: var(--text, light-dark(#1a1a1a, #eceef1));
+    --primary: var(--accent, light-dark(#2563eb, #6fd3b4));
+    --primary-foreground: var(--accent-contrast, light-dark(#ffffff, #10231e));
+    /*
+     * A surface a shade away from the ground: hovers, quiet buttons, the
+     * assistant's own bubble. The two scheme blocks this replaced read it from
+     * `--bg` in light and `--surface` in dark; one property cannot name two,
+     * and `--surface` is the one that means "a panel, not the page".
+     */
+    --secondary: var(--surface, light-dark(#f3f4f6, #1e2024));
+    --secondary-foreground: var(--text, light-dark(#1a1a1a, #eceef1));
+    --muted: var(--surface, light-dark(#f3f4f6, #1e2024));
+    --muted-foreground: var(--text-muted, light-dark(#666666, #a2a7b0));
+    --accent-surface: var(--surface, light-dark(#f3f4f6, #1e2024));
+    --accent-foreground: var(--text, light-dark(#1a1a1a, #eceef1));
+    --destructive: var(--bad, light-dark(#b3261e, #f08a76));
+    --destructive-foreground: light-dark(#ffffff, #16171a);
+    --border-color: var(--border, light-dark(#dddddd, #32353b));
+    --input: var(--border, light-dark(#dddddd, #32353b));
+    --ring: var(--focus, var(--accent, light-dark(#2563eb, #6fd3b4)));
     --radius: var(--radius, 8px);
-    --warning: var(--pending, #8a6a12);
-    --warning-bg: color-mix(in srgb, var(--pending, #8a6a12) 12%, transparent);
+    --warning: var(--pending, light-dark(#8a6a12, #e0b95a));
+    --warning-bg: color-mix(in srgb, var(--pending, light-dark(#8a6a12, #e0b95a)) 12%, transparent);
+  }
 
+  .broapp-chat,
+  .broapp-chat-drawer {
     color: var(--foreground);
     background: var(--background);
   }
 
-  @media (prefers-color-scheme: dark) {
-    .broapp-chat {
-      --background: var(--bg, #16171a);
-      --foreground: var(--text, #eceef1);
-      --card: var(--surface, #1e2024);
-      --card-foreground: var(--text, #eceef1);
-      --popover: var(--surface, #1e2024);
-      --popover-foreground: var(--text, #eceef1);
-      --primary: var(--accent, #6fd3b4);
-      --primary-foreground: var(--accent-contrast, #10231e);
-      --secondary: var(--surface, #1e2024);
-      --secondary-foreground: var(--text, #eceef1);
-      --muted: var(--surface, #1e2024);
-      --muted-foreground: var(--text-muted, #a2a7b0);
-      --accent-surface: var(--surface, #1e2024);
-      --accent-foreground: var(--text, #eceef1);
-      --destructive: var(--bad, #f08a76);
-      --destructive-foreground: #16171a;
-      --border-color: var(--border, #32353b);
-      --input: var(--border, #32353b);
-      --ring: var(--focus, var(--accent, #6fd3b4));
-      --warning: var(--pending, #e0b95a);
-    }
+  /*
+   * The part of Tailwind's preflight the panel cannot do without.
+   *
+   * Preflight is off, and a browser does not inherit `color` or `font` into a
+   * form control: the textarea would take the page's own text colour on the
+   * panel's ground, which in a dark page meant typing invisibly. `:where()`
+   * keeps the specificity at zero, so every vendored utility class still wins.
+   */
+  .broapp-chat :where(input, textarea, select, button) {
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    background-color: transparent;
+    border-radius: 0;
+  }
+
+  .broapp-chat :where(input, textarea)::placeholder {
+    color: var(--muted-foreground);
+    opacity: 1;
+  }
+
+  .broapp-chat :where(button) {
+    cursor: pointer;
   }
 
   /* Motion is decoration here; a person who asked for less must get less. */
   @media (prefers-reduced-motion: reduce) {
     .broapp-chat *,
     .broapp-chat *::before,
-    .broapp-chat *::after {
+    .broapp-chat *::after,
+    .broapp-chat-drawer {
       animation: none !important;
       transition: none !important;
     }
@@ -146,5 +183,158 @@
     max-height: 160px;
     width: auto;
     border-radius: var(--radius);
+  }
+
+  .broapp-chat__suggestions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+    margin: 0.75rem 0 0;
+  }
+
+  .broapp-chat__suggestion {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--primary);
+    font: inherit;
+    text-align: left;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .broapp-chat__tip {
+    margin: 0.6rem 0 0;
+    color: var(--muted-foreground);
+    font-size: 0.85rem;
+  }
+
+  .broapp-chat__counter {
+    margin-left: auto;
+    padding: 0 0.4rem;
+    color: var(--muted-foreground);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .broapp-chat__counter--full {
+    color: var(--destructive);
+  }
+
+  /*
+   * The drawer, and the button that opens it.
+   *
+   * Written by hand rather than with utility classes: neither is vendored, and
+   * the toggle lives in the application's own header, outside `.broapp-chat`,
+   * where the utility layer's tokens would not be defined.
+   */
+  .broapp-chat-drawer {
+    position: fixed;
+    inset-block: 0;
+    right: 0;
+    z-index: 900;
+    display: flex;
+    flex-direction: column;
+    /* Set inline by the component, so the media query below can still win. */
+    width: var(--broapp-chat-drawer-width, 26rem);
+    max-width: 100%;
+    border-left: 1px solid var(--border-color);
+    box-shadow: -8px 0 24px rgb(0 0 0 / 0.08);
+    animation: broapp-chat-drawer-in 150ms ease-out;
+  }
+
+  /* `display: flex` above would otherwise beat `[hidden]`'s `display: none`. */
+  .broapp-chat-drawer[hidden] {
+    display: none;
+  }
+
+  @media (max-width: 40rem) {
+    .broapp-chat-drawer {
+      width: 100%;
+    }
+  }
+
+  @keyframes broapp-chat-drawer-in {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+
+  .broapp-chat-drawer__header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.7rem 0.9rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .broapp-chat-drawer__title {
+    flex: 1 1 auto;
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 620;
+  }
+
+  .broapp-chat-drawer__action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+
+  .broapp-chat-drawer__action:hover {
+    background: var(--secondary);
+    color: var(--foreground);
+  }
+
+  .broapp-chat-drawer__description {
+    margin: 0;
+    padding: 0.7rem 0.9rem 0;
+    color: var(--muted-foreground);
+    font-size: 0.9rem;
+  }
+
+  .broapp-chat-drawer__body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0.9rem;
+  }
+
+  .broapp-chat-drawer__body > .broapp-chat {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .broapp-chat-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--secondary);
+    color: var(--foreground);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .broapp-chat-toggle kbd {
+    font: inherit;
+    font-size: 0.85em;
+    color: var(--muted-foreground);
   }
 }

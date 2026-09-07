@@ -16,6 +16,23 @@
   --launcher-accent: #2a5bd7;
   --launcher-error-surface: #fdecec;
   --launcher-error-text: #a12222;
+
+  /*
+   * The chat drawer reads an application's own custom properties and falls
+   * back to its own literals only when there are none. Aliasing them here is
+   * what makes the engineer look like the launcher rather than like a
+   * stylesheet's idea of a panel. The launcher is light, declares no
+   * `color-scheme`, and so the drawer resolves its `light-dark()` pairs light
+   * too — which is the bug this replaced.
+   */
+  --bg: var(--launcher-ground);
+  --surface: var(--launcher-surface);
+  --border: var(--launcher-border);
+  --text: var(--launcher-text);
+  --text-muted: var(--launcher-muted);
+  --accent: var(--launcher-accent);
+  --accent-contrast: #ffffff;
+  --bad: var(--launcher-error-text);
 }
 
 * {
@@ -31,8 +48,8 @@ body {
 
 .launcher {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
-  grid-template-areas: 'header header' 'main aside';
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'header' 'main';
   gap: 1.25rem;
   max-width: 78rem;
   margin: 0 auto;
@@ -40,10 +57,16 @@ body {
   min-height: 100vh;
 }
 
-@media (max-width: 60rem) {
-  .launcher {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: 'header' 'main' 'aside';
+/*
+ * The drawer is fixed above the page rather than in the flow, so the page has
+ * to give it room: without this the header's own buttons — Settings among
+ * them — end up underneath it, and "keep using the page beside it" stops being
+ * true. Under 40rem the drawer is the whole window and there is nothing to
+ * make room for.
+ */
+@media (min-width: 40rem) {
+  .launcher--drawer-open {
+    margin-right: 26rem;
   }
 }
 
@@ -63,14 +86,6 @@ body {
   min-width: 0;
 }
 
-.launcher__aside {
-  grid-area: aside;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  min-width: 0;
-}
-
 .launcher__title {
   margin: 0;
   font-size: 1.4rem;
@@ -78,7 +93,6 @@ body {
   color: var(--launcher-heading);
 }
 
-.launcher__aside-title,
 .launcher__card-title {
   margin: 0;
   font-size: 1rem;

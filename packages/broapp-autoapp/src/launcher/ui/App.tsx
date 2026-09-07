@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AiSettings } from 'broapp/ai/react';
-import { BroappChat } from 'broapp-ai-elements/ui';
+import { BroappChatDrawer, BroappChatToggle } from 'broapp-ai-elements/ui';
 import { useConnection, useOperation } from 'broapp/react';
 import { announcePending, browserSurface } from 'broapp-autoapp/react';
 
@@ -24,6 +24,21 @@ import { AppsTable } from './AppsTable.tsx';
 import { CandidatePanel } from './CandidatePanel.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
 
+/** Where the drawer's open state is remembered. */
+const ENGINEER_OPEN = 'broapp-autoapp:engineer-open';
+
+/**
+ * Three things the engineer can actually do, offered before anything is said.
+ *
+ * Each maps onto a tool it has: `apps.list`, `source.read` plus `source.edit`,
+ * and the journal behind `spec.read` — see `engineer/instructions.ts`.
+ */
+const ENGINEER_SUGGESTIONS = [
+  'What applications do I have?',
+  'Add a field to notes',
+  'What changed in the last candidate?',
+];
+
 export function App(): React.ReactElement {
   const connection = useConnection();
   const apps = useOperation<LauncherContract, 'launcher.appsList'>('launcher.appsList');
@@ -32,6 +47,24 @@ export function App(): React.ReactElement {
 
   const [selected, setSelected] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  // Whether the engineer's drawer is open, remembered across reloads: somebody
+  // who works with it open should not have to open it again after every build.
+  // Storage can be unavailable or full, and neither is worth a broken page.
+  const [engineerOpen, setEngineerOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(ENGINEER_OPEN) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const setEngineer = useCallback((open: boolean): void => {
+    setEngineerOpen(open);
+    try {
+      window.localStorage.setItem(ENGINEER_OPEN, String(open));
+    } catch {
+      // Nothing to do: the drawer still works, it just forgets.
+    }
+  }, []);
   // Bumped whenever something the engineer did may have changed what the
   // panels below show.
   const [changed, setChanged] = useState(0);
@@ -71,7 +104,7 @@ export function App(): React.ReactElement {
   const notOpened = open.data?.opened === false;
 
   return (
-    <div className="launcher">
+    <div className={`launcher${engineerOpen ? ' launcher--drawer-open' : ''}`}>
       <header className="launcher__header">
         <div>
           <h1 className="launcher__title">Your applications</h1>
@@ -91,6 +124,11 @@ export function App(): React.ReactElement {
           >
             Settings
           </button>
+          <BroappChatToggle
+            label="Ask AI"
+            onToggle={() => setEngineer(!engineerOpen)}
+            open={engineerOpen}
+          />
         </div>
       </header>
 
@@ -133,25 +171,23 @@ export function App(): React.ReactElement {
         )}
       </main>
 
-      <aside className="launcher__aside">
-        <h2 className="launcher__aside-title">Engineer</h2>
-        <p className="launcher__lede">
-          Ask for a change to {selected ?? 'an application'}. It will propose one, build it, and
-          show you a preview running on a copy of your data before anything is replaced.
-        </p>
-        <BroappChat
-          refs={selected === null ? [] : [`app:${selected}`]}
-          placeholder="Ask for a change…"
-          onAwaiting={onAwaiting}
-          onToolResult={(call) => {
-            // Anything that built, previewed or activated changes what the
-            // panels should be showing.
-            if (call.status === 'done' && !call.tool.startsWith('source.read')) {
-              setChanged((count) => count + 1);
-            }
-          }}
-        />
-      </aside>
+      <BroappChatDrawer
+        description={`Ask for a change to ${selected ?? 'an application'}. It will propose one, build it, and show you a preview running on a copy of your data before anything is replaced.`}
+        onAwaiting={onAwaiting}
+        onOpenChange={setEngineer}
+        onToolResult={(call) => {
+          // Anything that built, previewed or activated changes what the
+          // panels should be showing.
+          if (call.status === 'done' && !call.tool.startsWith('source.read')) {
+            setChanged((count) => count + 1);
+          }
+        }}
+        open={engineerOpen}
+        placeholder="Ask for a change…"
+        refs={selected === null ? [] : [`app:${selected}`]}
+        suggestions={ENGINEER_SUGGESTIONS}
+        title="Engineer"
+      />
     </div>
   );
 }

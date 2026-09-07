@@ -105,6 +105,22 @@ import { BroappChat } from 'broapp-ai-elements/ui';
 import 'broapp-ai-elements/styles.css';
 ```
 
+**`BroappChatDrawer`, from the same package.** The same panel at the right edge
+of the window, with a header that copies or clears the conversation, one
+suggestion list while the transcript is empty, a character counter against the
+20,000-character cap, and `⌘`/`Ctrl` + a key to open and close it. There is no
+backdrop and no scroll lock: the page beside it stays usable, which is the
+point of a drawer rather than a dialog. `BroappChatToggle` is the button that
+opens it, meant for the application's own header. The conversation is mounted
+whether the drawer is open or not, so closing it while a model is answering
+keeps the answer.
+
+```tsx
+const [open, setOpen] = useState(false);
+<BroappChatToggle open={open} onToggle={() => setOpen(!open)} />
+<BroappChatDrawer open={open} onOpenChange={setOpen} title="Engineer" suggestions={[…]} />
+```
+
 Rendering markdown means turning text a model wrote — after it has been shown
 documents from the user's own machine — into elements. So the renderer is
 narrowed rather than trusted: links and images are removed (their words are
@@ -329,6 +345,13 @@ cancellation.
   reports capabilities, so an unrecognised server is never refused an image on
   a guess; if the model cannot read it, the provider's own error is what you
   get.
+- **The panel's colours need `light-dark()`.** `broapp-ai-elements/styles.css`
+  resolves its light and dark literals against the page's own `color-scheme`
+  rather than against the operating system, so the panel is light inside a
+  light page on a machine set to dark. That function needs Chrome 123, Safari
+  17.5 or Firefox 120; an older browser paints the light half of every pair.
+  An application that defines `--bg`, `--text` and the rest is unaffected — its
+  own values are used, whichever browser reads them.
 - **One turn at a time.** Sending while a turn is running is ignored.
 - **`ai.modelsList` needs a configured provider**, so a settings panel cannot
   preview another provider's models before switching to it.
