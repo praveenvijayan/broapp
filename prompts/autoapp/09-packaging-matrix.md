@@ -10,9 +10,24 @@ macOS and Windows; dependencies for a candidate build come from a fixed
 packaged set, not a warmed cache; the three offline tiers are documented
 with the evidence; and `broapp-autoapp` is publishable.
 
+## Before starting
+
+Report 08b's session left prompt 09 steps 1 to 3 in `git stash` as
+`stash@{0}: prompt 09 steps 1-3`. Run `git stash list`; if it is there,
+`git stash pop`, run `bun run check`, and continue from step 4. That
+stash also carries a real fix: `bun build --minify` constant-folds
+`process.env.NODE_ENV`, so the crash-injection guard reads `Bun.env`
+instead. Keep it. If the stash is absent, do steps 1 to 3 as written.
+
+Pushing the branch is required by the CI criterion and is the owner's
+decision. If the owner has not said "push" in the run instruction, do
+every local step, write the CI job, and record the CI criterion as
+**unverified** in the report and in `docs/autoapp/packaging.md`. Never
+push without that word.
+
 ## Read first
 
-- `prompts/autoapp/00-common-rules.md` and every report so far, especially `02-spike.md` criteria 6 to 8 and any Windows notes in 03 and 05.
+- `prompts/autoapp/00-common-rules.md` and every report so far, especially `02-spike.md` criteria 6 to 8, `08b-fixups.md`, and any Windows notes in 03 and 05.
 - `.github/workflows/ci.yml`, `release.yml`, `publish.yml`.
 - `scripts/release-dry-run.ts`, `scripts/smoke-binary.ts`, `scripts/pack-local.ts`.
 - `packages/broapp/src/cli/targets.ts`.
@@ -29,13 +44,15 @@ A candidate build must resolve `import`s without network. The design is
   dependencies may be fetched; the report from prompt 02 says whether
   `--offline` from a warmed cache also works, but nothing here relies on
   it.
-- `buildCandidate` runs with the environment variable `BUN_OFFLINE=1`
-  if Bun honours it (check `bun-types` and `bun --help` output for the
-  current offline flag; record what exists) and, regardless, asserts
-  before bundling that every top-level dependency in `package.json`
-  resolves under `source/node_modules`. A missing one is a `host` build
-  problem naming the package, with the sentence "dependencies are installed
-  when an application is imported; re-import to add one".
+- There is **no offline flag to rely on**. Report 08b established that
+  Bun 1.4.0 has no `BUN_OFFLINE` variable, `--offline` is accepted and still
+  downloads, and `--prefer-offline` only skips staleness checks. So
+  `buildCandidate` asserts, before bundling, that every top-level
+  dependency in `package.json` resolves under `source/node_modules`. A
+  missing one is a `host` build problem naming the package, with the
+  sentence "dependencies are installed when an application is imported;
+  re-import to add one". No document may claim that a flag prevents a
+  socket from opening.
 - The engineer's instructions (prompt 07) already forbid adding
   dependencies; add the same sentence there.
 
@@ -98,10 +115,13 @@ Record any test that had to be skipped on a platform, with the reason, in
 ## Step 3 — the three tiers, tested
 
 Add `tests/autoapp-offline.test.ts`, run in the matrix job. Each case
-runs the compiled launcher with the environment variable `BUN_OFFLINE=1`
-(or whatever Step 1 found) **and** with a `fetch` that would fail (the
-launcher passes `fetch` into `createAi`; in tests the launcher accepts
-`AUTOAPP_TEST_NO_NETWORK=1` to install a failing `fetch` there):
+runs the compiled launcher with a `fetch` that would fail (the launcher
+passes `fetch` into `createAi`; in tests the launcher accepts
+`AUTOAPP_TEST_NO_NETWORK=1` to install a failing `fetch` there). Network
+absence for `bun install` itself cannot be proven by a flag; the "run
+offline" case proves it structurally instead: delete the whole source
+workspace and assert the release still serves, and assert the host bundle
+imports only `bun:` and Node builtins.
 
 | Tier | Test | Documented guarantee if it passes |
 |---|---|---|

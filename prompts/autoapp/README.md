@@ -7,7 +7,7 @@ using it, with an engineer built into the experience. It lives on the
 field on the contract. Nothing lands on `main` until every stage below has
 cleared.
 
-Eleven prompts, run in order, one per agent session. Each prompt is
+Twelve prompts, run in order, one per agent session. Each prompt is
 self-contained but assumes the previous ones landed. Every prompt ends by
 writing a short report to `prompts/autoapp/reports/NN-<name>.md`; the next
 prompt starts by reading the reports so far.
@@ -24,6 +24,7 @@ prompt starts by reading the reports so far.
 | 07 | `07-engineer-service.md` | The AI engineer: tools that read the spec, propose a change, build a candidate, preview it, and request activation. All through the gate. The Notes demo. | The full loop runs by hand. |
 | 08 | `08-mcp-adapter.md` | An MCP server over the same gate, approvals answered from the Broapp tab, denied when no tab is attached. | Tests green. Manual check with an MCP client. |
 | 08b | `08b-fixups.md` | Release identity covers the whole specification; hunk edits for the engineer; no `instanceof` across the release boundary; the demo rerun with a capable model. | Tests green. Demo log with one row per step. |
+| 08c | `08c-engineer-usability.md` | Indentation-tolerant hunks, `apps.list`, a ten-minute confirm window for the engineer with a countdown. | Tests green. Demo step 3 rerun. |
 | 09 | `09-packaging-matrix.md` | Linux and Windows coverage for the supervision chain; fixed packaged dependencies; the three offline tiers documented as tested. | CI green on every OS. |
 | 10 | `10-phase-2-backlog.md` | Not a build prompt. What was deliberately deferred and why. | — |
 
