@@ -279,7 +279,9 @@ describe('the toggle', () => {
     const html = renderToString(<BroappChatToggle onToggle={() => undefined} open />);
 
     expect(html).toContain('aria-expanded="true"');
-    expect(html).toContain('<kbd>\u2318 I</kbd>');
+    // Bun's `navigator.platform` is the host's, so this reads ⌘ on a Mac and
+    // Ctrl on the Linux runner. Either is right; what matters is the key.
+    expect(html).toMatch(/<kbd>(\u2318|Ctrl) I<\/kbd>/);
     expect(html).toContain('Ask AI');
   });
 
