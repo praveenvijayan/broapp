@@ -47,7 +47,14 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  /*
+   * The `:not()` is the chat panel's convention: a page that has said
+   * `<html data-scheme="light">` stays light whatever the machine says, and
+   * the panel beside it reads the same attribute. This example does not offer
+   * a forced *dark*, because its palette is this one media query and a second
+   * copy of it would be a theme switcher the example does not need.
+   */
+  :root:not([data-scheme='light']) {
     --bg: #16171a;
     --surface: #1e2024;
     --border: #32353b;

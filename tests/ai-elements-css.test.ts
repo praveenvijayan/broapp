@@ -52,14 +52,18 @@ describe('styles.css', () => {
     }
   });
 
-  test('follows the page\'s colour scheme, never the operating system\'s', () => {
-    // `light-dark()` resolves against the inherited `color-scheme`, so the
-    // panel is light inside a light page even on a machine set to dark. A
-    // `prefers-color-scheme` query anywhere in here would ask the machine
-    // instead — including the ones Tailwind's `dark:` variant generates.
-    expect(committed).toContain('light-dark(');
-    expect(committed).not.toContain('prefers-color-scheme');
-    // The one media query that should still be here.
+  test('takes its colour scheme from the page, in three states', () => {
+    // `<html data-scheme="light">` → light, `"dark"` → dark, absent → the
+    // machine. `light-dark()` said this in one function and cannot be used:
+    // Bun's CSS bundler rewrites it into an OS media query, so a stylesheet
+    // that was right here asked the machine in every page that shipped
+    // (report 07). `tests/build.test.ts` proves it on the built page; these
+    // are the rules that page is built from.
+    expect(committed).not.toContain('light-dark(');
+    expect(committed).toContain('[data-scheme=dark]');
+    expect(committed).toContain(':not([data-scheme=light])');
+    // The third state, and the only place the panel may ask the machine.
+    expect(committed).toContain('prefers-color-scheme');
     expect(committed).toContain('prefers-reduced-motion');
   });
 

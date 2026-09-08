@@ -273,6 +273,31 @@ describe('the host/browser boundary', () => {
     expect(html).not.toMatch(/<script[^>]+src=/);
     expect(html).not.toMatch(/<link[^>]+href=/);
   });
+
+  test('the panel\'s scheme survives the bundler', async () => {
+    // The test report 04d should have had. `light-dark()` reads the document's
+    // own `color-scheme`, which is what the panel wants — but Bun's CSS
+    // bundler rewrites it into a `prefers-color-scheme` query with
+    // `--buncss-light` / `--buncss-dark` toggles, so a stylesheet that was
+    // right before the build asked the operating system after it. Only the
+    // built page can prove the convention, and this is the page.
+    await write(
+      'ai-scheme.ts',
+      `import 'broapp-ai-elements/styles.css';
+       import { BroappChat } from 'broapp-ai-elements/ui';
+       document.title = typeof BroappChat;`,
+    );
+    const html = await build('ai-scheme.ts', 'dist/ai-scheme.html');
+
+    expect(html).not.toContain('buncss-');
+    expect(html).not.toContain('light-dark(');
+    // A minifier drops the quotes around an attribute value, so both
+    // spellings are the same selector.
+    expect(html).toMatch(/data-scheme=["']?dark["']?\]/);
+    expect(html).toMatch(/:not\(\[data-scheme=["']?light["']?\]\)/);
+    // The third state, and the only place the panel may ask the machine.
+    expect(html).toContain('prefers-color-scheme');
+  });
 });
 
 describe('targets', () => {

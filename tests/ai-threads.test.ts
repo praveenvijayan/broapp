@@ -6,8 +6,9 @@
  * keeps a copy of an image or of a key, and that a conversation's own model
  * reaches the adapter without letting a turn change the provider.
  */
+import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -358,5 +359,66 @@ describe('conversations', () => {
       { id: 'm1', role: 'user', parts: [{ type: 'text', text: 'written' }] },
     ]);
   });
-});
+  test('the order of two writes in the same millisecond is the order they happened', async () => {
+    // `updated_at` is milliseconds, and three saves fit inside one. Ordering
+    // by it left the tie to whichever random id sorted higher, so this ran
+    // green and red on the same code (report 07). Thirty rounds, because one
+    // round only fails when the clock happens not to tick.
+    const started = await start();
+    const client = await started.harness.connect(merged);
 
+    for (let round = 0; round < 30; round += 1) {
+      const one = await client.call('ai.threadsCreate', { title: 'one' });
+      const two = await client.call('ai.threadsCreate', { title: 'two' });
+      const three = await client.call('ai.threadsCreate', { title: 'three' });
+
+      // No timer between them: whether the clock ticks is exactly what must
+      // not decide the answer.
+      await client.call('ai.threadsSave', { id: one.id, messages: [user('1')] });
+      await client.call('ai.threadsSave', { id: three.id, messages: [user('3')] });
+      await client.call('ai.threadsSave', { id: two.id, messages: [user('2')] });
+
+      const listed = await client.call('ai.threadsList', undefined);
+      expect(listed.threads.map((thread) => thread.id)).toEqual([two.id, three.id, one.id]);
+      await client.call('ai.threadsClear', undefined);
+    }
+  }, 30_000);
+
+  test('a store written before the sequence existed opens, keeps its order, and gains one', async () => {
+    // `tests/fixtures/threads-v1.sqlite` was written by the code at 46e7a61 —
+    // `user_version = 1`, no `seq` column — with three conversations and a
+    // save on the oldest, so the order the old query gave is unambiguous.
+    const dataDir = await mkdtemp(join(tmpdir(), 'broapp-ai-threads-v1-'));
+    await mkdir(join(dataDir, 'ai'), { recursive: true });
+    await copyFile(
+      join(import.meta.dir, 'fixtures', 'threads-v1.sqlite'),
+      join(dataDir, 'ai', 'threads.sqlite'),
+    );
+
+    const started = await start({ dataDir });
+    const client = await started.harness.connect(merged);
+
+    const listed = await client.call('ai.threadsList', undefined);
+    expect(listed.threads.map((thread) => thread.title)).toEqual(['Oldest', 'Newest', 'Middle']);
+
+    // And the new column decides the order from here on: saving the row at
+    // the bottom of the list puts it at the top.
+    const leastRecent = listed.threads[2];
+    expect(leastRecent?.title).toBe('Middle');
+    await client.call('ai.threadsSave', { id: leastRecent?.id ?? '', messages: [user('after')] });
+    const after = await client.call('ai.threadsList', undefined);
+    expect(after.threads.map((thread) => thread.title)).toEqual(['Middle', 'Oldest', 'Newest']);
+
+    await started.harness.stop();
+    live = null;
+    const db = new Database(join(dataDir, 'ai', 'threads.sqlite'));
+    const columns = db
+      .query<{ name: string }, []>('PRAGMA table_info(threads)')
+      .all()
+      .map((column) => column.name);
+    const version = db.query<{ user_version: number }, []>('PRAGMA user_version').get();
+    db.close();
+    expect(columns).toContain('seq');
+    expect(version?.user_version).toBe(2);
+  });
+});

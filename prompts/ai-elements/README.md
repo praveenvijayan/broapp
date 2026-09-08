@@ -26,6 +26,7 @@ stays as the no-dependency option.
 | 04d | `04d-drawer-and-scheme.md` | Panel follows the page's `color-scheme` via `light-dark()`; scoped form-control reset; `BroappChatDrawer` + `BroappChatToggle`; launcher moves Engineer into the drawer. | View/CSS tests green; manual rows 1–10 pass with macOS in dark mode. |
 | 06 | `06-threads.md` | Threads in SQLite under the data dir: seven `ai.threads*` routes, per-thread `modelId` sent on `ai.chat`, `useBroappChat({ threadId, modelId })`, `useAiThreads()`. Images stored as placeholders. | Harness tests green incl. restart; `tests/ai-chat.test.ts` unchanged. |
 | 07 | `07-workspace-layout.md` | Launcher as a full-width chat workspace: rail + history + chat + applications, model picker per thread, chat menu, settings drawer that overlays, light/system/dark switch. | View/CSS tests green; manual rows 1–17; nothing shifts when anything opens. |
+| 07b | `07b-scheme-convention-and-thread-order.md` | Fix-up from report 07: Bun rewrites `light-dark()` into an OS query, so the scheme keys on `<html data-scheme>` with an OS fallback, proven on the built page; thread list ordered by a monotonic `seq`. | Built-page test has no `buncss-`; `ai-threads` passes six runs in a row. |
 | 05 | `05-backlog.md` | Not a build prompt. What comes next and why it waited. | — |
 
 ## How to run one prompt

@@ -22,14 +22,15 @@
 /*
  * Tailwind's `dark:` variant asks the operating system. Nothing here may.
  *
- * The utilities it generates come from streamdown's own markup, and every
- * token they would set — `--background`, `--input`, `--destructive` — is
- * already a `light-dark()` pair below, so the panel is right in either scheme
- * without them. Pointed at an attribute nothing sets, the variant compiles to
- * a selector instead of a `prefers-color-scheme` query, and the built
- * stylesheet carries no reference to the OS scheme at all.
+ * Pointed at the convention's attribute, it compiles to a selector rather than
+ * a `prefers-color-scheme` query, so a page that has forced a scheme gets
+ * utilities that agree with the tokens. In the third state — no attribute —
+ * these utilities stay light; every one of them sets a token-derived colour
+ * (`--background`, `--input`, `--destructive`, `--accent-surface`) that is
+ * already right for the scheme, so what they change is an opacity or a border
+ * that is legible either way. The sites are listed in report 07b.
  */
-@custom-variant dark (&:where([data-broapp-chat-dark] *));
+@custom-variant dark (&:where([data-scheme="dark"], [data-scheme="dark"] *));
 
 @theme inline {
   --color-background: var(--background);
@@ -59,16 +60,24 @@
 
 @layer base {
   /*
-   * The scheme is the page's, never the operating system's.
+   * The scheme is the page's, and it is one attribute on `<html>`.
    *
-   * `light-dark()` resolves against the element's own `color-scheme`, which is
-   * inherited: a page that declares nothing is light, one that declares
-   * `color-scheme: light dark` follows the OS, one that forces `dark` is dark.
-   * A `prefers-color-scheme` query here would ask the OS instead, and paint a
-   * dark panel into a light page — which is what the launcher did. Nothing
-   * below sets `color-scheme`; inheriting it is the whole mechanism, and it is
-   * what makes the panel match the launcher (light) and the notes example
-   * (either) without knowing anything about either one.
+   *   data-scheme="light"  light
+   *   data-scheme="dark"   dark
+   *   absent               whatever the operating system says
+   *
+   * The CSS function that says this in one line cannot be used: Bun's CSS
+   * bundler rewrites it into a `prefers-color-scheme` query with two toggle
+   * variables of its own, so every page that shipped asked the machine
+   * no matter what the document's `color-scheme` was (report 07). The two
+   * toggles below are that mechanism written by hand, where the bundler has
+   * nothing left to rewrite — `--scheme-light: initial` is guaranteed-invalid,
+   * so `var(--scheme-light, X)` becomes `X`, and `--scheme-dark: ` is empty,
+   * so `var(--scheme-dark, Y)` becomes nothing at all. One of each pair
+   * survives.
+   *
+   * Every token keeps its `var(--x, …)` indirection, so an application's own
+   * variables still win in all three states.
    */
   .broapp-chat,
   .broapp-chat-drawer,
@@ -76,6 +85,8 @@
   .broapp-chat-threads,
   .broapp-chat-scheme,
   .broapp-chat-menu__content {
+    --scheme-light: initial;
+    --scheme-dark: ;
     /*
      * `--accent` and `--border` already mean something in a Broapp
      * application — the brand colour and the hairline — so the shadcn tokens
@@ -83,34 +94,56 @@
      * `--border-color`. Mapping them directly would make every hover state
      * the brand colour.
      */
-    --background: var(--bg, light-dark(#ffffff, #16171a));
-    --foreground: var(--text, light-dark(#1a1a1a, #eceef1));
-    --card: var(--surface, light-dark(#ffffff, #1e2024));
-    --card-foreground: var(--text, light-dark(#1a1a1a, #eceef1));
-    --popover: var(--surface, light-dark(#ffffff, #1e2024));
-    --popover-foreground: var(--text, light-dark(#1a1a1a, #eceef1));
-    --primary: var(--accent, light-dark(#2563eb, #6fd3b4));
-    --primary-foreground: var(--accent-contrast, light-dark(#ffffff, #10231e));
+    --background: var(--bg, var(--scheme-light,#ffffff) var(--scheme-dark,#16171a));
+    --foreground: var(--text, var(--scheme-light,#1a1a1a) var(--scheme-dark,#eceef1));
+    --card: var(--surface, var(--scheme-light,#ffffff) var(--scheme-dark,#1e2024));
+    --card-foreground: var(--text, var(--scheme-light,#1a1a1a) var(--scheme-dark,#eceef1));
+    --popover: var(--surface, var(--scheme-light,#ffffff) var(--scheme-dark,#1e2024));
+    --popover-foreground: var(--text, var(--scheme-light,#1a1a1a) var(--scheme-dark,#eceef1));
+    --primary: var(--accent, var(--scheme-light,#2563eb) var(--scheme-dark,#6fd3b4));
+    --primary-foreground: var(--accent-contrast, var(--scheme-light,#ffffff) var(--scheme-dark,#10231e));
     /*
      * A surface a shade away from the ground: hovers, quiet buttons, the
      * assistant's own bubble. The two scheme blocks this replaced read it from
      * `--bg` in light and `--surface` in dark; one property cannot name two,
      * and `--surface` is the one that means "a panel, not the page".
      */
-    --secondary: var(--surface, light-dark(#f3f4f6, #1e2024));
-    --secondary-foreground: var(--text, light-dark(#1a1a1a, #eceef1));
-    --muted: var(--surface, light-dark(#f3f4f6, #1e2024));
-    --muted-foreground: var(--text-muted, light-dark(#666666, #a2a7b0));
-    --accent-surface: var(--surface, light-dark(#f3f4f6, #1e2024));
-    --accent-foreground: var(--text, light-dark(#1a1a1a, #eceef1));
-    --destructive: var(--bad, light-dark(#b3261e, #f08a76));
-    --destructive-foreground: light-dark(#ffffff, #16171a);
-    --border-color: var(--border, light-dark(#dddddd, #32353b));
-    --input: var(--border, light-dark(#dddddd, #32353b));
-    --ring: var(--focus, var(--accent, light-dark(#2563eb, #6fd3b4)));
+    --secondary: var(--surface, var(--scheme-light,#f3f4f6) var(--scheme-dark,#1e2024));
+    --secondary-foreground: var(--text, var(--scheme-light,#1a1a1a) var(--scheme-dark,#eceef1));
+    --muted: var(--surface, var(--scheme-light,#f3f4f6) var(--scheme-dark,#1e2024));
+    --muted-foreground: var(--text-muted, var(--scheme-light,#666666) var(--scheme-dark,#a2a7b0));
+    --accent-surface: var(--surface, var(--scheme-light,#f3f4f6) var(--scheme-dark,#1e2024));
+    --accent-foreground: var(--text, var(--scheme-light,#1a1a1a) var(--scheme-dark,#eceef1));
+    --destructive: var(--bad, var(--scheme-light,#b3261e) var(--scheme-dark,#f08a76));
+    --destructive-foreground: var(--scheme-light,#ffffff) var(--scheme-dark,#16171a);
+    --border-color: var(--border, var(--scheme-light,#dddddd) var(--scheme-dark,#32353b));
+    --input: var(--border, var(--scheme-light,#dddddd) var(--scheme-dark,#32353b));
+    --ring: var(--focus, var(--accent, var(--scheme-light,#2563eb) var(--scheme-dark,#6fd3b4)));
     --radius: var(--radius, 8px);
-    --warning: var(--pending, light-dark(#8a6a12, #e0b95a));
-    --warning-bg: color-mix(in srgb, var(--pending, light-dark(#8a6a12, #e0b95a)) 12%, transparent);
+    --warning: var(--pending, var(--scheme-light,#8a6a12) var(--scheme-dark,#e0b95a));
+    --warning-bg: color-mix(in srgb, var(--pending, var(--scheme-light,#8a6a12) var(--scheme-dark,#e0b95a)) 12%, transparent);
+  }
+
+  :root[data-scheme="dark"] .broapp-chat,
+  :root[data-scheme="dark"] .broapp-chat-drawer,
+  :root[data-scheme="dark"] .broapp-chat-toggle,
+  :root[data-scheme="dark"] .broapp-chat-threads,
+  :root[data-scheme="dark"] .broapp-chat-scheme,
+  :root[data-scheme="dark"] .broapp-chat-menu__content {
+    --scheme-light: ;
+    --scheme-dark: initial;
+  }
+
+  @media (prefers-color-scheme: dark) {
+  :root:not([data-scheme="light"]) .broapp-chat,
+  :root:not([data-scheme="light"]) .broapp-chat-drawer,
+  :root:not([data-scheme="light"]) .broapp-chat-toggle,
+  :root:not([data-scheme="light"]) .broapp-chat-threads,
+  :root:not([data-scheme="light"]) .broapp-chat-scheme,
+  :root:not([data-scheme="light"]) .broapp-chat-menu__content {
+      --scheme-light: ;
+      --scheme-dark: initial;
+    }
   }
 
   .broapp-chat,

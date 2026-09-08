@@ -142,11 +142,15 @@ source named.
 12. **Off-origin is checked on CSS too.** `tests/build.test.ts` fails a page
     whose CSS carries `url(` or `@import`. Tailwind must be configured so the
     built stylesheet has neither; a test asserts it on the committed `styles.css`.
-13. **Dark scheme defaults.** Commit `752b499` made the renderer's fields
-    legible under `prefers-color-scheme: dark` without application
-    variables. The new stylesheet must do the same: shadcn tokens map to the
-    custom properties `ai.css` already reads, with literal light and dark
-    fallbacks.
+13. **Scheme is decided by the page, three ways.** `<html data-scheme="light">`
+    → light; `"dark"` → dark; absent → `prefers-color-scheme`. The panel
+    never reads the OS when the page has spoken. Do not use `light-dark()`
+    anywhere: Bun's CSS bundler rewrites it into an OS media query with
+    `--buncss-*` toggles (report 07), which silently breaks a scheme
+    switch. A built-page test asserts no `buncss-` in the HTML. Every
+    token keeps a `var(--x, literal)` indirection so an application's own
+    variables win in all three states (commit `752b499`'s legibility rule
+    still applies to the literals).
 14. **Launcher plumbing is off limits.** Commits `c44be1d` (acceptance over
     IPC so the launch token stays unspent), `c4f1f9b` (tabs opened from the
     host), `6130990` (relative `BROAPP_DATA_DIR` resolved before a child),

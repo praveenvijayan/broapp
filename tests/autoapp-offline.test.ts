@@ -209,6 +209,46 @@ describe.skipIf(!available)('run offline', () => {
     expect(outside).toEqual([]);
     expect(specifiers).toContain('bun:sqlite');
   }, 120_000);
+
+  test('the launcher page decides its scheme from the document, not the machine', async () => {
+    // Built here rather than read from `dist/`: the page bundles the chat
+    // panel's stylesheet, which lives in another package, and the staleness
+    // check that guards the compiled launcher only watches this one. Built by
+    // spawning the package's own script rather than calling `buildPage`,
+    // because `Bun.build` inside `bun test` cannot resolve the relative
+    // imports of a source tree outside the test's own directory.
+    //
+    // What it is guarding: Bun's CSS bundler rewrites `light-dark()` into a
+    // `prefers-color-scheme` query with `--buncss-*` toggles, so a stylesheet
+    // that read the document's own scheme before the build asked the machine
+    // after it (report 07). The convention is an attribute instead, and the
+    // bundler has no opinion about attributes.
+    const packageDir = join(import.meta.dir, '..', 'packages', 'broapp-autoapp');
+    const built = Bun.spawn({
+      cmd: ['bun', 'run', 'build:page'],
+      cwd: packageDir,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [code, stderr] = await Promise.all([
+      built.exited,
+      new Response(built.stderr as ReadableStream<Uint8Array>).text(),
+    ]);
+    // `bun run` echoes the script it is about to run on stderr, so the exit
+    // code is what says whether it worked; the output is here to explain a
+    // failure rather than to be matched.
+    expect(code === 0 ? 'built' : `exit ${String(code)}: ${stderr}`).toBe('built');
+
+    const page = readFileSync(join(packageDir, 'dist', 'launcher-page.html'), 'utf8');
+    expect(page).not.toContain('light-dark(');
+    // Bun defines its toggle pair beside every `color-scheme` declaration,
+    // whether or not anything reads it, and the launcher declares one in each
+    // of its three palette blocks. What must not exist is a *use*: a colour
+    // that resolves through the pair is a colour the machine decides.
+    expect(page).not.toContain('var(--buncss-');
+    expect(page).toMatch(/data-scheme=["']?dark["']?\]/);
+    expect(page).toMatch(/:not\(\[data-scheme=["']?light["']?\]\)/);
+  }, 120_000);
 });
 
 describe.skipIf(!available)('edit offline', () => {

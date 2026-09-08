@@ -40,6 +40,24 @@ const MIGRATIONS: readonly string[] = [
      json      TEXT    NOT NULL,
      PRIMARY KEY (thread_id, position)
    );`,
+  /*
+   * A monotonic sequence, because a timestamp is not one.
+   *
+   * `updated_at` is milliseconds, and two writes inside one millisecond used
+   * to be ordered by whichever random id sorted higher — so a list could come
+   * back in a different order for the same history (report 07). `seq` is
+   * bumped by every write that touches a conversation, so "most recently
+   * changed first" means what it says. The backfill puts existing rows in the
+   * order they were last shown in, `rowid` breaking the ties the old query
+   * could not.
+   */
+  `ALTER TABLE threads ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
+   UPDATE threads SET seq = (
+     SELECT COUNT(*) FROM threads AS earlier
+     WHERE earlier.updated_at < threads.updated_at
+        OR (earlier.updated_at = threads.updated_at AND earlier.rowid <= threads.rowid)
+   );
+   CREATE INDEX threads_seq ON threads (seq DESC);`,
 ];
 
 /** What a conversation is called until it has been named. */
@@ -185,16 +203,27 @@ export function openThreads(dataDir: string): ThreadStore {
 
   const statements = {
     list: db.query<ThreadRow, [number]>(
-      `SELECT ${THREAD_COLUMNS} FROM threads t ORDER BY t.updated_at DESC, t.id DESC LIMIT ?`,
+      // `seq` only: it is unique and monotonic, so no tie-break is needed and
+      // none can disagree with the order the writes actually happened in.
+      `SELECT ${THREAD_COLUMNS} FROM threads t ORDER BY t.seq DESC LIMIT ?`,
     ),
     byId: db.query<ThreadRow, [string]>(
       `SELECT ${THREAD_COLUMNS} FROM threads t WHERE t.id = ?`,
     ),
+    /*
+     * Both writes take the next sequence in the same statement that changes
+     * the row, so the number a conversation is ordered by is decided inside
+     * whatever transaction is writing it — never by a second round trip that
+     * another write could interleave with.
+     */
     insert: db.query<unknown, [string, string, string | null, number, number]>(
-      'INSERT INTO threads (id, title, model_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+      `INSERT INTO threads (id, title, model_id, created_at, updated_at, seq)
+       VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM threads))`,
     ),
     touch: db.query<unknown, [string, string | null, number, string]>(
-      'UPDATE threads SET title = ?, model_id = ?, updated_at = ? WHERE id = ?',
+      `UPDATE threads SET title = ?, model_id = ?, updated_at = ?,
+         seq = (SELECT COALESCE(MAX(seq), 0) + 1 FROM threads)
+       WHERE id = ?`,
     ),
     messages: db.query<{ json: string }, [string]>(
       'SELECT json FROM messages WHERE thread_id = ? ORDER BY position ASC',

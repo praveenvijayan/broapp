@@ -147,6 +147,26 @@ different arrangement can too.
 back. A list beside the panel needs it: the title the host derives from the
 first message cannot be predicted in the browser.
 
+**Which scheme the panel paints in** is the page's decision, made with one
+attribute on `<html>`:
+
+| `<html data-scheme>` | Panel |
+|---|---|
+| `"light"` | light |
+| `"dark"` | dark |
+| absent | follows `prefers-color-scheme` |
+
+Every colour keeps its `var(--bg, …)` indirection, so an application that
+defines its own variables is unaffected in all three states — the attribute
+only decides which literals stand in when it does not.
+
+**Do not use `light-dark()` in a Broapp page.** It is the obvious way to write
+the table above and it does not survive the build: Bun's CSS bundler (1.4.0)
+rewrites it into a `prefers-color-scheme` query with two toggle variables, so a
+stylesheet that asked the document ends up asking the operating system, and a
+scheme switch stops working with nothing to see in the source.
+`tests/build.test.ts` asserts the built page carries no rewrite.
+
 Rendering markdown means turning text a model wrote — after it has been shown
 documents from the user's own machine — into elements. So the renderer is
 narrowed rather than trusted: links and images are removed (their words are
@@ -420,13 +440,12 @@ cancellation.
   reports capabilities, so an unrecognised server is never refused an image on
   a guess; if the model cannot read it, the provider's own error is what you
   get.
-- **The panel's colours need `light-dark()`.** `broapp-ai-elements/styles.css`
-  resolves its light and dark literals against the page's own `color-scheme`
-  rather than against the operating system, so the panel is light inside a
-  light page on a machine set to dark. That function needs Chrome 123, Safari
-  17.5 or Firefox 120; an older browser paints the light half of every pair.
-  An application that defines `--bg`, `--text` and the rest is unaffected — its
-  own values are used, whichever browser reads them.
+- **Forcing a scheme is an attribute, not `color-scheme`.** The panel reads
+  `<html data-scheme>`; setting `color-scheme` alone will not repaint it,
+  because the literals behind its tokens are chosen by a selector rather than
+  by the CSS function that would have read that property (see "The chat
+  panel"). Set both if you want native scrollbars and form controls to follow
+  too.
 - **One turn at a time.** Sending while a turn is running is ignored.
 - **`ai.modelsList` needs a configured provider**, so a settings panel cannot
   preview another provider's models before switching to it.
