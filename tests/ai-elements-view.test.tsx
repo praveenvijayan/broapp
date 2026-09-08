@@ -12,7 +12,18 @@ import type { ToolUIPart } from 'ai';
 import { aiContract } from 'broapp/ai';
 import { AiProvider } from 'broapp/ai/react';
 import { BroappProvider } from 'broapp/react';
-import { BroappChatDrawer, BroappChatToggle, BroappChatView, transcriptOf } from 'broapp-ai-elements/ui';
+import {
+  BroappChatDrawer,
+  BroappChatMenu,
+  BroappChatToggle,
+  BroappChatView,
+  BroappModelList,
+  BroappModelPicker,
+  BroappSchemeToggle,
+  BroappThreadList,
+  transcriptOf,
+} from 'broapp-ai-elements/ui';
+import type { BroappModel, Thread } from 'broapp/ai';
 import type { BroappUIMessage } from 'broapp-ai-elements';
 
 const NOW = 1_700_000_000_000;
@@ -297,5 +308,156 @@ describe('the transcript', () => {
     ]);
 
     expect(text).toBe('You: add a note\n\nAssistant: Used notes.create\nAdded it.');
+  });
+});
+
+describe('the model picker', () => {
+  const models: BroappModel[] = [
+    {
+      provider: 'ollama',
+      modelId: 'gemma4:31b-mlx',
+      label: 'gemma4:31b-mlx',
+      capabilities: { tools: true, vision: true, structuredOutput: false },
+    },
+    {
+      provider: 'ollama',
+      modelId: 'nirnex-model:latest',
+      label: 'nirnex-model:latest',
+      capabilities: { tools: true, vision: false, structuredOutput: false },
+    },
+  ];
+
+  test('shows what the conversation follows, closed', () => {
+    // No connection is opened under `renderToString`, so the hook has no
+    // models yet: the trigger falls back to the id Settings would use, which
+    // here is nothing at all.
+    const html = renderToString(
+      <BroappProvider contract={aiContract}>
+        <AiProvider>
+          <BroappModelPicker onChange={() => undefined} value={null} />
+        </AiProvider>
+      </BroappProvider>,
+    ).replaceAll('<!-- -->', '');
+
+    expect(html).toContain('Default · not set');
+    // Closed: the list, and the badges in it, are not in the document.
+    expect(html).not.toContain('vision');
+  });
+
+  test('marks the vision models and the current one', () => {
+    const html = renderToString(
+      <BroappModelList
+        defaultLabel="gemma4:31b-mlx"
+        models={models}
+        onChange={() => undefined}
+        value="nirnex-model:latest"
+      />,
+    ).replaceAll('<!-- -->', '');
+
+    // One badge, for the one model that reports it.
+    expect(html.split('>vision<').length - 1).toBe(1);
+    expect(html).toContain('Default (follow Settings)');
+    expect(html).toContain('gemma4:31b-mlx');
+    // The check is on the pinned model, not on the default row.
+    expect(html.split('aria-label="Current"').length - 1).toBe(1);
+  });
+});
+
+describe('the conversation list', () => {
+  const NOON = new Date(2026, 0, 15, 12, 0, 0).getTime();
+  const threads: Thread[] = [
+    {
+      id: 't1',
+      title: 'Add a field to notes',
+      modelId: 'gemma4:31b-mlx',
+      createdAt: NOON - 3_600_000,
+      updatedAt: NOON - 3_600_000,
+      messageCount: 4,
+    },
+    {
+      id: 't2',
+      title: 'What changed last week',
+      modelId: null,
+      createdAt: NOON - 6 * 86_400_000,
+      updatedAt: NOON - 6 * 86_400_000,
+      messageCount: 2,
+    },
+  ];
+
+  function list(overrides: Partial<Parameters<typeof BroappThreadList>[0]> = {}): string {
+    return renderToString(
+      <BroappThreadList
+        activeId="t1"
+        now={NOON}
+        onDelete={() => undefined}
+        onNew={() => undefined}
+        onRename={() => undefined}
+        onSelect={() => undefined}
+        threads={threads}
+        {...overrides}
+      />,
+    ).replaceAll('<!-- -->', '');
+  }
+
+  test('groups by the day, and marks the conversation being read', () => {
+    const html = list();
+
+    expect(html).toContain('>Today</h3>');
+    expect(html).toContain('>Earlier</h3>');
+    expect(html).not.toContain('>Yesterday</h3>');
+    expect(html).toContain('aria-current="true"');
+    // The model a conversation is pinned to is shown; a default one says
+    // nothing rather than repeating what Settings already says.
+    expect(html).toContain('gemma4:31b-mlx');
+  });
+
+  test('says so when there is nothing to show', () => {
+    expect(list({ threads: [] })).toContain('No conversations yet.');
+    expect(list({ threads: [], emptyText: 'Nothing here.' })).toContain('Nothing here.');
+  });
+});
+
+describe('the scheme toggle', () => {
+  test('is a radio group with one of the three chosen', () => {
+    const html = renderToString(
+      <BroappSchemeToggle onChange={() => undefined} value="dark" />,
+    ).replaceAll('<!-- -->', '');
+
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toContain('aria-checked="true" aria-label="Dark"');
+    expect(html.split('aria-checked="true"').length - 1).toBe(1);
+  });
+});
+
+describe('the conversation menu', () => {
+  test('is a closed menu until it is opened', () => {
+    const html = renderToString(
+      <BroappChatMenu
+        onClear={() => undefined}
+        onCopy={() => undefined}
+        onDelete={() => undefined}
+      />,
+    ).replaceAll('<!-- -->', '');
+
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain('aria-label="Conversation actions"');
+    // Nothing destructive is one click away: the items are inside the menu.
+    expect(html).not.toContain('Delete chat');
+  });
+});
+
+describe('the top bar', () => {
+  test('is drawn above the conversation when there is one', () => {
+    const html = render({ topBar: <button type="button">Settings</button> });
+
+    expect(html).toContain('broapp-chat__topbar');
+    expect(html).toContain('>Settings</button>');
+  });
+
+  test('stands in for the empty state while a conversation is read', () => {
+    const html = render({ loading: true, suggestions: ['Ask me'] });
+
+    expect(html).toContain('Loading conversation…');
+    expect(html).not.toContain('Ask me');
   });
 });

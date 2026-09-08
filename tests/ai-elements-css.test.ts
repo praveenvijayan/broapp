@@ -37,6 +37,21 @@ describe('styles.css', () => {
     expect(committed).toContain('.broapp-chat-toggle');
   });
 
+  test('dresses the workspace pieces too', () => {
+    // The list, the scheme toggle and the menu's own content are drawn outside
+    // `.broapp-chat` — in a rail, a column, a portal — so each needs its own
+    // rules and its own copy of the tokens.
+    for (const workspace of [
+      '.broapp-chat__topbar',
+      '.broapp-chat-picker',
+      '.broapp-chat-menu__content',
+      '.broapp-chat-threads',
+      '.broapp-chat-scheme',
+    ]) {
+      expect(committed).toContain(workspace);
+    }
+  });
+
   test('follows the page\'s colour scheme, never the operating system\'s', () => {
     // `light-dark()` resolves against the inherited `color-scheme`, so the
     // panel is light inside a light page even on a machine set to dark. A

@@ -39,7 +39,11 @@ right.
 Allowed files: everything under `packages/broapp-ai-elements/`, everything
 under `packages/broapp-autoapp/src/launcher/ui/` (new files welcome),
 `packages/broapp-autoapp/src/react/index.tsx` only if `titleWithPending`
-needs a tweak, docs, tests. Nothing else under `launcher/`.
+needs a tweak, docs, tests. One more, from report 06: the launcher's
+`src/launcher/tab.ts` builds its own `Ai` and never closes it, so its
+thread store misses a final WAL checkpoint on exit. You may add the one
+`ai.close()` call to its shutdown path and nothing else in that file.
+Nothing else under `launcher/`.
 
 ## Step 1 — reusable pieces in `broapp-ai-elements/ui`
 

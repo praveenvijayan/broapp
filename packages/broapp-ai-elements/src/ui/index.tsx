@@ -15,6 +15,18 @@ export type {
   BroappChatToggleProps,
 } from './BroappChatDrawer.tsx';
 
+export { BroappChatMenu } from './BroappChatMenu.tsx';
+export type { BroappChatMenuProps } from './BroappChatMenu.tsx';
+
+export { BroappModelList, BroappModelPicker } from './BroappModelPicker.tsx';
+export type { BroappModelListProps, BroappModelPickerProps } from './BroappModelPicker.tsx';
+
+export { BroappSchemeToggle } from './BroappSchemeToggle.tsx';
+export type { BroappScheme, BroappSchemeToggleProps } from './BroappSchemeToggle.tsx';
+
+export { BroappThreadList } from './BroappThreadList.tsx';
+export type { BroappThreadListProps } from './BroappThreadList.tsx';
+
 export { transcriptOf } from './transcript.ts';
 
 export { BroappChatView, MESSAGE_MAX_LENGTH, Response, ToolApproval } from './BroappChatView.tsx';

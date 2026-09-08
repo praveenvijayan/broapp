@@ -72,7 +72,10 @@
    */
   .broapp-chat,
   .broapp-chat-drawer,
-  .broapp-chat-toggle {
+  .broapp-chat-toggle,
+  .broapp-chat-threads,
+  .broapp-chat-scheme,
+  .broapp-chat-menu__content {
     /*
      * `--accent` and `--border` already mean something in a Broapp
      * application — the brand colour and the hairline — so the shadcn tokens
@@ -124,7 +127,9 @@
    * panel's ground, which in a dark page meant typing invisibly. `:where()`
    * keeps the specificity at zero, so every vendored utility class still wins.
    */
-  .broapp-chat :where(input, textarea, select, button) {
+  .broapp-chat :where(input, textarea, select, button),
+  .broapp-chat-threads :where(input, textarea, select, button),
+  .broapp-chat-menu__content :where(input, textarea, select, button) {
     color: inherit;
     font: inherit;
     letter-spacing: inherit;
@@ -132,12 +137,15 @@
     border-radius: 0;
   }
 
-  .broapp-chat :where(input, textarea)::placeholder {
+  .broapp-chat :where(input, textarea)::placeholder,
+  .broapp-chat-threads :where(input, textarea)::placeholder {
     color: var(--muted-foreground);
     opacity: 1;
   }
 
-  .broapp-chat :where(button) {
+  .broapp-chat :where(button),
+  .broapp-chat-threads :where(button),
+  .broapp-chat-scheme :where(button) {
     cursor: pointer;
   }
 
@@ -146,6 +154,8 @@
     .broapp-chat *,
     .broapp-chat *::before,
     .broapp-chat *::after,
+    .broapp-chat-menu__content,
+    .broapp-chat-menu__content *,
     .broapp-chat-drawer {
       animation: none !important;
       transition: none !important;
@@ -336,5 +346,343 @@
     font: inherit;
     font-size: 0.85em;
     color: var(--muted-foreground);
+  }
+
+  /*
+   * The prompt bar: the image button, the box, the counter and send, on one
+   * line — with the attachment chips on a line of their own above them.
+   *
+   * The vendored input lays its children out as a flex row that turns into a
+   * column the moment a block-aligned addon (the chips) is present, and flex
+   * ordering alone cannot say "these three share a line and that one does
+   * not". A grid can, and it leaves every vendored component untouched.
+   */
+  .broapp-chat__form > [data-slot='input-group'] {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .broapp-chat__chips {
+    grid-column: 1 / -1;
+  }
+
+  .broapp-chat__lead,
+  .broapp-chat__trail {
+    padding-bottom: 0.4rem;
+  }
+
+  .broapp-chat__lead {
+    padding-left: 0.35rem;
+  }
+
+  .broapp-chat__trail {
+    padding-right: 0.35rem;
+  }
+
+  /* A chrome of the caller's above the conversation: picker, menu, status. */
+  .broapp-chat__topbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  /* The model picker: a quiet button, and the panel it opens. */
+  .broapp-chat-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    max-width: 18rem;
+    padding: 0.3rem 0.55rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--secondary);
+    color: var(--foreground);
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  .broapp-chat-picker:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .broapp-chat-picker__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .broapp-chat-picker__panel {
+    z-index: 40;
+    width: 22rem;
+    max-width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--popover);
+    color: var(--popover-foreground);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  }
+
+  .broapp-chat-picker__error {
+    margin: 0;
+    padding: 0.4rem 0.6rem;
+    color: var(--destructive);
+    font-size: 0.85rem;
+  }
+
+  .broapp-chat-option {
+    gap: 0.45rem;
+  }
+
+  .broapp-chat-option__mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15rem;
+    height: 1.15rem;
+    border-radius: 5px;
+    background: var(--secondary);
+    color: var(--muted-foreground);
+    font-size: 0.7rem;
+    font-weight: 700;
+  }
+
+  .broapp-chat-option__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .broapp-chat-option__muted {
+    color: var(--muted-foreground);
+    font-size: 0.8rem;
+  }
+
+  .broapp-chat-option__badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0 0.35rem;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--muted-foreground);
+    font-size: 0.7rem;
+  }
+
+  /* The `…` menu, and the two-step delete inside it. */
+  .broapp-chat-menu__trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+
+  .broapp-chat-menu__trigger:hover:not(:disabled) {
+    background: var(--secondary);
+    color: var(--foreground);
+  }
+
+  .broapp-chat-menu__content {
+    color: var(--popover-foreground);
+    background: var(--popover);
+  }
+
+  .broapp-chat-menu__confirm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .broapp-chat-menu__danger,
+  .broapp-chat-menu__cancel {
+    padding: 0.15rem 0.45rem;
+    border: 1px solid var(--border-color);
+    border-radius: calc(var(--radius) - 3px);
+    background: transparent;
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .broapp-chat-menu__danger {
+    border-color: var(--destructive);
+    color: var(--destructive);
+  }
+
+  /* The conversation list. */
+  .broapp-chat-threads {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-height: 0;
+    color: var(--foreground);
+  }
+
+  .broapp-chat-threads__header {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.2rem 0.1rem 0.4rem;
+  }
+
+  .broapp-chat-threads__title {
+    flex: 1 1 auto;
+    margin: 0;
+    font-size: 0.8rem;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-foreground);
+  }
+
+  .broapp-chat-threads__action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: calc(var(--radius) - 2px);
+    background: transparent;
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+
+  .broapp-chat-threads__action:hover {
+    background: var(--secondary);
+    color: var(--foreground);
+  }
+
+  .broapp-chat-threads__group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .broapp-chat-threads__group-title {
+    margin: 0.5rem 0 0.15rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-foreground);
+  }
+
+  .broapp-chat-threads__row {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    border-radius: calc(var(--radius) - 2px);
+  }
+
+  .broapp-chat-threads__row:hover {
+    background: var(--secondary);
+  }
+
+  .broapp-chat-threads__row--active {
+    background: var(--secondary);
+  }
+
+  /*
+   * The row's own menu is only there when it is wanted: a column of `…`
+   * buttons reads as three columns of controls rather than a list of names.
+   */
+  .broapp-chat-threads__row .broapp-chat-threads__action {
+    opacity: 0;
+  }
+
+  .broapp-chat-threads__row:hover .broapp-chat-threads__action,
+  .broapp-chat-threads__row .broapp-chat-threads__action:focus-visible,
+  .broapp-chat-threads__row .broapp-chat-threads__action[data-state='open'] {
+    opacity: 1;
+  }
+
+  .broapp-chat-threads__select {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 0.05rem;
+    min-width: 0;
+    padding: 0.3rem 0.4rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .broapp-chat-threads__name {
+    overflow: hidden;
+    font-size: 0.9rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .broapp-chat-threads__model {
+    overflow: hidden;
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .broapp-chat-threads__rename {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.25rem 0.4rem;
+    border: 1px solid var(--border-color);
+    border-radius: calc(var(--radius) - 2px);
+    background: var(--background);
+  }
+
+  .broapp-chat-threads__empty {
+    margin: 0;
+    padding: 0.3rem 0.1rem;
+    color: var(--muted-foreground);
+    font-size: 0.85rem;
+  }
+
+  /* Light, system, dark. */
+  .broapp-chat-scheme {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--secondary);
+  }
+
+  .broapp-chat-scheme__button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border: 0;
+    border-radius: calc(var(--radius) - 3px);
+    background: transparent;
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+
+  .broapp-chat-scheme__button[aria-checked='true'] {
+    background: var(--background);
+    color: var(--foreground);
   }
 }

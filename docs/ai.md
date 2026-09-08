@@ -121,6 +121,32 @@ const [open, setOpen] = useState(false);
 <BroappChatDrawer open={open} onOpenChange={setOpen} title="Engineer" suggestions={[…]} />
 ```
 
+**The workspace pieces, from the same package.** A panel is not always a
+drawer. `BroappChat` takes a `topBar` — anything the application wants above
+the conversation — and the pieces that usually go in one are components of
+their own: `BroappModelPicker` (a searchable list of the provider's models,
+with a mark for each provider and a badge on the ones that can see),
+`BroappChatMenu` (copy the transcript, empty the conversation, delete it —
+asked twice, inside the menu), `BroappThreadList` (the conversations, grouped
+by the day they last changed, renamed in place) and `BroappSchemeToggle`
+(light, system, dark — which the application applies itself). The Autoapp
+launcher composes all four around `BroappChat`; an application that wants a
+different arrangement can too.
+
+```tsx
+<BroappChat
+  frame="plain"
+  threadId={active?.id ?? null}
+  modelId={active?.modelId ?? null}
+  onTurnEnd={() => void threads.refresh()}
+  topBar={<BroappModelPicker value={…} onChange={…} />}
+/>
+```
+
+`onTurnEnd` fires after a turn has ended and the conversation has been written
+back. A list beside the panel needs it: the title the host derives from the
+first message cannot be predicted in the browser.
+
 Rendering markdown means turning text a model wrote — after it has been shown
 documents from the user's own machine — into elements. So the renderer is
 narrowed rather than trusted: links and images are removed (their words are

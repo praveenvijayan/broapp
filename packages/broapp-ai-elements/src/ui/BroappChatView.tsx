@@ -28,7 +28,6 @@ import {
   PromptInput,
   PromptInputBody,
   PromptInputButton,
-  PromptInputFooter,
   PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
@@ -65,6 +64,10 @@ export interface BroappChatViewProps {
   readonly markdown: boolean;
   readonly placeholder: string;
   readonly emptyText: string;
+  /** Drawn above the conversation: a model picker, a menu, whatever fits. */
+  readonly topBar?: React.ReactNode;
+  /** True while a stored conversation is being read. */
+  readonly loading?: boolean;
   /** Offered while the transcript is empty; clicking one sends it. */
   readonly suggestions?: readonly string[];
   /** One line under the suggestions, e.g. the keyboard shortcut. */
@@ -247,7 +250,7 @@ function Pending(): React.ReactElement | null {
   const attachments = usePromptInputAttachments();
   if (attachments.files.length === 0) return null;
   return (
-    <PromptInputHeader>
+    <PromptInputHeader className="broapp-chat__chips">
       <Attachments variant="list">
         {attachments.files.map((file) => (
           <Attachment
@@ -291,6 +294,8 @@ export function BroappChatView({
   markdown,
   placeholder,
   emptyText,
+  topBar,
+  loading,
   suggestions,
   suggestionTip,
   maxLength = MESSAGE_MAX_LENGTH,
@@ -311,9 +316,16 @@ export function BroappChatView({
 
   return (
     <div className="broapp-chat">
+      {topBar === undefined ? null : <div className="broapp-chat__topbar">{topBar}</div>}
       <Conversation>
         <ConversationContent>
-          {messages.length === 0 ? (
+          {loading === true ? (
+            // A conversation that is being read has nothing to suggest yet:
+            // offering the openers of an empty chat would be a lie about a
+            // transcript that is about to appear.
+            <ConversationEmptyState description="" title="Loading conversation…" />
+          ) : null}
+          {loading !== true && messages.length === 0 ? (
             // The caller's sentence is the whole empty state; the component's
             // own second line would say the same thing twice.
             <>
@@ -367,6 +379,7 @@ export function BroappChatView({
 
       <PromptInput
         accept={IMAGE_LIMITS.accept}
+        className="broapp-chat__form"
         maxFiles={IMAGE_LIMITS.maxFiles}
         // Before downscaling: what the browser shrinks is measured after this.
         maxFileSize={10 * 1024 * 1024}
@@ -387,7 +400,17 @@ export function BroappChatView({
           onSend({ text: submitted.text, files: submitted.files });
         }}
       >
+        {/*
+          One row: the image button, the box, then the counter and send. The
+          chips, when there are any, take a row of their own above it — which
+          is what the grid in the stylesheet is for. The vendored input lays
+          its children out with flex ordering, and ordering alone cannot put
+          three things on one line and a fourth above them.
+        */}
         <Pending />
+        <PromptInputTools className="broapp-chat__lead">
+          <AddImages />
+        </PromptInputTools>
         <PromptInputBody>
           <PromptInputTextarea
             maxLength={maxLength}
@@ -395,17 +418,14 @@ export function BroappChatView({
             placeholder={placeholder}
           />
         </PromptInputBody>
-        <PromptInputFooter>
-          <PromptInputTools>
-            <AddImages />
-          </PromptInputTools>
+        <PromptInputTools className="broapp-chat__trail">
           <span
             className={`broapp-chat__counter${typed >= maxLength ? ' broapp-chat__counter--full' : ''}`}
           >
             {typed} / {maxLength}
           </span>
           <PromptInputSubmit onStop={onStop} status={status} />
-        </PromptInputFooter>
+        </PromptInputTools>
       </PromptInput>
     </div>
   );

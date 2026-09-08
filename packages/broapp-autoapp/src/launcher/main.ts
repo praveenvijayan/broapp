@@ -210,6 +210,9 @@ async function openLauncher(
     isBusy: () => tab.ai.activeStreams > 0,
     onShutdown: async () => {
       tab.ai.abortAll('the launcher is shutting down');
+      // The conversations live in a SQLite file of the AI layer's own, and a
+      // database that is never closed misses its last WAL checkpoint.
+      tab.ai.close();
       control.stop();
       // Applications the launcher started do not outlive it.
       await supervisor.stopAll(STOP_DEADLINE_MS);

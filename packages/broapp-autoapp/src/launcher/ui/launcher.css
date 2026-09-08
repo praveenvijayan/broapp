@@ -4,9 +4,30 @@
  * Prefixed `.launcher-` and `.launcher__` so nothing here can collide with the
  * renderer's `.autoapp-` rules — the two never appear on the same page today,
  * and keeping them separate means they never have to.
+ *
+ * The shell is a full-window grid: a rail, the conversations, the chat, the
+ * applications. Every column scrolls itself and the page never does, so
+ * nothing moves when a column is collapsed or Settings slides over the top.
  */
 
+/*
+ * The palette, in three blocks rather than in `light-dark()` pairs.
+ *
+ * `light-dark()` is what the chat panel uses, and it is the right mechanism —
+ * it follows the document's own `color-scheme` rather than the machine's. But
+ * the launcher's page is bundled by `buildPage`, and Bun's CSS bundler
+ * *downlevels* `light-dark()` into a `prefers-color-scheme` query with two
+ * toggle variables. Measured, not assumed: in the built page
+ * `--launcher-ground` reads `var(--buncss-light,#f6f7f9)var(--buncss-dark,#16171a)`,
+ * and setting `color-scheme` on the document changed nothing at all. So the
+ * scheme is an attribute the toggle writes, and the dark values are spelled
+ * twice — once for a machine that is dark and has not been overruled, once for
+ * a person who chose dark. Each block also sets `color-scheme`, which is what
+ * scrollbars, form controls and the panel's own fallbacks read.
+ */
 :root {
+  color-scheme: light;
+
   --launcher-surface: #ffffff;
   --launcher-ground: #f6f7f9;
   --launcher-border: #dfe3ea;
@@ -14,25 +35,92 @@
   --launcher-text: #33383f;
   --launcher-muted: #6b7280;
   --launcher-accent: #2a5bd7;
+  --launcher-accent-contrast: #ffffff;
   --launcher-error-surface: #fdecec;
   --launcher-error-text: #a12222;
+  --launcher-quiet: #f4f5f8;
+  --launcher-pending: #8a6a12;
+  --launcher-good-surface: #e8f2e8;
+  --launcher-good-text: #2f6b34;
+  --launcher-warn-surface: #fdf6e7;
+  --launcher-warn-text: #6b5312;
+  --launcher-warn-border: #f0d9a8;
+  --launcher-selected: #eef3fd;
+  --launcher-hover: #e9ebf1;
+}
 
-  /*
-   * The chat drawer reads an application's own custom properties and falls
-   * back to its own literals only when there are none. Aliasing them here is
-   * what makes the engineer look like the launcher rather than like a
-   * stylesheet's idea of a panel. The launcher is light, declares no
-   * `color-scheme`, and so the drawer resolves its `light-dark()` pairs light
-   * too — which is the bug this replaced.
-   */
+@media (prefers-color-scheme: dark) {
+  /* The machine is dark and nobody has said otherwise. */
+  :root:not([data-scheme='light']) {
+    color-scheme: dark;
+
+    --launcher-surface: #1e2024;
+    --launcher-ground: #16171a;
+    --launcher-border: #32353b;
+    --launcher-heading: #f2f3f5;
+    --launcher-text: #eceef1;
+    --launcher-muted: #a2a7b0;
+    --launcher-accent: #6fd3b4;
+    --launcher-accent-contrast: #10231e;
+    --launcher-error-surface: #3a1e1b;
+    --launcher-error-text: #f08a76;
+    --launcher-quiet: #24272c;
+    --launcher-pending: #e0b95a;
+    --launcher-good-surface: #1d2f22;
+    --launcher-good-text: #8fd39a;
+    --launcher-warn-surface: #33290f;
+    --launcher-warn-text: #e0b95a;
+    --launcher-warn-border: #4a3d18;
+    --launcher-selected: #22262e;
+    --launcher-hover: #2c3037;
+  }
+}
+
+/*
+ * Somebody chose dark. After the media query, so that the choice wins on a
+ * machine that is light — the two selectors have the same specificity.
+ */
+:root[data-scheme='dark'] {
+  color-scheme: dark;
+
+  --launcher-surface: #1e2024;
+  --launcher-ground: #16171a;
+  --launcher-border: #32353b;
+  --launcher-heading: #f2f3f5;
+  --launcher-text: #eceef1;
+  --launcher-muted: #a2a7b0;
+  --launcher-accent: #6fd3b4;
+  --launcher-accent-contrast: #10231e;
+  --launcher-error-surface: #3a1e1b;
+  --launcher-error-text: #f08a76;
+  --launcher-quiet: #24272c;
+  --launcher-pending: #e0b95a;
+  --launcher-good-surface: #1d2f22;
+  --launcher-good-text: #8fd39a;
+  --launcher-warn-surface: #33290f;
+  --launcher-warn-text: #e0b95a;
+  --launcher-warn-border: #4a3d18;
+  --launcher-selected: #22262e;
+  --launcher-hover: #2c3037;
+}
+
+/*
+ * The chat panel reads an application's own custom properties and falls back
+ * to its own `light-dark()` literals only when there are none — and those
+ * literals are downlevelled to the machine's scheme by the same bundler. So
+ * the launcher defines every one of them, and the panel follows the launcher
+ * rather than the machine.
+ */
+:root {
   --bg: var(--launcher-ground);
   --surface: var(--launcher-surface);
   --border: var(--launcher-border);
   --text: var(--launcher-text);
   --text-muted: var(--launcher-muted);
   --accent: var(--launcher-accent);
-  --accent-contrast: #ffffff;
+  --accent-contrast: var(--launcher-accent-contrast);
   --bad: var(--launcher-error-text);
+  --pending: var(--launcher-pending);
 }
 
 * {
@@ -48,47 +136,241 @@ body {
 
 .launcher {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: 'header' 'main';
-  gap: 1.25rem;
-  max-width: 78rem;
-  margin: 0 auto;
-  padding: 1.5rem;
-  min-height: 100vh;
+  grid-template-columns: 3rem auto minmax(0, 1fr) minmax(24rem, 30rem);
+  grid-template-areas: 'rail history chat apps';
+  height: 100vh;
+  /* Each column scrolls itself; the window never does. */
+  overflow: hidden;
 }
 
 /*
- * The drawer is fixed above the page rather than in the flow, so the page has
- * to give it room: without this the header's own buttons — Settings among
- * them — end up underneath it, and "keep using the page beside it" stops being
- * true. Under 40rem the drawer is the whole window and there is nothing to
- * make room for.
+ * A collapsed column takes no width, and the chat takes what it leaves. Only
+ * the chat column is `1fr`, so collapsing either side is the one thing that
+ * changes — the applications never move because the conversations did.
  */
-@media (min-width: 40rem) {
-  .launcher--drawer-open {
-    margin-right: 26rem;
-  }
+.launcher--history-hidden {
+  grid-template-columns: 3rem 0 minmax(0, 1fr) minmax(24rem, 30rem);
 }
 
-.launcher__header {
-  grid-area: header;
+.launcher--apps-hidden {
+  grid-template-columns: 3rem auto minmax(0, 1fr) 0;
+}
+
+.launcher--history-hidden.launcher--apps-hidden {
+  grid-template-columns: 3rem 0 minmax(0, 1fr) 0;
+}
+
+.launcher__rail {
+  grid-area: rail;
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0;
+  border-right: 1px solid var(--launcher-border);
+  background: var(--launcher-surface);
+}
+
+.launcher__rail-spacer {
+  flex: 1 1 auto;
+}
+
+.launcher__rail-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--launcher-muted);
+  cursor: pointer;
+}
+
+.launcher__rail-button:hover {
+  background: var(--launcher-quiet);
+  color: var(--launcher-heading);
+}
+
+.launcher__rail-button[aria-expanded='true'] {
+  color: var(--launcher-heading);
+}
+
+.launcher__history {
+  grid-area: history;
+  width: 15rem;
+  overflow-y: auto;
+  padding: 0.6rem;
+  border-right: 1px solid var(--launcher-border);
+  background: var(--launcher-surface);
+}
+
+.launcher__chat {
+  grid-area: chat;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * The panel fills the column and scrolls its own conversation. Without a
+ * height here the transcript would grow the page, and the page does not
+ * scroll.
+ */
+.launcher__chat .broapp-chat {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.launcher__apps {
+  grid-area: apps;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 1rem;
+  border-left: 1px solid var(--launcher-border);
+}
+
+/* Fills the space between the picker and the buttons in the chat's top bar. */
+.launcher__spacer {
+  flex: 1 1 auto;
+}
+
+.launcher__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--launcher-muted);
+  cursor: pointer;
+}
+
+.launcher__icon-button:hover {
+  background: var(--launcher-quiet);
+  color: var(--launcher-heading);
+}
+
+/*
+ * Settings is over the page, not in it: it covers the applications column and
+ * the grid underneath it does not move. A person who opens Settings while
+ * reading an answer comes back to the same answer in the same place.
+ */
+.launcher__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 940;
+  padding: 0;
+  border: 0;
+  background: rgb(0 0 0 / 0.35);
+  cursor: pointer;
+}
+
+.launcher__settings {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 950;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: min(30rem, 100%);
+  height: 100vh;
+  overflow-y: auto;
+  padding: 1rem;
+  border-left: 1px solid var(--launcher-border);
+  background: var(--launcher-ground);
+}
+
+.launcher__settings-header {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-start;
   gap: 1rem;
 }
 
-.launcher__main {
-  grid-area: main;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  min-width: 0;
+/*
+ * Narrow windows. The launcher is a desktop tool, so these are fallbacks
+ * rather than a second design: under 60rem the applications move below the
+ * chat, and under 40rem the two side columns become panels over the page.
+ */
+@media (max-width: 60rem) {
+  .launcher,
+  .launcher--history-hidden,
+  .launcher--apps-hidden,
+  .launcher--history-hidden.launcher--apps-hidden {
+    grid-template-columns: 3rem auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 45vh);
+    grid-template-areas: 'rail history chat' 'rail history apps';
+  }
+
+  .launcher--history-hidden,
+  .launcher--history-hidden.launcher--apps-hidden {
+    grid-template-columns: 3rem 0 minmax(0, 1fr);
+  }
+
+  .launcher--apps-hidden,
+  .launcher--history-hidden.launcher--apps-hidden {
+    grid-template-rows: minmax(0, 1fr) 0;
+  }
+
+  .launcher__history {
+    grid-row: 1 / -1;
+  }
+
+  .launcher__apps {
+    border-top: 1px solid var(--launcher-border);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 40rem) {
+  .launcher,
+  .launcher--history-hidden,
+  .launcher--apps-hidden,
+  .launcher--history-hidden.launcher--apps-hidden {
+    grid-template-columns: 3rem minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: 'rail chat';
+  }
+
+  /*
+   * Both columns become panels over the chat, and neither is shown until the
+   * rail asks for it: two overlays open at once — which is what a window
+   * resized down from a desktop width has — would bury the conversation.
+   */
+  .launcher__history,
+  .launcher__apps {
+    position: fixed;
+    z-index: 900;
+    inset: 0 0 0 3rem;
+    display: none;
+    width: auto;
+    background: var(--launcher-ground);
+  }
+
+  .launcher--narrow-history .launcher__history,
+  .launcher--narrow-apps .launcher__apps {
+    display: block;
+    overflow-y: auto;
+    padding: 0.6rem;
+  }
 }
 
 .launcher__title {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: 1.05rem;
   font-weight: 650;
   color: var(--launcher-heading);
 }
@@ -113,24 +395,18 @@ body {
   color: var(--launcher-muted);
 }
 
-.launcher__header-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .launcher__status {
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
-  background: #e8f2e8;
-  color: #2f6b34;
-  font-size: 0.85rem;
+  background: var(--launcher-good-surface);
+  color: var(--launcher-good-text);
+  font-size: 0.8rem;
 }
 
 .launcher__status--connecting,
 .launcher__status--reconnecting {
-  background: #fdf6e7;
-  color: #6b5312;
+  background: var(--launcher-warn-surface);
+  color: var(--launcher-warn-text);
 }
 
 .launcher__status--lost,
@@ -174,11 +450,12 @@ body {
 }
 
 .launcher__row--selected {
-  background: #eef3fd;
+  background: var(--launcher-selected);
 }
 
 .launcher__row-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
   align-items: center;
 }
@@ -187,7 +464,7 @@ body {
   padding: 0.35rem 0.75rem;
   border: 1px solid var(--launcher-border);
   border-radius: 7px;
-  background: #f4f5f8;
+  background: var(--launcher-quiet);
   font: inherit;
   font-weight: 600;
   color: inherit;
@@ -195,7 +472,7 @@ body {
 }
 
 .launcher__button:hover:not(:disabled) {
-  background: #e9ebf1;
+  background: var(--launcher-hover);
 }
 
 .launcher__button:disabled {
@@ -212,8 +489,8 @@ body {
   margin-left: 0.5rem;
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
-  background: #fdf6e7;
-  color: #6b5312;
+  background: var(--launcher-warn-surface);
+  color: var(--launcher-warn-text);
   font-size: 0.75rem;
 }
 
@@ -230,7 +507,7 @@ body {
 }
 
 .launcher__check--pass {
-  color: #2f6b34;
+  color: var(--launcher-good-text);
 }
 
 .launcher__check--fail {
@@ -239,9 +516,9 @@ body {
 
 .launcher__grants {
   padding: 0.75rem 0.9rem;
-  border: 1px solid #f0d9a8;
+  border: 1px solid var(--launcher-warn-border);
   border-radius: 8px;
-  background: #fdf6e7;
+  background: var(--launcher-warn-surface);
 }
 
 .launcher__grants ul {

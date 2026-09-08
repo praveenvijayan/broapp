@@ -29,6 +29,15 @@ export interface BroappChatOptions {
   readonly onToolResult?: BroappChatTransportOptions['onToolResult'];
   /** Called whenever the number of calls waiting for a person changes. */
   readonly onAwaiting?: BroappChatTransportOptions['onAwaiting'];
+  /**
+   * Called after a turn has ended and the conversation has been written back.
+   *
+   * A list of conversations shown beside the panel learns two things only from
+   * the store: the title the host derived from the first message, and when the
+   * conversation last changed. Neither can be predicted here, so the caller is
+   * told when it is worth reading them again.
+   */
+  readonly onTurnEnd?: () => void;
   /** Stable chat id. Default: one per hook instance. */
   readonly id?: string;
   /**
@@ -100,6 +109,8 @@ export function useBroappChat(options: BroappChatOptions = {}): BroappChatHook {
   onToolResult.current = options.onToolResult;
   const onAwaiting = React.useRef<BroappChatOptions['onAwaiting']>(undefined);
   onAwaiting.current = options.onAwaiting;
+  const onTurnEnd = React.useRef<BroappChatOptions['onTurnEnd']>(undefined);
+  onTurnEnd.current = options.onTurnEnd;
   const client = React.useRef(shared.client);
   client.current = shared.client;
   const modelId = React.useRef<string | null>(options.modelId ?? null);
@@ -145,6 +156,10 @@ export function useBroappChat(options: BroappChatOptions = {}): BroappChatHook {
         // Reported, never thrown: a conversation that could not be written is
         // not a reason to stop the person asking the next question.
         setThreadError(asError(cause, 'That conversation could not be saved.'));
+      } finally {
+        // After the write, whether it worked or not: a failed save is exactly
+        // when a list showing what is stored should be read again.
+        onTurnEnd.current?.();
       }
     },
     [],

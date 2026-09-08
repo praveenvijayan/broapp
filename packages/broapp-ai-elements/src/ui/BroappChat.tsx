@@ -41,6 +41,8 @@ export interface BroappChatProps {
   readonly onToolResult?: BroappChatOptions['onToolResult'];
   /** How many tool calls are waiting for a person, whenever that changes. */
   readonly onAwaiting?: BroappChatOptions['onAwaiting'];
+  /** After a turn has ended and the conversation has been written back. */
+  readonly onTurnEnd?: BroappChatOptions['onTurnEnd'];
   /** Render assistant text as markdown. Default true. */
   readonly markdown?: boolean;
   /** Offered while the transcript is empty; clicking one sends it. */
@@ -49,6 +51,20 @@ export interface BroappChatProps {
   readonly suggestionTip?: string;
   /** Characters allowed in one message. Default 20,000 — the contract's cap. */
   readonly maxLength?: number;
+  /**
+   * Drawn above the conversation, inside the panel: a model picker, a menu,
+   * whatever the surrounding application puts there. Shown in every settings
+   * state, because the button that opens Settings is usually in it — and that
+   * is exactly what somebody who has not set AI up needs to reach.
+   */
+  readonly topBar?: React.ReactNode;
+  /**
+   * The stored conversation to load on mount and save after every turn.
+   * Null or absent keeps the conversation in memory only.
+   */
+  readonly threadId?: string | null;
+  /** The model this conversation talks to. Null follows Settings. */
+  readonly modelId?: string | null;
   /**
    * `"card"` (default) draws the panel as a titled card, as `AiChat` does.
    * `"plain"` draws the conversation alone, for a chrome that has its own
@@ -101,10 +117,14 @@ export function BroappChat({
   emptyText,
   onToolResult,
   onAwaiting,
+  onTurnEnd,
   markdown = true,
   suggestions,
   suggestionTip,
   maxLength,
+  topBar,
+  threadId,
+  modelId,
   frame = 'card',
   controlsRef,
 }: BroappChatProps): React.ReactElement {
@@ -113,6 +133,9 @@ export function BroappChat({
     ...(refs === undefined ? {} : { refs }),
     ...(onToolResult === undefined ? {} : { onToolResult }),
     ...(onAwaiting === undefined ? {} : { onAwaiting }),
+    ...(onTurnEnd === undefined ? {} : { onTurnEnd }),
+    ...(threadId === undefined ? {} : { threadId }),
+    ...(modelId === undefined ? {} : { modelId }),
   });
   const {
     messages,
@@ -121,6 +144,7 @@ export function BroappChat({
     confirmError,
     usage,
     awaiting,
+    loading,
     sendMessage,
     stop,
     confirm,
@@ -149,14 +173,17 @@ export function BroappChat({
   if (settings === null || settings.configured !== true) {
     return (
       <Frame frame={frame}>
-        <p className="form__hint">
+        <div className="broapp-chat">
+          {topBar === undefined ? null : <div className="broapp-chat__topbar">{topBar}</div>}
           {/* Until the first settings read returns there is nothing to say yet,
               and saying "not set up" would be a guess that is wrong as often as
               it is right. */}
-          {settings === null
-            ? 'Checking the AI settings…'
-            : 'AI is not set up. Open Settings to choose a provider.'}
-        </p>
+          <p className="form__hint">
+            {settings === null
+              ? 'Checking the AI settings…'
+              : 'AI is not set up. Open Settings to choose a provider.'}
+          </p>
+        </div>
       </Frame>
     );
   }
@@ -166,6 +193,7 @@ export function BroappChat({
       <BroappChatView
         emptyText={emptyText ?? 'Ask a question about what you are looking at.'}
         error={confirmError ?? error?.message ?? null}
+        loading={loading}
         markdown={markdown}
         messages={messages}
         now={now}
@@ -175,6 +203,7 @@ export function BroappChat({
         placeholder={placeholder ?? 'Ask about these notes'}
         status={status}
         usage={usage}
+        {...(topBar === undefined ? {} : { topBar })}
         {...(suggestions === undefined ? {} : { suggestions })}
         {...(suggestionTip === undefined ? {} : { suggestionTip })}
         {...(maxLength === undefined ? {} : { maxLength })}

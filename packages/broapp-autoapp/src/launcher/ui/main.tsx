@@ -16,10 +16,15 @@ import 'broapp-ai-elements/styles.css';
 
 import { launcherContract } from '../contract.ts';
 import { App } from './App.tsx';
+import { applyScheme, readScheme } from './scheme.ts';
 import './launcher.css';
 
 const container = document.getElementById('root');
 if (container === null) throw new Error('#root is missing from the document');
+
+// Before the first paint, so a page that was left dark does not flash light
+// on its way back.
+applyScheme(readScheme());
 
 createRoot(container).render(
   <StrictMode>

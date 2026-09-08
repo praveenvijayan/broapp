@@ -34,7 +34,11 @@ function asError(cause: unknown, fallback: string): Error {
 export function useAiThreads(): AiThreadsHook {
   const shared = useAiContext();
   const [threads, setThreads] = React.useState<readonly Thread[]>([]);
-  const [loading, setLoading] = React.useState(false);
+  // True from the first render, not from the first call: the hook always
+  // reads the list in an effect below, and a consumer that decides "there are
+  // no conversations, make one" on the render before that would make one for
+  // every reload.
+  const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<Error | null>(null);
 
   const client = React.useRef(shared.client);
