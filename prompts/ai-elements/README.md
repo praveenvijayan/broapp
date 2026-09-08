@@ -27,6 +27,7 @@ stays as the no-dependency option.
 | 06 | `06-threads.md` | Threads in SQLite under the data dir: seven `ai.threads*` routes, per-thread `modelId` sent on `ai.chat`, `useBroappChat({ threadId, modelId })`, `useAiThreads()`. Images stored as placeholders. | Harness tests green incl. restart; `tests/ai-chat.test.ts` unchanged. |
 | 07 | `07-workspace-layout.md` | Launcher as a full-width chat workspace: rail + history + chat + applications, model picker per thread, chat menu, settings drawer that overlays, light/system/dark switch. | View/CSS tests green; manual rows 1–17; nothing shifts when anything opens. |
 | 07b | `07b-scheme-convention-and-thread-order.md` | Fix-up from report 07: Bun rewrites `light-dark()` into an OS query, so the scheme keys on `<html data-scheme>` with an OS fallback, proven on the built page; thread list ordered by a monotonic `seq`. | Built-page test has no `buncss-`; `ai-threads` passes six runs in a row. |
+| 07c | `07c-rail-and-input-clipping.md` | Fix-up: scheme switch stacks vertically in the rail with a `.broapp-tokens` scope; the prompt bar clipping is measured in the browser and fixed at its cause. | Measurement dump in the report; manual rows 1–6 at 1024 px and 700 px. |
 | 05 | `05-backlog.md` | Not a build prompt. What comes next and why it waited. | — |
 
 ## How to run one prompt

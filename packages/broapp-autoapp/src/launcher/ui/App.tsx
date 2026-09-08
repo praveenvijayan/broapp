@@ -269,7 +269,14 @@ export function App(): React.ReactElement {
           <PanelRight aria-hidden="true" size={17} />
         </button>
         <div className="launcher__rail-spacer" />
-        <BroappSchemeToggle onChange={chooseScheme} value={scheme} />
+        {/*
+          The switch is a component of the panel's, drawn outside the panel:
+          `.broapp-tokens` is what gives it the panel's colours here, and the
+          rail is too narrow for three buttons on one line.
+        */}
+        <div className="broapp-tokens launcher__rail-scheme">
+          <BroappSchemeToggle onChange={chooseScheme} orientation="vertical" value={scheme} />
+        </div>
       </nav>
 
       {historyOpen ? (

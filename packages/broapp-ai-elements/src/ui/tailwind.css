@@ -78,13 +78,23 @@
    *
    * Every token keeps its `var(--x, …)` indirection, so an application's own
    * variables still win in all three states.
+   *
+   * A scope, not a layout. This rule carries the custom properties and nothing
+   * else, so a component from `broapp-ai-elements/ui` that is drawn outside the
+   * panel — the scheme switch in an application's own sidebar, say — can be
+   * given `.broapp-tokens` and read the same colours without also being told
+   * how to lay itself out. `:where()` keeps every one of them at zero
+   * specificity, so an application that defines its own still wins.
    */
-  .broapp-chat,
-  .broapp-chat-drawer,
-  .broapp-chat-toggle,
-  .broapp-chat-threads,
-  .broapp-chat-scheme,
-  .broapp-chat-menu__content {
+  :where(
+      .broapp-chat,
+      .broapp-chat-drawer,
+      .broapp-chat-toggle,
+      .broapp-chat-threads,
+      .broapp-chat-scheme,
+      .broapp-chat-menu__content,
+      .broapp-tokens
+    ) {
     --scheme-light: initial;
     --scheme-dark: ;
     /*
@@ -129,7 +139,8 @@
   :root[data-scheme="dark"] .broapp-chat-toggle,
   :root[data-scheme="dark"] .broapp-chat-threads,
   :root[data-scheme="dark"] .broapp-chat-scheme,
-  :root[data-scheme="dark"] .broapp-chat-menu__content {
+  :root[data-scheme="dark"] .broapp-chat-menu__content,
+  :root[data-scheme="dark"] .broapp-tokens {
     --scheme-light: ;
     --scheme-dark: initial;
   }
@@ -140,7 +151,8 @@
   :root:not([data-scheme="light"]) .broapp-chat-toggle,
   :root:not([data-scheme="light"]) .broapp-chat-threads,
   :root:not([data-scheme="light"]) .broapp-chat-scheme,
-  :root:not([data-scheme="light"]) .broapp-chat-menu__content {
+  :root:not([data-scheme="light"]) .broapp-chat-menu__content,
+  :root:not([data-scheme="light"]) .broapp-tokens {
       --scheme-light: ;
       --scheme-dark: initial;
     }
@@ -150,6 +162,25 @@
   .broapp-chat-drawer {
     color: var(--foreground);
     background: var(--background);
+  }
+
+  /*
+   * The panel is a column: chrome, a conversation that scrolls inside itself,
+   * then the lines that report a turn, then the bar. Prompt 07c: this used to
+   * be written by each embedder — the launcher had it, the drawer and the
+   * notes example did not, so in those two the transcript grew the panel and
+   * pushed the bar off the bottom. It belongs to the panel.
+   *
+   * `min-height: 0` is the defensive half: a flex item's automatic minimum
+   * size is its content, and a panel given a height by its container must be
+   * able to shrink under it. Nothing measured in 07c needed it — the
+   * conversation's own `overflow-y: hidden` already resolves its automatic
+   * minimum to zero — but the next thing dropped into this column would.
+   */
+  .broapp-chat {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
   /*
@@ -394,6 +425,29 @@
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: end;
+    /*
+     * Prompt 07c: the vendored group is `h-9` — 36px — with
+     * `has-[>textarea]:h-auto` to undo that when it holds a box rather than a
+     * one-line input. That escape hatch is a *direct-child* selector, and the
+     * textarea is inside `PromptInputBody`, which renders `display: contents`:
+     * a box removed from layout but still in the tree, so `:has(> textarea)`
+     * does not match. The group stayed 36px while its own grid row measured
+     * 64, and `overflow: hidden` with `align-items: end` clipped everything
+     * but the textarea's top edge. Measured, not guessed — the flex chain
+     * above it was correct throughout.
+     */
+    height: auto;
+  }
+
+  /*
+   * The bar is never what gives way. Prompt 07c: the transcript is the only
+   * thing in this column that may shrink, so the three rows below it say so
+   * rather than relying on their content to hold them open.
+   */
+  .broapp-chat__form,
+  .broapp-chat__usage,
+  .broapp-chat > .message--error {
+    flex: 0 0 auto;
   }
 
   .broapp-chat__chips {
@@ -698,6 +752,11 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius);
     background: var(--secondary);
+  }
+
+  /* Stacked, for a rail too narrow for three buttons side by side. */
+  .broapp-chat-scheme[data-orientation='vertical'] {
+    flex-direction: column;
   }
 
   .broapp-chat-scheme__button {

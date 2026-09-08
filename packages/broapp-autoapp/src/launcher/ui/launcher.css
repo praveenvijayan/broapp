@@ -175,6 +175,16 @@ body {
   flex: 1 1 auto;
 }
 
+/*
+ * Only where the switch sits. What it looks like is the panel's, and it reads
+ * the panel's tokens through `.broapp-tokens` on this element.
+ */
+.launcher__rail-scheme {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.2rem;
+}
+
 .launcher__rail-button {
   display: inline-flex;
   align-items: center;
@@ -216,15 +226,14 @@ body {
 }
 
 /*
- * The panel fills the column and scrolls its own conversation. Without a
- * height here the transcript would grow the page, and the page does not
- * scroll.
+ * The panel fills the column and scrolls its own conversation. Being a column
+ * is the panel's own doing now (prompt 07c moved it into the package's
+ * stylesheet, where the drawer and the notes example benefit too); what is
+ * left here is the one thing only this shell knows — that the panel takes the
+ * height this column has, rather than the height its transcript wants.
  */
 .launcher__chat .broapp-chat {
-  display: flex;
   flex: 1 1 auto;
-  flex-direction: column;
-  min-height: 0;
 }
 
 .launcher__apps {

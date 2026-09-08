@@ -427,6 +427,18 @@ describe('the scheme toggle', () => {
     expect(html).toContain('aria-checked="true" aria-label="Dark"');
     expect(html.split('aria-checked="true"').length - 1).toBe(1);
   });
+
+  test('stacks when it is told to, and says nothing when it is not', () => {
+    const vertical = renderToString(
+      <BroappSchemeToggle onChange={() => undefined} orientation="vertical" value="light" />,
+    );
+    const horizontal = renderToString(
+      <BroappSchemeToggle onChange={() => undefined} value="light" />,
+    );
+
+    expect(vertical).toContain('data-orientation="vertical"');
+    expect(horizontal).not.toContain('data-orientation');
+  });
 });
 
 describe('the conversation menu', () => {

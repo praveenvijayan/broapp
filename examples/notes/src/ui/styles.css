@@ -102,10 +102,24 @@ body {
   border-radius: 4px;
 }
 
+/*
+ * A window, not a scroll of paper.
+ *
+ * The assistant's prompt bar has to stay on the page: a long transcript used to
+ * grow the card it sits in until the box was below the fold and the only way to
+ * type was to scroll to the bottom of the document first. So the shell is the
+ * height of the window, the notes scroll in their own region, and the panel
+ * keeps the height it is given (prompt 07c, row 5).
+ */
 .app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  /* The bar the mobile browsers draw over `100vh` would take the prompt bar. */
+  height: 100dvh;
   max-width: 46rem;
   margin: 0 auto;
-  padding: 2.5rem 1.25rem 4rem;
+  padding: 2.5rem 1.25rem 1.25rem;
 }
 
 .app__header {
@@ -137,8 +151,44 @@ body {
 }
 
 .app__main {
-  display: grid;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 1.25rem;
+  min-height: 0;
+}
+
+/* Everything above the assistant, and the only thing on this page that scrolls. */
+.app__scroll {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1.25rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/*
+ * The assistant takes what the window has left, within reason: never so little
+ * that the box and the last answer cannot both be seen, never so much that the
+ * notes are pushed out of sight. The panel is already a column of its own
+ * (`broapp-ai-elements/styles.css`); this is the height it needs to be one.
+ */
+.ai-chat {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  /*
+   * The floor holds the box at its tallest — the textarea stops growing at
+   * 12rem — plus the card's own chrome, so a long draft never pushes the send
+   * button off. The ceiling leaves the notes above it a third of the window.
+   */
+  min-height: 12rem;
+  max-height: 70%;
+}
+
+.ai-chat > .broapp-chat {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .app__footer {

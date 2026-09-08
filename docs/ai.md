@@ -133,6 +133,18 @@ by the day they last changed, renamed in place) and `BroappSchemeToggle`
 launcher composes all four around `BroappChat`; an application that wants a
 different arrangement can too.
 
+The stylesheet's colours are declared on the panel's own classes, so a piece
+drawn away from the panel has none. Wrap it in `.broapp-tokens` — a scope that
+carries the custom properties and no layout at all — and it reads the same
+palette wherever it sits. `BroappSchemeToggle` also takes
+`orientation="vertical"`, which stacks its three buttons for a narrow rail.
+
+```tsx
+<div className="broapp-tokens">
+  <BroappSchemeToggle orientation="vertical" value={scheme} onChange={setScheme} />
+</div>
+```
+
 ```tsx
 <BroappChat
   frame="plain"

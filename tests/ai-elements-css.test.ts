@@ -67,6 +67,32 @@ describe('styles.css', () => {
     expect(committed).toContain('prefers-reduced-motion');
   });
 
+  test('offers the tokens without the layout', () => {
+    // A piece drawn away from the panel — the scheme switch in a rail — needs
+    // the colours and none of the column. `:where()` keeps the whole token
+    // block at zero specificity, so an application's own variables still win.
+    expect(committed).toContain('.broapp-tokens');
+    expect(committed).toContain(':where(');
+  });
+
+  test('keeps the prompt bar whole and the transcript the only thing that gives way', () => {
+    // Prompt 07c. The panel is a column with a scrolling middle; the vendored
+    // input group is `h-9` unless it sees a textarea as a direct child, which
+    // it never does here, so its height is overridden rather than inherited
+    // from a `:has()` that cannot match.
+    expect(committed).toContain('.broapp-chat{flex-direction:column;min-height:0;display:flex}');
+    expect(committed).toContain(
+      '.broapp-chat__form>[data-slot=input-group]{grid-template-columns:auto minmax(0,1fr) auto;align-items:end;height:auto;display:grid}',
+    );
+    expect(committed).toContain(
+      '.broapp-chat__form,.broapp-chat__usage,.broapp-chat>.message--error{flex:none}',
+    );
+  });
+
+  test('stacks the scheme switch when it is asked to', () => {
+    expect(committed).toContain('.broapp-chat-scheme[data-orientation=vertical]{flex-direction:column}');
+  });
+
   test('reproduces the part of preflight a form control needs', () => {
     // Without this the textarea takes the page's colour on the panel's ground,
     // which in a dark page meant typing invisibly.

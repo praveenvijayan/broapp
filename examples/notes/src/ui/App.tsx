@@ -73,13 +73,17 @@ export function App(): React.ReactElement {
       </header>
 
       <main className="app__main">
-        {showSettings && (
-          <section className="card">
-            <AiSettings />
-          </section>
-        )}
+        {/* The document scrolls; the assistant below it does not scroll away
+            with it, so its prompt bar is always where it was last time. */}
+        <div className="app__scroll">
+          {showSettings && (
+            <section className="card">
+              <AiSettings />
+            </section>
+          )}
 
-        <AutoappView reloadToken={changed} />
+          <AutoappView reloadToken={changed} />
+        </div>
 
         {/* The note being looked at is what the model is shown. Everything else
             it needs it has to search for. */}
