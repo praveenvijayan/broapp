@@ -5,15 +5,13 @@ what a maintainer has to do, and what they have to decide.
 
 ## Status
 
-[broapp](https://www.npmjs.com/package/broapp) and
-[create-broapp](https://www.npmjs.com/package/create-broapp) are on npm as of
-2026-09-05, at version 0.1.0, each published with provenance from the
-`Publish to npm` workflow, so `bun create broapp my-app` works. Version 0.2.1
-adds the AI layer and two new packages,
-[broapp-ai-anthropic](https://www.npmjs.com/package/broapp-ai-anthropic) and
-[broapp-ai-compatible](https://www.npmjs.com/package/broapp-ai-compatible),
-which are prepared in this repository and not yet published. To generate from an unreleased checkout
-instead, see [troubleshooting.md](troubleshooting.md).
+Published on npm from the `Publish to npm` workflow, each with provenance:
+`broapp`, `create-broapp`, `broapp-ai-anthropic`, `broapp-ai-compatible` and
+`broapp-ai-elements` at 0.3.0, and `broapp-autoapp` at 0.1.0 (its first
+release). Earlier: 0.1.0 on 2026-09-05, 0.2.0 after it. Version 0.2.1 was
+prepared in this repository and never published; 0.3.0 supersedes it. To
+generate from an unreleased checkout instead, see
+[troubleshooting.md](troubleshooting.md).
 
 ## Before publishing
 

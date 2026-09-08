@@ -1,6 +1,6 @@
 {
   "name": "broapp-ai-elements",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "description": "The AI SDK transport and AI Elements chat panel for a Broapp application",
   "license": "MIT",
@@ -53,7 +53,7 @@
     "use-stick-to-bottom": "1.1.6"
   },
   "peerDependencies": {
-    "broapp": ">=0.2.1",
+    "broapp": ">=0.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

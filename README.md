@@ -156,10 +156,10 @@ development time or afterwards.
 
 ## Status
 
-Version 0.2.1 in this repository. `broapp` and `create-broapp` 0.1.0 are on
-npm, so `bun create broapp` works today; 0.2.1 and the two AI provider
-packages are prepared and await publication — see
-[docs/publishing.md](docs/publishing.md) for what a maintainer has to do.
+Version 0.3.0 in this repository, published to npm together with
+`broapp-ai-anthropic`, `broapp-ai-compatible`, `broapp-ai-elements` and the
+first release of `broapp-autoapp` (0.1.0). `bun create broapp` generates a
+project on 0.3.0.
 
 ## Licence
 

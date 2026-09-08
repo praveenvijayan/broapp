@@ -51,10 +51,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
-    "broapp": "^0.2.1",
-    "broapp-ai-anthropic": "^0.2.1",
-    "broapp-ai-compatible": "^0.2.1",
-    "broapp-ai-elements": "^0.2.1"
+    "broapp": "^0.3.0",
+    "broapp-ai-anthropic": "^0.3.0",
+    "broapp-ai-compatible": "^0.3.0",
+    "broapp-ai-elements": "^0.3.0"
   },
   "peerDependencies": {
     "ai": "7.0.93",

@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires Bun 1.2 or newer on macOS, Linux or Windows. No other runtime. Network needed only for the first `bun install`.
 metadata:
   author: praveenvijayan
-  version: "0.2.1"
+  version: "0.3.0"
   homepage: https://github.com/praveenvijayan/broapp
 ---
 
