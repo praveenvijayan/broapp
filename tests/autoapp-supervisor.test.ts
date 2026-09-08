@@ -12,7 +12,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { buildCandidate, createSupervisor, isCompiled, selfCommand, type Supervisor } from 'broapp-autoapp/launcher';
+import { buildCandidate, createSupervisor, isCompiled, isCompiledEntry, selfCommand, type Supervisor } from 'broapp-autoapp/launcher';
 import { layout, setCurrent } from 'broapp-autoapp/spec';
 
 const fixture = join(import.meta.dir, 'fixtures', 'autoapp-app');
@@ -30,6 +30,23 @@ afterEach(async () => {
   if (existsSync(runRoot) && readdirSync(runRoot).length === 0) {
     rmSync(runRoot, { recursive: true, force: true });
   }
+});
+
+describe('isCompiledEntry', () => {
+  // What a compiled binary's `Bun.main` reads on each platform. `import.meta.path`
+  // is deliberately not the input: since Bun 1.4 it is the original source path
+  // inside a binary too, which is how the launcher came to spawn itself with
+  // `main.ts` as a command.
+  test('recognises the virtual root Bun gives a compiled entry', () => {
+    expect(isCompiledEntry('/$bunfs/root/broapp-autoapp')).toBe(true);
+    expect(isCompiledEntry(String.raw`B:\~BUN\root\broapp-autoapp.exe`)).toBe(true);
+  });
+
+  test('a source path, even one that mentions bunfs, is not compiled', () => {
+    expect(isCompiledEntry(join(import.meta.dir, '..', 'packages', 'broapp-autoapp', 'src', 'launcher', 'main.ts'))).toBe(false);
+    expect(isCompiledEntry('/home/me/$bunfs/root/main.ts')).toBe(false);
+    expect(isCompiledEntry(Bun.main)).toBe(isCompiled());
+  });
 });
 
 describe('selfCommand', () => {

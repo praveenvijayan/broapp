@@ -143,16 +143,29 @@ function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promis
 }
 
 /**
- * Bun names a compiled binary's own modules under a virtual root. This is the
+ * Bun names a compiled binary's entry module under a virtual root. This is the
  * one signal that says whether the launcher running now is a single file or a
  * tree of sources; `process.execPath` alone does not, since either way it is a
  * path to something that runs.
+ *
+ * The signal is `Bun.main`, not `import.meta.path`. Since Bun 1.4 a compiled
+ * binary reports each module's *original* source path in `import.meta`, so a
+ * test on it said "from source" inside every binary, and the launcher then
+ * spawned itself with `main.ts` as its first argument — which the child read
+ * as an unknown command and exited. The CI smoke on all three platforms was
+ * the first to notice. `Bun.main` still carries the virtual root
+ * (`/$bunfs/root/<name>` on POSIX, `B:\~BUN\root\<name>` on Windows).
  */
 const COMPILED_ROOT = /^(\/\$bunfs\/|[A-Za-z]:\\~BUN\\)/;
 
+/** Whether `entry` is the entry module of a compiled binary. Exported for its test. */
+export function isCompiledEntry(entry: string): boolean {
+  return COMPILED_ROOT.test(entry);
+}
+
 /** Whether this launcher is running from a compiled binary. */
 export function isCompiled(): boolean {
-  return COMPILED_ROOT.test(import.meta.path);
+  return isCompiledEntry(Bun.main);
 }
 
 /**
