@@ -210,8 +210,22 @@ jobs:
 
             ## Getting started with the launcher
 
-            Download `broapp-autoapp-<target>` for your machine and
-            `notes-starter.zip`, then unpack both into one directory.
+            Download `broapp-autoapp-<target>` for your machine, unpack it, and
+            run it with no arguments. It opens its own tab; press **New
+            application**, give it a name, and the launcher writes a starter
+            application to disk, installs its dependencies from npm (the one
+            time it reaches the network), builds it, makes it current and opens
+            it. `create <appId>` does the same from a terminal.
+
+            ```
+            tar -xzf broapp-autoapp-darwin-arm64.tar.gz      # or unzip the .zip on Windows
+            xattr -d com.apple.quarantine broapp-autoapp-darwin-arm64   # macOS only
+            ./broapp-autoapp-darwin-arm64
+            ```
+
+            For a fuller starting point, `notes-starter.zip` is the Notes
+            example with its AI panel, its dependencies pointed at the
+            published packages. Unpack it beside the launcher:
 
             ```
             tar -xzf broapp-autoapp-darwin-arm64.tar.gz      # or unzip the .zip on Windows

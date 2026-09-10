@@ -13,6 +13,12 @@ prepared in this repository and never published; 0.3.0 supersedes it. To
 generate from an unreleased checkout instead, see
 [troubleshooting.md](troubleshooting.md).
 
+Repository release v0.3.1 (2026-09-10) shipped launcher binaries only — the New
+application button and the Windows compiled-launcher fix — with every npm
+package unchanged. A created application installs `broapp@^0.3.0` and
+`broapp-autoapp@^0.1.0` from the registry, which is why the launcher's own
+package version did not move.
+
 ## Before publishing
 
 1. `bun run check` — typecheck and the full suite.

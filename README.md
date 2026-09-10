@@ -52,23 +52,30 @@ session cookie, the framing, resume — are
 ## Download the launcher
 
 Every [release](https://github.com/praveenvijayan/broapp/releases) ships the
-Autoapp launcher as one compiled binary per target, `broapp-autoapp-<target>`,
-next to `notes-starter.zip`: the Notes example with its dependencies pointed
-at the published packages. No Bun installation is needed on the machine that
-runs them.
+Autoapp launcher as one compiled binary per target, `broapp-autoapp-<target>`.
+No Bun installation is needed on the machine that runs it; the launcher
+carries a starter application inside it.
 
 ```bash
 tar -xzf broapp-autoapp-darwin-arm64.tar.gz   # unzip the .zip on Windows
+./broapp-autoapp-darwin-arm64
+```
+
+The launcher opens its own tab. Press **New application**, give it a name, and
+it writes the starter to disk, installs its dependencies from npm — the one
+time the launcher reaches the network — builds the first release, makes it
+current and opens it. From then on the engineer in the launcher's tab proposes
+changes as candidate releases; `create <appId>` does the same from a terminal.
+
+The release also ships `notes-starter.zip`, the Notes example with its AI panel
+and its dependencies pointed at the published packages, for a fuller starting
+point:
+
+```bash
 unzip notes-starter.zip
 ./broapp-autoapp-darwin-arm64 import ./notes-starter --as notes --grant
 ./broapp-autoapp-darwin-arm64 serve notes
-```
-
-`import` installs the starter's dependencies from npm — the one time the
-launcher reaches the network — builds the first release and makes it current.
-`serve` runs it as its own process and opens a browser tab. Run the launcher
-with no arguments for its own tab, where the engineer proposes changes as
-candidate releases. The binaries are unsigned; on macOS remove the quarantine
+``` The binaries are unsigned; on macOS remove the quarantine
 attribute first (`xattr -d com.apple.quarantine <binary>`), and see
 [docs/packaging.md](docs/packaging.md) for Windows.
 
@@ -179,9 +186,11 @@ development time or afterwards.
 
 ## Status
 
-Version 0.3.0 in this repository, published to npm together with
-`broapp-ai-anthropic`, `broapp-ai-compatible`, `broapp-ai-elements` and the
-first release of `broapp-autoapp` (0.1.0). `bun create broapp` generates a
+Version 0.3.1 in this repository: a launcher release with the New
+application button and the Windows compiled-launcher fix. The npm packages are
+unchanged from 0.3.0 — `broapp`, `broapp-ai-anthropic`, `broapp-ai-compatible`,
+`broapp-ai-elements` and `create-broapp` at 0.3.0, `broapp-autoapp` at 0.1.0 —
+and a created application depends on those. `bun create broapp` generates a
 project on 0.3.0.
 
 ## Licence
