@@ -38,13 +38,13 @@ activated release that nobody clicked within two minutes could never be opened.
 Creating an application ends the same way. `launcher.appCreate` is a `write`,
 which on channel `user` is a person's own click, and it finishes by opening the
 new application's tab through the same function `appOpen` uses — so the address
-never reaches the page that asked for it. The engineer's `apps.create` is a
-`write` too, so on channel `ai` it asks first, and it opens nothing: a tool that
-reported a tab had opened would be telling somebody about a screen that had not
-changed. Neither returns a path outside the launcher's root, and neither
-returns a URL. The one thing creation does that opening does not is fetch: the
-starter's dependencies come from the registry, once, in the same install
-`import` has always run.
+never reaches the page that asked for it. The engineer's `apps.create` is
+`external`, because the one thing creation does that opening does not is fetch:
+the starter's dependencies come from the registry, once, in the same install
+`import` has always run. On channel `ai` that asks first, as a `write` would
+have, and it opens nothing: a tool that reported a tab had opened would be
+telling somebody about a screen that had not changed. Neither route returns a
+path outside the launcher's root, and neither returns a URL.
 
 ## Approvals
 

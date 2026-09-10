@@ -122,11 +122,11 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     description:
       'Create a new application from the starter: a list of items with a label, a note and a done flag. Writes the source workspace, installs its dependencies, builds the first release and makes it current. Choose a short id from the name. Creation needs the network once.',
     inputSchema: createInput.toJsonSchema(),
-    // A write, so the person is asked before an application appears on their
-    // computer. It is not `external`, because everything it touches is theirs:
-    // the one thing that leaves the machine is the dependency install, which is
-    // the same fetch `import` has always made.
-    effect: 'write',
+    // `external`, because creation installs the application's dependencies from
+    // the registry: it reaches the network, which is what that classification
+    // names. The person is asked before an application appears on their
+    // computer, as they are for every write.
+    effect: 'external',
     run: async (input) => {
       const { appId, name, description } = createInput.parse(input);
       const created = await createApplication({

@@ -31,7 +31,6 @@ activate it.
 # The workspace
 
 Each application has a source workspace with a fixed shape:
-
 - \`autoapp.json\` — \`appId\`, \`name\`, \`schemaVersion\`, \`migrations\`,
   \`capabilities\`, \`acceptance\`.
 - \`src/shared/contract.ts\` — exports \`contract\`. Every route needs an
@@ -39,32 +38,32 @@ Each application has a source workspace with a fixed shape:
 - \`src/shared/views.ts\` — exports the view specification. Components keep
   their \`id\`: a person's customisations key on it, and renaming one loses them.
 - \`src/host/app.ts\` — exports \`start\` and \`migrate\`.
-- \`src/ui/main.tsx\` and \`src/ui/index.html\` — the browser entry.
-- \`src/ui/styles.css\`. The renderer draws every form, table and button from
-  \`views.ts\`, coloured by \`--autoapp-*\` properties on \`:root\` (\`--autoapp-text\`,
-  \`--autoapp-input\`, …). Set those; \`.input\` styles nothing.
+- \`src/ui/\` — \`main.tsx\`, \`index.html\`, \`styles.css\`. The renderer draws every
+  form, table and button from \`views.ts\`, coloured by \`--autoapp-*\` on \`:root\`.
 
-Migrations are appended, never edited: one that has already run against
-somebody's data is history, and their database and your list would disagree.
+Migrations are appended and never edited. One that has already run against
+somebody's data is history; changing it means their database and your list
+disagree for ever.
 
 # How to work
 
-If the person asks for an application that does not exist yet, create it with
-\`apps.create\` — a short id from its name — then continue below with that id.
-Creation installs dependencies and needs the network once.
+If the person asks for an application that does not exist, create it with
+\`apps.create\` — a short id from its name. It needs the network once.
 
 1. Find the application with \`apps.list\` if you were not told its id. Then
    read its specification with \`spec.read\`, and read every file you are going
    to change with \`source.read\`. Do not guess at a file's contents.
-2. Say what will be different in a sentence or two, and add or update an
-   acceptance example in \`autoapp.json\` that fails today and passes afterwards.
-3. Read the file with \`source.read\`, then change it with \`source.edit\`. Make
-   each \`find\` the smallest block that occurs only once — three to eight
+2. Say what the application will do differently, in one or two sentences, and
+   add or update an acceptance example in \`autoapp.json\` that would fail today
+   and pass afterwards.
+3. Read the file with \`source.read\`, then change it with \`source.edit\`.
+   Make each \`find\` the smallest block that occurs only once — three to eight
    lines is right. Leading whitespace need not match: the file keeps its own
-   indentation. Send several small hunks rather than one large one; hunks under
-   a kilobyte land, and ones over two kilobytes have been measured not to. Use
-   \`source.change\` only to create a new file: replacing a whole file costs far
-   more than the edit is worth.
+   indentation, so copy the lines and do not worry about the spaces. Send
+   several small hunks rather than one large one; hunks under a kilobyte land,
+   and ones over two kilobytes have been measured not to. Use \`source.change\`
+   only to create a new file: it replaces a whole file, and for anything but a
+   tiny one that costs far more than the edit is worth.
 4. Build with \`candidate.build\`. If it reports problems, fix them and build
    again. Keep going until it passes.
 5. Preview with \`candidate.preview\`, then \`candidate.check\`.
