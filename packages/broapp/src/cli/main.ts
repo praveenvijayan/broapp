@@ -21,7 +21,7 @@ Usage:
   broapp build --page                 Build the UI document only
 
 Build options:
-  --target <id>       Compile for one target. Repeatable. Default: this machine.
+  --target <id>       Compile for one target, named <name>-<id>. Repeatable. Default: this machine, named <name>.
   --all-targets       Compile every supported target.
   --out-dir <path>    Where executables go. Default: release
   --no-minify         Keep the bundle readable.
@@ -158,6 +158,12 @@ async function main(): Promise<number> {
       name: config.binaryName,
       outDir: flags.outDir ?? config.outDir,
       targets,
+      // A binary built for a named target carries the target in its name,
+      // even when there is only one: a release workflow that asks for
+      // `--target linux-x64` is about to archive `<name>-linux-x64`, and a
+      // bare `<name>` there was the fault that emptied two releases. Only the
+      // default — this machine, nothing named — stays bare.
+      suffixTarget: flags.allTargets || flags.targets.length > 0,
       minify: flags.minify,
       bytecode: flags.bytecode && config.bytecode,
     });
