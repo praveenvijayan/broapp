@@ -65,24 +65,18 @@ async function compile(target: Target | null): Promise<number> {
 }
 
 async function main(): Promise<number> {
-  // The page is part of the binary: `src/launcher/main.ts` imports it as text.
-  const page = Bun.spawn({
-    cmd: ['bun', 'run', 'scripts/build-page.ts'],
+  // Both of the launcher's artefacts are part of the binary: `main.ts` imports
+  // the page as text and the starter workspace as JSON, and a binary without
+  // the second is a **New application** button that cannot work. `build:assets`
+  // is the same script the pack and the publish workflow call, so a binary and
+  // a tarball never disagree about what was built.
+  const assets = Bun.spawn({
+    cmd: ['bun', 'run', 'build:assets'],
     cwd: packageDir,
     stdout: 'inherit',
     stderr: 'inherit',
   });
-  if ((await page.exited) !== 0) return 1;
-
-  // And so is the starter workspace: `main.ts` imports it as JSON, and a
-  // binary without it is a **New application** button that cannot work.
-  const template = Bun.spawn({
-    cmd: ['bun', 'run', 'scripts/build-template.ts'],
-    cwd: packageDir,
-    stdout: 'inherit',
-    stderr: 'inherit',
-  });
-  if ((await template.exited) !== 0) return 1;
+  if ((await assets.exited) !== 0) return 1;
 
   if (argv.includes('--all-targets')) {
     for (const target of TARGETS) await compile(target);

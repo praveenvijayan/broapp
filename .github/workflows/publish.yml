@@ -45,17 +45,13 @@ jobs:
       - name: Stage the template into the generator
         run: bun run scripts/stage-template.ts
 
-      # `broapp-autoapp` ships its own page, built the way an application's is
-      # and imported by `src/launcher/main.ts`. It is not in git, so publishing
-      # without this step produces a package whose launcher cannot start.
-      - name: Build the launcher's page
-        run: bun run --cwd packages/broapp-autoapp build:page
-
-      # The starter workspace `src/launcher/main.ts` imports as JSON. Also not
-      # in git: a tarball without it is a launcher whose New application
-      # button has nothing to write.
-      - name: Pack the starter workspace
-        run: bun run --cwd packages/broapp-autoapp build:template
+      # `broapp-autoapp` ships two artefacts `src/launcher/main.ts` imports:
+      # its own page, built the way an application's is, and the starter
+      # workspace it copies for a new application. Neither is in git, so
+      # publishing without this step produces a package whose launcher cannot
+      # start, or one whose New application button has nothing to write.
+      - name: Build the launcher's page and starter template
+        run: bun run --cwd packages/broapp-autoapp build:assets
 
       # Order matters: the provider packages and the generator depend on the
       # published broapp, so it goes first and create-broapp last.

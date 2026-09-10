@@ -33,14 +33,17 @@ const PUBLISHED = [
 /**
  * Packages that have to build something before they are packed.
  *
- * The launcher's own page is an inlined, hash-pinned document built the same
- * way an application's is, and `src/launcher/main.ts` imports it. It is not in
- * git — no built artefact is — so packing without building it first produces a
- * tarball whose binary cannot start. This is the same reason the generator's
- * template is staged above.
+ * The launcher ships two artefacts `src/launcher/main.ts` imports: its own
+ * page, an inlined hash-pinned document built the way an application's is, and
+ * the starter workspace it writes for a new application. Neither is in git —
+ * no built artefact is — so packing without building them first produces a
+ * tarball whose binary cannot start, or one whose **New application** button
+ * has nothing to copy. `build:assets` is the one script that makes both, so
+ * that a third artefact added later is added in one place. This is the same
+ * reason the generator's template is staged above.
  */
 const PREPARED: Record<string, readonly string[]> = {
-  'broapp-autoapp': ['bun', 'run', 'build:page'],
+  'broapp-autoapp': ['bun', 'run', 'build:assets'],
   // `styles.css` is committed and a test keeps it fresh, but a pack that
   // shipped a stale one would be wrong in the one place nobody re-runs the
   // tests: somebody else's install.

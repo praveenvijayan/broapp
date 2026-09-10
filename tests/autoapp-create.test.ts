@@ -172,7 +172,10 @@ describe('the starter template', () => {
 
   test('refuses a tree with somebody else’s build in it', () => {
     // The check is on the directory in git, so it is asserted against a
-    // directory made here rather than by breaking the real one.
+    // directory made here rather than by breaking the real one. The run root
+    // is made first: `afterEach` removes it when it empties, and this test can
+    // be the first in the file to run, so nothing else has necessarily made it.
+    mkdirSync(runRoot, { recursive: true });
     const scratch = mkdtempSync(join(runRoot, 'pack-'));
     try {
       mkdirSync(join(scratch, 'node_modules'), { recursive: true });

@@ -80,6 +80,7 @@
   "scripts": {
     "build:page": "bun run scripts/build-page.ts",
     "build:template": "bun run scripts/build-template.ts",
+    "build:assets": "bun run build:page && bun run build:template",
     "build:launcher": "bun run scripts/build-launcher.ts",
     "build:all": "bun run scripts/build-launcher.ts --all-targets"
   }
