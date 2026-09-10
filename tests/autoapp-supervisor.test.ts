@@ -9,10 +9,10 @@
  * else could go right.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { buildCandidate, createSupervisor, isCompiled, isCompiledEntry, selfCommand, type Supervisor } from 'broapp-autoapp/launcher';
+import { buildCandidate, createSupervisor, isCompiled, selfCommand, type Supervisor } from 'broapp-autoapp/launcher';
 import { layout, setCurrent } from 'broapp-autoapp/spec';
 
 const fixture = join(import.meta.dir, 'fixtures', 'autoapp-app');
@@ -32,20 +32,34 @@ afterEach(async () => {
   }
 });
 
-describe('isCompiledEntry', () => {
-  // What a compiled binary's `Bun.main` reads on each platform. `import.meta.path`
-  // is deliberately not the input: since Bun 1.4 it is the original source path
-  // inside a binary too, which is how the launcher came to spawn itself with
-  // `main.ts` as a command.
-  test('recognises the virtual root Bun gives a compiled entry', () => {
-    expect(isCompiledEntry('/$bunfs/root/broapp-autoapp')).toBe(true);
-    expect(isCompiledEntry(String.raw`B:\~BUN\root\broapp-autoapp.exe`)).toBe(true);
+describe('isCompiled', () => {
+  // The question is asked of the runtime rather than of a path's spelling.
+  // Reading it out of `Bun.main` was right on POSIX and wrong on Windows, and
+  // a launcher that thinks it is running from source spawns itself with
+  // `main.ts` as a command, which a binary rejects. `import.meta.path` is no
+  // help either: since Bun 1.4 it is the original source path inside a binary.
+  test('this test process is not a compiled binary', () => {
+    expect(isCompiled()).toBe(false);
+    expect(Bun.isStandaloneExecutable).toBe(false);
   });
 
-  test('a source path, even one that mentions bunfs, is not compiled', () => {
-    expect(isCompiledEntry(join(import.meta.dir, '..', 'packages', 'broapp-autoapp', 'src', 'launcher', 'main.ts'))).toBe(false);
-    expect(isCompiledEntry('/home/me/$bunfs/root/main.ts')).toBe(false);
-    expect(isCompiledEntry(Bun.main)).toBe(isCompiled());
+  test('a binary compiled here says it is one', async () => {
+    mkdirSync(runRoot, { recursive: true });
+    const directory = mkdtempSync(join(runRoot, 'compiled-'));
+    const entry = join(directory, 'probe.ts');
+    writeFileSync(entry, 'console.log(String(Bun.isStandaloneExecutable));\n');
+    const outfile = join(directory, `probe${process.platform === 'win32' ? '.exe' : ''}`);
+    const built = Bun.spawn({
+      cmd: ['bun', 'build', '--compile', entry, '--outfile', outfile],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    expect(await built.exited).toBe(0);
+    const ran = Bun.spawn({ cmd: [outfile], stdout: 'pipe', stderr: 'pipe' });
+    const [code, out] = await Promise.all([ran.exited, new Response(ran.stdout).text()]);
+    expect(code).toBe(0);
+    expect(out.trim()).toBe('true');
+    rmSync(directory, { recursive: true, force: true });
   });
 });
 

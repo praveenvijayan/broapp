@@ -17,7 +17,7 @@ export type { LauncherContract } from './contract.ts';
 export { createLauncherTab } from './tab.ts';
 export type { CreateLauncherTabOptions, LauncherTab } from './tab.ts';
 
-export { createSupervisor, isCompiled, isCompiledEntry, selfCommand } from './supervisor.ts';
+export { createSupervisor, isCompiled, selfCommand } from './supervisor.ts';
 export type {
   ChildHandle,
   HealthReport,

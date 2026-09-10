@@ -143,29 +143,23 @@ function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promis
 }
 
 /**
- * Bun names a compiled binary's entry module under a virtual root. This is the
- * one signal that says whether the launcher running now is a single file or a
- * tree of sources; `process.execPath` alone does not, since either way it is a
- * path to something that runs.
+ * Whether this launcher is running from a compiled binary.
  *
- * The signal is `Bun.main`, not `import.meta.path`. Since Bun 1.4 a compiled
- * binary reports each module's *original* source path in `import.meta`, so a
- * test on it said "from source" inside every binary, and the launcher then
- * spawned itself with `main.ts` as its first argument — which the child read
- * as an unknown command and exited. The CI smoke on all three platforms was
- * the first to notice. `Bun.main` still carries the virtual root
- * (`/$bunfs/root/<name>` on POSIX, `B:\~BUN\root\<name>` on Windows).
+ * `process.execPath` cannot answer this, since either way it is a path to
+ * something that runs, and neither can `import.meta.path`: since Bun 1.4 a
+ * compiled binary reports each module's *original* source path there, so a
+ * test on it said "from source" inside every binary and the launcher spawned
+ * itself with `main.ts` as its first argument — which the child read as an
+ * unknown command and exited.
+ *
+ * The answer used to be read out of `Bun.main`, which carries a virtual root
+ * inside a binary. That is a guess about a path's spelling, and it was wrong
+ * on Windows: the same fault came back on that runner alone while the other
+ * two were green. `Bun.isStandaloneExecutable` is the runtime's own answer to
+ * exactly this question, with no format to get wrong.
  */
-const COMPILED_ROOT = /^(\/\$bunfs\/|[A-Za-z]:\\~BUN\\)/;
-
-/** Whether `entry` is the entry module of a compiled binary. Exported for its test. */
-export function isCompiledEntry(entry: string): boolean {
-  return COMPILED_ROOT.test(entry);
-}
-
-/** Whether this launcher is running from a compiled binary. */
 export function isCompiled(): boolean {
-  return isCompiledEntry(Bun.main);
+  return Bun.isStandaloneExecutable;
 }
 
 /**
