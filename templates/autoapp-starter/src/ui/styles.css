@@ -1,0 +1,66 @@
+/*
+ * The page around the renderer, and the palette the renderer draws with.
+ *
+ * The renderer draws every form, table and button itself, coloured by the
+ * `--autoapp-*` custom properties on `:root`. Setting those is how an
+ * application looks like itself; writing rules for `.input` or `.table` is not,
+ * because those elements are not drawn here.
+ *
+ * Both colour schemes are defined. A page that leaves this to the browser gets
+ * light text on a white field the first time somebody's machine is in dark
+ * mode, and that is not a bug anybody enjoys finding.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --border: #dfe3ea;
+  --text: #23262b;
+  --text-muted: #6b7280;
+  --accent: #2a5bd7;
+
+  /* What the renderer reads. Every one of them follows the palette above. */
+  --autoapp-heading: var(--text);
+  --autoapp-text: var(--text);
+  --autoapp-text-muted: var(--text-muted);
+  --autoapp-muted: var(--text-muted);
+  --autoapp-border: var(--border);
+  --autoapp-surface: var(--surface);
+  --autoapp-input: var(--surface);
+  --autoapp-button: var(--bg);
+  --autoapp-button-hover: var(--border);
+  --autoapp-accent: var(--accent);
+  --autoapp-code-surface: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a;
+    --surface: #1e2024;
+    --border: #32353b;
+    --text: #eceef1;
+    --text-muted: #a2a7b0;
+    --accent: #7aa2ff;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 2rem 1.25rem 4rem;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+#root {
+  margin: 0 auto;
+  max-width: 52rem;
+}

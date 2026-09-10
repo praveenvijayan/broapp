@@ -95,7 +95,10 @@ jobs:
       # `autoapp-spec` is here for one case the other files cannot reach on
       # Windows: moving `current` onto an existing pointer file, which is a
       # `MoveFileEx` replacement there rather than a POSIX rename.
-      - run: bun test tests/autoapp-spike.test.ts tests/autoapp-spec.test.ts tests/autoapp-activation.test.ts tests/autoapp-mcp.test.ts
+      # `autoapp-create` is here for the platform question the template raises:
+      # it is packed with forward-slashed paths and written back out with
+      # `join`, and Windows is the only place that distinction can be wrong.
+      - run: bun test tests/autoapp-spike.test.ts tests/autoapp-spec.test.ts tests/autoapp-activation.test.ts tests/autoapp-mcp.test.ts tests/autoapp-create.test.ts
       # Drives the compiled binary end to end — import, serve, the control
       # connection, build, activate, a crash past the switch, and recovery.
       # This is the step that catches a packaging fault the module tests

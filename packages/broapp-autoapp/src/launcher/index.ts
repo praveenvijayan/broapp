@@ -34,7 +34,16 @@ export type { KeepServingOptions } from './keepalive.ts';
 export { startControl } from './control.ts';
 export type { Control, ControlFile, StartControlOptions } from './control.ts';
 
-export { buildCandidate } from './candidate.ts';
+export { createApplication } from './create.ts';
+export type { CreateOptions, CreateResult } from './create.ts';
+
+export { STARTER_MARKERS, writeStarter } from './starter.ts';
+export type { StarterTemplate, StarterValues } from './starter.ts';
+
+export { adopt, prepareWorkspace } from './workspace.ts';
+export type { PrepareOptions, PrepareResult } from './workspace.ts';
+
+export { buildCandidate, SOURCE } from './candidate.ts';
 export type {
   BuildCandidateParams,
   BuildCandidateResult,

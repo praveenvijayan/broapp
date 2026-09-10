@@ -85,6 +85,27 @@ export const launcherContract = defineContract({
       output: s.object({ apps: s.array(appSummary, { max: 500 }) }),
       summary: 'Every application on this computer, and whether it is running.',
     },
+    'launcher.appCreate': {
+      // A write, like `appOpen`: a person's own click, and it ends by opening a
+      // tab. The engineer reaches the same function through `apps.create`,
+      // which asks first because it arrives on channel `ai`.
+      effect: 'write',
+      input: s.object({
+        appId: s.string({ min: 3, max: 40 }),
+        name: s.string({ min: 1, max: 200 }),
+        description: s.optional(s.string({ max: 400 })),
+      }),
+      output: s.object({
+        ok: s.boolean(),
+        releaseId: s.nullable(s.string({ max: 64 })),
+        installed: s.boolean(),
+        problems: s.array(buildProblem, { max: 200 }),
+        notes: s.array(s.string({ max: 400 }), { max: 20 }),
+        opened: s.boolean(),
+      }),
+      summary:
+        'Create an application from the starter, build it, make it current, and open it in a browser tab.',
+    },
     'launcher.appOpen': {
       // A write: it may start a process and it opens a browser tab, which is
       // why only a person's own click reaches this route.

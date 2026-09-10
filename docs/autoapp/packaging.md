@@ -105,9 +105,12 @@ Four differences, each with a comment where the code makes the choice.
 A candidate build must resolve its imports without a network. It does that from
 a **vendored dependency directory per application**, not from a warmed cache:
 
-- `<root>/apps/<appId>/source/node_modules` is created at `import` time, by
-  `BUN_BE_BUN=1 <launcher> install --production --frozen-lockfile` run in the
-  source workspace. That is the one moment dependencies may be fetched.
+- `<root>/apps/<appId>/source/node_modules` is created by
+  `BUN_BE_BUN=1 <launcher> install --production` run in the source workspace,
+  once, by `import` or by `create`. Those are the two moments dependencies may
+  be fetched, and they are the same moment in the same function: a workspace
+  written from the starter has no lockfile to freeze, and the one that install
+  writes becomes the workspace's.
 - Before bundling, `buildCandidate` checks that every top-level dependency in
   the workspace's `package.json` resolves. A missing one is a `host` build
   problem naming the package: *"dependencies are installed when an application
@@ -131,16 +134,28 @@ entire source workspace and starts the release anyway.
 | **Edit offline** | Changes to an application's source build and activate with no network — as long as they use dependencies that are already installed. The engineer needs a model: with a remote provider it is unavailable offline; with a local one (Ollama) it works. | A source change rebuilds to a new release identity with no network involved, and with a `fetch` that refuses, the provider test and the engineer's chat both report the provider as unreachable rather than hanging. | the same three |
 | **Extend dependencies offline** | Refused. Adding a dependency needs the network and a re-import. | A build with a package that was never installed fails with the sentence above, naming the package. | the same three |
 
+| **Create offline** | Refused. The starter is in the binary, but the packages it depends on come from the registry. | A creation whose install fails keeps the workspace, writes no grant it did not earn, and reports what is missing; nothing pretends the dependencies arrived. | the same three |
+
 What these cases do **not** do is sever the interface — a test may not, and a
 flag cannot be trusted to. Each proves the part that is under Broapp's control
 and says so in the file's own comment. The one thing genuinely outside it,
-`bun install` reaching the registry, is confined to `import` by design and
+`bun install` reaching the registry, is confined to `import` and `create` by design and
 stated as such rather than tested.
 
 ## Publishing
 
 `broapp-autoapp` is published from `.github/workflows/publish.yml`, manually,
 with a reviewer on the environment, like every other package here.
+
+Two of its files are build artifacts rather than git contents, and both are
+imported by `src/launcher/main.ts`: the launcher's page, and
+`dist/starter-template.json` — `templates/autoapp-starter` packed by
+`scripts/build-template.ts`, embedded in every target's binary the same way the
+page is, and worth 64.5 KiB of it. `build:launcher` builds both before it
+compiles, `publish.yml` builds both before it publishes, and
+`scripts/autoapp-dry-run.ts` checks that both are in the installed tarball. A
+package without the template is a launcher whose **New application** button has
+nothing to write.
 
 Two things are particular to it. Its page is a build artifact — not in git — and
 `src/launcher/main.ts` imports it, so the workflow builds the page before

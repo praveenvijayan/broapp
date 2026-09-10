@@ -23,7 +23,9 @@ import type { Layout } from '../spec/index.ts';
 
 import { createLauncherApp, LAUNCHER_CONFIRM_TIMEOUT_MS, type LauncherApp } from './app.ts';
 import type { Journal } from './journal.ts';
+import type { StarterTemplate } from './starter.ts';
 import type { Supervisor } from './supervisor.ts';
+import type { PrepareOptions } from './workspace.ts';
 
 /** What the launcher's tab needs to exist. */
 export interface CreateLauncherTabOptions {
@@ -43,6 +45,12 @@ export interface CreateLauncherTabOptions {
   readonly logger?: HostLogger;
   /** How a tab is opened for an application or a preview. Tests stub it. */
   readonly openBrowser?: (url: string) => Promise<boolean>;
+  /** The starter workspace this launcher carries, and what it depends on. */
+  readonly template: StarterTemplate;
+  readonly versions: { readonly broapp: string; readonly autoapp: string };
+  /** Creation's two spawns, injectable so a test reaches no registry and no git. */
+  readonly install?: PrepareOptions['install'];
+  readonly initGit?: PrepareOptions['initGit'];
 }
 
 /** Everything that mounts on the launcher's bridge. */
@@ -69,7 +77,11 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     states,
     gate: options.gate,
     logger,
+    template: options.template,
+    versions: options.versions,
     ...(options.openBrowser === undefined ? {} : { openBrowser: options.openBrowser }),
+    ...(options.install === undefined ? {} : { install: options.install }),
+    ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
   });
 
   const ai = createAi({
@@ -95,6 +107,10 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       gate: options.gate,
       states,
       logger,
+      template: options.template,
+      versions: options.versions,
+      ...(options.install === undefined ? {} : { install: options.install }),
+      ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
     }),
     onRunEnd: (runId, status, summary) => options.store.finishRun(runId, status, summary),
     logger,

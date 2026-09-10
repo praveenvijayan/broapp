@@ -74,6 +74,16 @@ async function main(): Promise<number> {
   });
   if ((await page.exited) !== 0) return 1;
 
+  // And so is the starter workspace: `main.ts` imports it as JSON, and a
+  // binary without it is a **New application** button that cannot work.
+  const template = Bun.spawn({
+    cmd: ['bun', 'run', 'scripts/build-template.ts'],
+    cwd: packageDir,
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+  if ((await template.exited) !== 0) return 1;
+
   if (argv.includes('--all-targets')) {
     for (const target of TARGETS) await compile(target);
     return 0;

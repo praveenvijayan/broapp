@@ -27,8 +27,11 @@ import {
 import { activate } from './activate.ts';
 import { listApps, serving as servingChild } from './apps.ts';
 import { launcherContract, type LauncherContract } from './contract.ts';
+import { createApplication } from './create.ts';
 import type { Journal } from './journal.ts';
+import type { StarterTemplate } from './starter.ts';
 import type { ChildHandle, Supervisor } from './supervisor.ts';
+import type { PrepareOptions } from './workspace.ts';
 
 /** What the launcher's host app needs. */
 export interface CreateLauncherAppOptions {
@@ -44,6 +47,13 @@ export interface CreateLauncherAppOptions {
    * opener; tests pass a stub so a suite does not open tabs.
    */
   readonly openBrowser?: (url: string) => Promise<boolean>;
+  /** The starter workspace this launcher carries, for `launcher.appCreate`. */
+  readonly template: StarterTemplate;
+  /** The dependency ranges a created workspace is written with. */
+  readonly versions: { readonly broapp: string; readonly autoapp: string };
+  /** Creation's two spawns, injectable so a test reaches no registry and no git. */
+  readonly install?: PrepareOptions['install'];
+  readonly initGit?: PrepareOptions['initGit'];
 }
 
 /** The launcher's routes, ready to mount. */
@@ -101,7 +111,15 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
     apps: listApps(root, supervisor, journal).map((row) => ({ ...row })),
   }));
 
-  host.operation('launcher.appOpen', async ({ appId }) => {
+  /**
+   * Start an application if it is not running, and open its tab.
+   *
+   * One function rather than two: `appOpen` is a person clicking Open, and
+   * `appCreate` ends by doing exactly the same thing to the application it has
+   * just made. A copy of this that drifted would be a copy that started a child
+   * the other one would not.
+   */
+  async function openApplication(appId: string): Promise<{ opened: boolean }> {
     const existing = serving(appId);
     if (existing !== null) return await openTab(existing);
     const releaseId = readCurrent(root, appId);
@@ -117,7 +135,42 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
     // Opened from here. The address is never returned to the tab, never
     // written down, never given to a model.
     return await openTab(child);
+  }
+
+  host.operation('launcher.appCreate', async ({ appId, name, description }) => {
+    const created = await createApplication({
+      layout: root,
+      template: options.template,
+      versions: options.versions,
+      appId,
+      name,
+      ...(description === undefined ? {} : { description }),
+      logger,
+      ...(options.install === undefined ? {} : { install: options.install }),
+      ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
+    });
+    if (!created.ok) {
+      return {
+        ok: false,
+        releaseId: null,
+        installed: created.installed,
+        problems: created.problems.map((problem) => ({ ...problem })),
+        notes: [...created.notes],
+        opened: false,
+      };
+    }
+    const { opened } = await openApplication(appId);
+    return {
+      ok: true,
+      releaseId: created.releaseId,
+      installed: created.installed,
+      problems: [],
+      notes: [...created.notes],
+      opened,
+    };
   });
+
+  host.operation('launcher.appOpen', async ({ appId }) => await openApplication(appId));
 
   host.operation('launcher.appStop', async ({ appId }) => {
     const child = serving(appId);

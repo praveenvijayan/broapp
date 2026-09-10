@@ -276,6 +276,11 @@ What it adds:
 - **An MCP adapter**, `broapp-autoapp mcp <appId>`, offering `read` and `write`
   operations as tools through the same gate. `external` operations are not
   offered.
+- **Two ways in.** `broapp-autoapp import <sourceDir> --as <appId>` takes a
+  workspace that already exists; `broapp-autoapp create <appId> [--name …]` —
+  the **New application** button, and the engineer's `apps.create` — writes out
+  the starter workspace carried inside the launcher's binary. Both then install,
+  build and make current through the same code.
 
 The one thing to say out loud whenever it comes up: a candidate release's host
 code is **trusted local code** — crash isolated in its own child process, not

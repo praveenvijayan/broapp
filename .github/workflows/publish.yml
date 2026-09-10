@@ -51,6 +51,12 @@ jobs:
       - name: Build the launcher's page
         run: bun run --cwd packages/broapp-autoapp build:page
 
+      # The starter workspace `src/launcher/main.ts` imports as JSON. Also not
+      # in git: a tarball without it is a launcher whose New application
+      # button has nothing to write.
+      - name: Pack the starter workspace
+        run: bun run --cwd packages/broapp-autoapp build:template
+
       # Order matters: the provider packages and the generator depend on the
       # published broapp, so it goes first and create-broapp last.
       - name: Publish broapp

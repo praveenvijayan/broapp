@@ -56,6 +56,7 @@ import {
   type CandidateStates,
 } from 'broapp-autoapp/engineer';
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
+import { STARTER, STARTER_VERSIONS } from './autoapp-template.ts';
 import { harness, type Harness } from './harness.ts';
 
 /** The compiled binary every child in this file is started from. */
@@ -126,7 +127,20 @@ function makeWorld(options: { mode?: 'live' | 'preview' } = {}): World {
   const journal = openJournal(root.journal);
   const supervisor = createSupervisor({ execPath: launcher, logger: quiet });
   const states = createCandidateStates();
-  const tools = engineerTools({ layout: root, supervisor, journal, gate, states, logger: quiet });
+  const tools = engineerTools({
+    layout: root,
+    supervisor,
+    journal,
+    gate,
+    states,
+    logger: quiet,
+    template: STARTER,
+    versions: STARTER_VERSIONS,
+    // Nothing in this file creates an application, and nothing in it may reach
+    // a registry or somebody's git configuration.
+    install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
+    initGit: () => false,
+  });
 
   const built: World = { root, journal, supervisor, store, states, gate, tools, directory };
   world = built;
@@ -964,6 +978,10 @@ describe.skipIf(!available)('the launcher tab', () => {
       gate: where.gate,
       dataDir: join(where.directory, 'launcher'),
       store: where.store,
+      template: STARTER,
+      versions: STARTER_VERSIONS,
+      install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
+      initGit: () => false,
       providers: [adapter],
       fetch: Object.assign(() => Promise.reject(new Error('no network in tests')), {
         preconnect: () => undefined,

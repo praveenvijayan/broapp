@@ -1,0 +1,22 @@
+{
+  "appId": "__APP_ID__",
+  "name": "__APP_NAME__",
+  "schemaVersion": 1,
+  "capabilities": [],
+  "migrations": [
+    {
+      "id": "001-create-items",
+      "fromSchemaVersion": 0,
+      "toSchemaVersion": 1,
+      "checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "description": "Create the items table."
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "list-works",
+      "title": "The list can be read",
+      "steps": [{ "route": "items.list", "input": null }]
+    }
+  ]
+}

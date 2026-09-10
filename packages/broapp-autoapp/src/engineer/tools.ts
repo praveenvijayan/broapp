@@ -22,9 +22,12 @@ import { s } from 'broapp/shared';
 import { activate } from '../launcher/activate.ts';
 import { listApps } from '../launcher/apps.ts';
 import { buildCandidate } from '../launcher/candidate.ts';
+import { createApplication } from '../launcher/create.ts';
 import type { Journal } from '../launcher/journal.ts';
 import { snapshotDirectory } from '../launcher/snapshot.ts';
+import type { StarterTemplate } from '../launcher/starter.ts';
 import type { Supervisor } from '../launcher/supervisor.ts';
+import type { PrepareOptions } from '../launcher/workspace.ts';
 import {
   diffCapabilities,
   readCurrent,
@@ -53,6 +56,12 @@ export interface EngineerToolsOptions {
   readonly gate: Gate;
   readonly states: CandidateStates;
   readonly logger?: HostLogger;
+  /** The starter workspace `apps.create` writes, and what it depends on. */
+  readonly template: StarterTemplate;
+  readonly versions: { readonly broapp: string; readonly autoapp: string };
+  /** Creation's two spawns, injectable so a test reaches no registry and no git. */
+  readonly install?: PrepareOptions['install'];
+  readonly initGit?: PrepareOptions['initGit'];
 }
 
 /** How long a preview child gets to stop. */
@@ -101,6 +110,49 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
           schemaVersion: row.schemaVersion,
         })),
       }),
+  });
+
+  const createInput = s.object({
+    appId: s.string({ min: 3, max: 40 }),
+    name: s.string({ min: 1, max: 200 }),
+    description: s.optional(s.string({ max: 400 })),
+  });
+  tools['apps.create'] = guardedTool(gate, {
+    name: 'apps.create',
+    description:
+      'Create a new application from the starter: a list of items with a label, a note and a done flag. Writes the source workspace, installs its dependencies, builds the first release and makes it current. Choose a short id from the name. Creation needs the network once.',
+    inputSchema: createInput.toJsonSchema(),
+    // A write, so the person is asked before an application appears on their
+    // computer. It is not `external`, because everything it touches is theirs:
+    // the one thing that leaves the machine is the dependency install, which is
+    // the same fetch `import` has always made.
+    effect: 'write',
+    run: async (input) => {
+      const { appId, name, description } = createInput.parse(input);
+      const created = await createApplication({
+        layout: root,
+        template: options.template,
+        versions: options.versions,
+        appId,
+        name,
+        ...(description === undefined ? {} : { description }),
+        logger,
+        ...(options.install === undefined ? {} : { install: options.install }),
+        ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
+      });
+      // The route's output without `opened`: a tool never opens a tab, and a
+      // model that was told one had opened would say so to somebody looking at
+      // a screen where nothing had.
+      return created.ok
+        ? { ok: true, releaseId: created.releaseId, installed: created.installed, notes: created.notes, problems: [] }
+        : {
+            ok: false,
+            releaseId: null,
+            installed: created.installed,
+            notes: created.notes,
+            problems: created.problems,
+          };
+    },
   });
 
   tools['spec.read'] = guardedTool(gate, {

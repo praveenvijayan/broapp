@@ -27,6 +27,7 @@ prompt starts by reading the reports so far.
 | 08c | `08c-engineer-usability.md` | Indentation-tolerant hunks, `apps.list`, a ten-minute confirm window for the engineer with a countdown. | Tests green. Demo step 3 rerun. |
 | 09 | `09-packaging-matrix.md` | Linux and Windows coverage for the supervision chain; fixed packaged dependencies; the three offline tiers documented as tested. | CI green on every OS. |
 | 10 | `10-phase-2-backlog.md` | Not a build prompt. What was deliberately deferred and why. | — |
+| 11 | `11-new-application.md` | A starter workspace embedded in the launcher binary; `launcher.appCreate`, a `create` command and an `apps.create` tool sharing one implementation with `import`; a **New application** button in the tab. | Tests green. Smoke test's create step passes. |
 
 ## How to run one prompt
 

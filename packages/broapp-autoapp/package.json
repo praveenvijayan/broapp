@@ -32,6 +32,7 @@
   "files": [
     "src",
     "dist/launcher-page.html",
+    "dist/starter-template.json",
     "README.md",
     "LICENSE"
   ],
@@ -78,6 +79,7 @@
   },
   "scripts": {
     "build:page": "bun run scripts/build-page.ts",
+    "build:template": "bun run scripts/build-template.ts",
     "build:launcher": "bun run scripts/build-launcher.ts",
     "build:all": "bun run scripts/build-launcher.ts --all-targets"
   }

@@ -13,6 +13,8 @@
  * sequence.
  */
 import launcherPage from '../../dist/launcher-page.html' with { type: 'text' };
+import starterTemplate from '../../dist/starter-template.json' with { type: 'json' };
+import selfManifest from '../../package.json' with { type: 'json' };
 
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -43,7 +45,10 @@ import { keepServing } from './keepalive.ts';
 import { recover } from './recover.ts';
 import { createSupervisor, type Supervisor } from './supervisor.ts';
 import { createLauncherGate } from './app.ts';
+import { createApplication } from './create.ts';
+import type { StarterTemplate } from './starter.ts';
 import { createLauncherTab } from './tab.ts';
+import { adopt, prepareWorkspace } from './workspace.ts';
 
 /**
  * The launcher's own page, inlined into the binary.
@@ -53,11 +58,34 @@ import { createLauncherTab } from './tab.ts';
  */
 const page = launcherPage as unknown as string;
 
+/**
+ * The starter workspace, inlined into the binary the same way.
+ *
+ * A person who downloaded a launcher has no source workspace to import, so the
+ * launcher carries one. `scripts/build-template.ts` packs
+ * `templates/autoapp-starter` into this file; it is a build artefact, not in
+ * git, and `files` ships it.
+ */
+const starter = starterTemplate as StarterTemplate;
+
+/**
+ * What a created workspace depends on.
+ *
+ * Read from this package's own manifest rather than typed in, so an
+ * application is always built against the packages the launcher that created it
+ * was built against.
+ */
+const VERSIONS = {
+  broapp: selfManifest.dependencies.broapp,
+  autoapp: `^${selfManifest.version}`,
+};
+
 const HELP = `broapp-autoapp
 
 Usage:
   broapp-autoapp                        Open the launcher's own tab
   broapp-autoapp serve <appId> [--no-open]
+  broapp-autoapp create <appId> [--name <name>] [--description <text>]
   broapp-autoapp import <sourceDir> --as <appId> [--grant]
   broapp-autoapp build <appId>
   broapp-autoapp activate <appId> <releaseId>
@@ -190,6 +218,8 @@ async function openLauncher(
     }),
     dataDir,
     store,
+    template: starter,
+    versions: VERSIONS,
     providers: [anthropic(), ollama(), openai(), customServer()],
     // The offline tier tests need a launcher whose AI layer cannot reach the
     // network, and severing an interface in CI is not something a test may do.
@@ -254,41 +284,18 @@ async function importApp(
     filter: (from) => !/(^|[\\/])(node_modules|dist|release|\.git)([\\/]|$)/.test(from),
   });
 
-  // The one moment dependencies may be fetched. Everything after this — every
-  // candidate build, every activation — resolves what is already on disk, which
-  // is what makes editing an application offline mean anything.
-  //
-  // `BUN_BE_BUN=1` turns this compiled binary back into the plain `bun` CLI;
-  // report 02 verified that. It is best effort: an application whose
-  // `package.json` uses the `workspace:*` protocol cannot be installed outside
-  // its monorepo, and the examples in this repository are exactly that. A
-  // dependency that is genuinely missing is caught by the build, which names
-  // the package and says to re-import.
-  const installed = Bun.spawnSync({
-    cmd: [process.execPath, 'install', '--production', '--frozen-lockfile'],
-    cwd: app.source,
-    env: { ...process.env, BUN_BE_BUN: '1' },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  console.log(
-    installed.exitCode === 0
-      ? 'installed the application’s dependencies'
-      : `could not install dependencies here (${new TextDecoder().decode(installed.stderr).trim().split('\n').pop() ?? 'no reason given'}); the build will say if one is missing`,
-  );
-
-  // Git is optional. A candidate workspace is more useful with history, and the
-  // launcher has to work on a machine without it.
-  const git = Bun.spawnSync({ cmd: ['git', 'init', '--quiet'], cwd: app.source, stdout: 'ignore', stderr: 'ignore' });
-  console.log(git.exitCode === 0 ? 'initialised a git repository in the workspace' : 'git is not available; the workspace has no history');
-
-  const built = await buildCandidate({ layout: root, appId });
-  if (!built.ok) {
-    for (const problem of built.problems) console.error(`${problem.stage}: ${problem.message}`);
+  // Install, `git init` and build — the steps `create` also takes, in the one
+  // place both of them reach them from. The sentences this used to print are
+  // returned as `notes`, because a route and a tool have to show the same facts
+  // somewhere that is not a terminal.
+  const prepared = await prepareWorkspace({ layout: root, appId });
+  for (const note of prepared.notes) console.log(note);
+  if (!prepared.ok) {
+    for (const problem of prepared.problems) console.error(`${problem.stage}: ${problem.message}`);
     return 1;
   }
 
-  const wanted = built.spec.manifest.capabilities;
+  const wanted = prepared.spec.manifest.capabilities;
   if (wanted.length > 0) {
     console.log(`${appId} asks for:`);
     for (const capability of wanted) {
@@ -303,14 +310,38 @@ async function importApp(
       }
     }
   }
-  writeGrants(root, appId, {
+  adopt(root, appId, prepared.releaseId, wanted);
+  console.log(`${appId} ${prepared.releaseId}`);
+  return 0;
+}
+
+/**
+ * `create <appId>` — the other way in, for somebody with no workspace at all.
+ *
+ * The same lines `import` prints, for the same reason: whatever a person did
+ * to get an application, what they have afterwards is a source workspace and a
+ * release. It does not open a browser, and neither does `import`.
+ */
+async function createApp(
+  root: Layout,
+  appId: string,
+  name: string,
+  description: string,
+): Promise<number> {
+  const created = await createApplication({
+    layout: root,
+    template: starter,
+    versions: VERSIONS,
     appId,
-    releaseId: built.releaseId,
-    grantedAt: Date.now(),
-    capabilities: wanted,
+    name,
+    description,
   });
-  setCurrent(root, appId, built.releaseId);
-  console.log(`${appId} ${built.releaseId}`);
+  for (const note of created.notes) console.log(note);
+  if (!created.ok) {
+    for (const problem of created.problems) console.error(`${problem.stage}: ${problem.message}`);
+    return 1;
+  }
+  console.log(`${appId} ${created.releaseId}`);
   return 0;
 }
 
@@ -364,6 +395,17 @@ async function main(): Promise<number> {
           return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'));
         }
         return await serve(root, journal, supervisor, appId, !argv.includes('--no-open'));
+      }
+
+      case 'create': {
+        const appId = positional(argv, 1);
+        if (appId === undefined) return usage('create <appId> [--name <name>] [--description <text>]');
+        return await createApp(
+          root,
+          appId,
+          flagValue(argv, '--name') ?? appId,
+          flagValue(argv, '--description') ?? '',
+        );
       }
 
       case 'import': {

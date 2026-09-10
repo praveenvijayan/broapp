@@ -561,3 +561,56 @@ code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
 }
+
+/*
+ * The applications card's header, and the form under it.
+ *
+ * The heading and the New application button share a line so that a person
+ * with no applications at all sees the way in beside the word "Applications"
+ * rather than below an empty table.
+ */
+.launcher__card-header {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.launcher__card-header .launcher__button {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex: none;
+}
+
+.launcher__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--launcher-border);
+  border-radius: 8px;
+  background: var(--launcher-ground);
+}
+
+.launcher__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--launcher-muted);
+}
+
+.launcher__input {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--launcher-border);
+  border-radius: 7px;
+  background: var(--launcher-surface);
+  font: inherit;
+  color: var(--launcher-text);
+}
+
+.launcher__input:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 1px;
+}

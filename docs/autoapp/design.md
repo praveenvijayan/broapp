@@ -39,6 +39,17 @@ changes; it does not apply them.
 
 **The gate** is below.
 
+There are two ways an application comes to exist, and they meet after the first
+step. `import <sourceDir> --as <appId>` copies a workspace somebody already
+has. `create <appId>` — the **New application** button in the launcher's tab,
+the `create` command, and the engineer's `apps.create` tool — writes out the
+starter workspace the launcher carries inside its own binary. From there both
+take the same steps, in `src/launcher/workspace.ts`: install, `git init`,
+build, and then whatever the caller decides about capabilities. The starter is
+an ordinary Autoapp source workspace with one table and five routes; once it is
+on disk it is imported in every sense that matters, and every command and every
+tool works on it.
+
 ## The gate
 
 Every mutation of an application, from any channel, passes one gate:

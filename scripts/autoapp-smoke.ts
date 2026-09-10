@@ -198,6 +198,36 @@ async function main(): Promise<number> {
     : '';
   if (!/^[0-9a-f]{32}$/.test(first)) fail('import', `current is ${JSON.stringify(first)}`);
 
+  // 1b. Create, from the starter inside the binary.
+  //
+  // This installs from the registry *inside this repository's tree*, where
+  // resolution still finds the workspace packages above the run root. So what
+  // it proves is the command and the embedding — that the binary carries the
+  // template, writes it out, builds it and makes it current — and not that the
+  // versions the starter names are published. If the registry does not yet
+  // carry them the install fails, the build resolves upward and passes anyway,
+  // and the step says which of the two happened.
+  const created = run(['create', 'dream', '--name', 'Dream']);
+  const dreamRelease = created.stdout.trim().split(/\s+/).pop() ?? '';
+  if (created.code !== 0 || !/^[0-9a-f]{32}$/.test(dreamRelease)) {
+    fail('create', created.stderr.trim() || created.stdout.trim());
+  } else {
+    const fromRegistry = created.stdout.includes('installed the application');
+    const releases = run(['releases', 'dream']);
+    const lines = releases.stdout.trim().split('\n').filter((line) => line.trim() !== '');
+    const status = run(['status', 'dream']);
+    if (lines.length !== 1) fail('create', `releases dream printed ${String(lines.length)} lines`);
+    else if (!lines[0]?.startsWith('*')) fail('create', 'the only release is not current');
+    else if (!status.stdout.includes('granted: nothing')) {
+      fail('create', `status dream says ${JSON.stringify(status.stdout.trim())}`);
+    } else {
+      ok(
+        'create',
+        `${dreamRelease}, dependencies ${fromRegistry ? 'installed from the registry' : 'resolved from this tree after the install failed'}`,
+      );
+    }
+  }
+
   // 2. Serve, and reach it over the control connection.
   if (!(await startServing())) {
     fail('serve', 'no launcher.json appeared within 30s');

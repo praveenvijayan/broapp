@@ -68,8 +68,13 @@ export type BuildCandidateResult =
   | { readonly ok: true; readonly releaseId: string; readonly spec: AppSpec; readonly rebuilt: boolean }
   | { readonly ok: false; readonly problems: readonly BuildProblem[] };
 
-/** The fixed shape of a source workspace. */
-const SOURCE = {
+/**
+ * The fixed shape of a source workspace.
+ *
+ * Exported so the starter template can be checked against the same list the
+ * build reads, rather than against a copy of it in a test.
+ */
+export const SOURCE = {
   manifest: 'autoapp.json',
   contract: 'src/shared/contract.ts',
   views: 'src/shared/views.ts',

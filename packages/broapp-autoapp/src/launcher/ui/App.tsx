@@ -46,12 +46,15 @@ const APPS_OPEN = 'broapp-autoapp:apps-open';
 const ACTIVE_THREAD = 'broapp-autoapp:thread';
 
 /**
- * Three things the engineer can actually do, offered before anything is said.
+ * Four things the engineer can actually do, offered before anything is said.
  *
- * Each maps onto a tool it has: `apps.list`, `source.read` plus `source.edit`,
- * and the journal behind `spec.read` — see `engineer/instructions.ts`.
+ * Each maps onto a tool it has: `apps.create`, `apps.list`, `source.read` plus
+ * `source.edit`, and the journal behind `spec.read` — see
+ * `engineer/instructions.ts`. The first is left unfinished on purpose: the
+ * person completes the sentence, and what they write is the description.
  */
 const ENGINEER_SUGGESTIONS = [
+  'Create a new application for…',
   'What applications do I have?',
   'Add a field to notes',
   'What changed in the last candidate?',
@@ -122,6 +125,23 @@ export function App(): React.ReactElement {
   useEffect(() => {
     if (selected === null && rows.length > 0) setSelected(rows[0]?.appId ?? null);
   }, [rows, selected]);
+
+  // An application that has just been made, waiting for the list it is in.
+  // Selecting it before `appsList` has been read again would put the panels
+  // below on an id the table does not yet have a row for.
+  const [awaitingSelection, setAwaitingSelection] = useState<string | null>(null);
+  useEffect(() => {
+    if (awaitingSelection === null) return;
+    if (!rows.some((row) => row.appId === awaitingSelection)) return;
+    setSelected(awaitingSelection);
+    setAwaitingSelection(null);
+  }, [rows, awaitingSelection]);
+
+  /** A new application exists: refresh the list, then select it. */
+  const noteCreated = useCallback((appId: string): void => {
+    setAwaitingSelection(appId);
+    setChanged((count) => count + 1);
+  }, []);
 
   const chooseThread = useCallback((id: string): void => {
     setActiveId(id);
@@ -316,6 +336,14 @@ export function App(): React.ReactElement {
             if (call.status === 'done' && !call.tool.startsWith('source.read')) {
               setChanged((count) => count + 1);
             }
+            // An application the engineer made is one the person is about to
+            // want selected. The id comes from the call's own input, which is
+            // the only place it is spelled out: the tool's output says what
+            // was built, not what it was called.
+            if (call.status === 'done' && call.tool === 'apps.create') {
+              const made = (call.input as { appId?: unknown } | undefined)?.appId;
+              if (typeof made === 'string') noteCreated(made);
+            }
           }}
           placeholder="Ask for a change…"
           refs={selected === null ? [] : [`app:${selected}`]}
@@ -380,6 +408,7 @@ export function App(): React.ReactElement {
             apps={rows}
             selected={selected}
             onSelect={setSelected}
+            onCreated={noteCreated}
             onOpen={(appId) => void openApp(appId)}
             onStop={(appId) => void stop.run({ appId }).then(() => setChanged((count) => count + 1))}
           />
