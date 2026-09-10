@@ -38,6 +38,22 @@ platform. The release workflow keeps "compiled" and "smoke-tested" in separate
 columns for the launcher exactly as [../packaging.md](../packaging.md) does for
 an application, and the release notes say which is which.
 
+**What a release ships next to it.** A launcher can only import a source
+workspace, and somebody who downloaded a binary has no repository to take one
+from. `scripts/autoapp-starter.ts` copies the Notes example with its
+`workspace:*` dependencies pointed at the published packages, and the release
+workflow zips it as `notes-starter.zip`. `import` installs those from npm — the
+one time the launcher reaches the registry — so the ranges are read from the
+packages' own manifests, never typed in.
+
+**The compiled binary resolves differently.** Inside a compiled executable
+`Bun.resolveSync` answers from the modules embedded in the binary rather than
+from the directory it is handed, so a dependency check written over it called
+an installed package missing — but only for a workspace with its own
+`node_modules`, which nothing in the repository has. The check now walks
+`node_modules` itself, and step 7 of `scripts/autoapp-smoke.ts` imports a
+workspace outside the repository through the binary so the case stays covered.
+
 ## What runs where
 
 | Check | What it does | Runs on |

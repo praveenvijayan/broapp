@@ -118,6 +118,15 @@ jobs:
               *) chmod +x "$file"; tar -czf "$file.tar.gz" "$file" ;;
             esac
           done
+      # A launcher can only import a source workspace, and somebody who
+      # downloaded a binary has no repository to take one from. The starter is
+      # the Notes example with its dependencies pointed at the published
+      # packages, so `import` installs them from npm.
+      - name: Starter workspace
+        run: |
+          bun run scripts/autoapp-starter.ts packages/broapp-autoapp/dist
+          cd packages/broapp-autoapp/dist
+          zip -qr notes-starter.zip notes-starter
       - uses: actions/upload-artifact@v4
         with:
           name: launcher
@@ -198,6 +207,31 @@ jobs:
             Binaries are **not signed**. macOS will need Gatekeeper bypassed or
             the binary signed and notarised; Windows will show SmartScreen. See
             `docs/packaging.md`.
+
+            ## Getting started with the launcher
+
+            Download `broapp-autoapp-<target>` for your machine and
+            `notes-starter.zip`, then unpack both into one directory.
+
+            ```
+            tar -xzf broapp-autoapp-darwin-arm64.tar.gz      # or unzip the .zip on Windows
+            unzip notes-starter.zip
+            xattr -d com.apple.quarantine broapp-autoapp-darwin-arm64   # macOS only
+            ./broapp-autoapp-darwin-arm64 import ./notes-starter --as notes --grant
+            ./broapp-autoapp-darwin-arm64 serve notes
+            ```
+
+            `import` installs the starter's dependencies from npm — the one
+            time the launcher reaches the network — builds the first release
+            and makes it current. `serve` starts it as its own process and
+            opens a browser tab.
+
+            To change it, run the launcher with no arguments for its own tab,
+            pick a model provider in its settings, and describe the change; the
+            engineer proposes an edit, the launcher builds a candidate, and you
+            preview and activate it. Or edit the workspace under the launcher's
+            data directory yourself and run `build notes`. `--help` lists every
+            command; `docs/autoapp/design.md` explains the loop.
 
             Check downloads against `SHA256SUMS`:
 

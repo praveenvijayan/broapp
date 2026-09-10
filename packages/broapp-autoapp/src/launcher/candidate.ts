@@ -14,9 +14,9 @@
  * something an AI engineer runs against something it just wrote; it needs to be
  * told everything that is wrong in one pass, not the first thing.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { buildPage } from 'broapp/build';
 import type { HostLogger } from 'broapp/host';
@@ -87,6 +87,11 @@ function reason(cause: unknown): string {
   return String(cause instanceof Error ? cause.message : cause);
 }
 
+/** The bundler's messages, one line each, for a build problem. */
+function describeLogs(logs: ReadonlyArray<string | { message: string }>): string {
+  return logs.map((log) => (typeof log === 'string' ? log : log.message)).join('; ');
+}
+
 /** What a build says when a dependency is not installed. */
 const MISSING_DEPENDENCY =
   'dependencies are installed when an application is imported; re-import to add one';
@@ -106,7 +111,23 @@ const MISSING_DEPENDENCY =
  * release*, which bundles what it needs and resolves nothing at run time. What
  * this check is for is the other half — a package that is nowhere at all, which
  * only the network could supply.
+ *
+ * The walk is written out rather than delegated to `Bun.resolveSync`, because
+ * inside a compiled executable that function does not consult the directory it
+ * is handed: it answers from the modules embedded in the binary, and reports a
+ * package that is installed in the workspace as missing. The bundler itself
+ * resolves from the workspace correctly; only the lookup differs.
  */
+function isInstalled(name: string, from: string): boolean {
+  let dir = from;
+  for (;;) {
+    if (existsSync(join(dir, 'node_modules', name, 'package.json'))) return true;
+    const parent = dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
+}
+
 function checkDependencies(sourceDir: string): readonly BuildProblem[] {
   let manifest: { dependencies?: Record<string, string> };
   try {
@@ -119,9 +140,7 @@ function checkDependencies(sourceDir: string): readonly BuildProblem[] {
 
   const problems: BuildProblem[] = [];
   for (const name of Object.keys(manifest.dependencies ?? {})) {
-    try {
-      Bun.resolveSync(name, sourceDir);
-    } catch {
+    if (!isInstalled(name, sourceDir)) {
       problems.push({ stage: 'host', message: `${name} is not installed. ${MISSING_DEPENDENCY}` });
     }
   }
@@ -174,11 +193,14 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
       target: 'bun',
       format: 'esm',
       minify: false,
+      // Without this the bundler throws an error whose message is only
+      // "Bundle failed", and the messages that say why are lost.
+      throw: false,
     }).catch((cause: unknown) => ({ success: false as const, logs: [reason(cause)] }));
     if (!shared.success) {
       return {
         ok: false,
-        problems: [{ stage: 'contract', message: `the shared layer would not bundle: ${String(shared.logs.join('; '))}` }],
+        problems: [{ stage: 'contract', message: `the shared layer would not bundle: ${describeLogs(shared.logs)}` }],
       };
     }
     try {
@@ -248,9 +270,10 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
       format: 'esm',
       external: ['bun:sqlite'],
       minify: false,
+      throw: false,
     }).catch((cause: unknown) => ({ success: false as const, logs: [reason(cause)] }));
     if (!host.success) {
-      problems.push({ stage: 'host', message: `the host bundle failed: ${String(host.logs.join('; '))}` });
+      problems.push({ stage: 'host', message: `the host bundle failed: ${describeLogs(host.logs)}` });
     }
 
     if (problems.length > 0 || exported === null || views === null) return { ok: false, problems };

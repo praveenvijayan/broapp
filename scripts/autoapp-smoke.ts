@@ -16,7 +16,10 @@
  * somewhere must say so out loud rather than quietly passing.
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+
+import { packLocal } from './pack-local.ts';
 
 const repo = resolve(import.meta.dir, '..');
 // `.exe` on Windows: `bun build --compile` adds the suffix the platform needs.
@@ -294,6 +297,50 @@ async function main(): Promise<number> {
   } else if (controlFile() !== null) {
     fail('cleanup', 'launcher.json outlived the launcher');
   } else ok('cleanup', 'launcher.json removed on exit');
+
+  // 7. A workspace outside this repository, through the compiled binary.
+  //
+  // Every step above resolves the fixture's dependencies through the
+  // monorepo's own `node_modules`, which is exactly what a person who
+  // downloaded the launcher does not have. Their workspace installs its own,
+  // and the compiled binary has to find them there. It did not, once:
+  // `Bun.resolveSync` inside a compiled executable answers from the modules
+  // embedded in the binary rather than from the directory it is given, so the
+  // dependency check called an installed package missing. This is the case
+  // that would have caught it — the binary, a workspace with its own
+  // `node_modules`, and nothing of the repository above it.
+  const outside = join(tmpdir(), `autoapp-smoke-outside-${String(process.pid)}`);
+  rmSync(outside, { recursive: true, force: true });
+  mkdirSync(outside, { recursive: true });
+  try {
+    const packed = await packLocal(join(outside, 'packs'));
+    const tarball = (name: string): string => {
+      const found = packed.find((entry) => entry.name === name)?.tarball;
+      if (found === undefined) throw new Error(`${name} was not packed`);
+      return found;
+    };
+    const source = join(outside, 'items');
+    cpSync(fixture, source, { recursive: true });
+    const manifestPath = join(source, 'package.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      dependencies: Record<string, string>;
+    };
+    for (const name of Object.keys(manifest.dependencies)) {
+      if (manifest.dependencies[name] === 'workspace:*') manifest.dependencies[name] = `file:${tarball(name)}`;
+    }
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+    const data = join(outside, 'data');
+    const imported = run(['import', source, '--as', 'items', '--grant'], { BROAPP_DATA_DIR: data });
+    const release = imported.stdout.trim().split(/\s+/).pop() ?? '';
+    if (imported.code !== 0 || !/^[0-9a-f]{32}$/.test(release)) {
+      fail('outside', imported.stderr.trim() || imported.stdout.trim());
+    } else ok('outside', `imported with its own node_modules: ${release}`);
+  } catch (cause) {
+    fail('outside', String(cause instanceof Error ? cause.message : cause));
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
 
   return failures.length === 0 ? 0 : 1;
 }

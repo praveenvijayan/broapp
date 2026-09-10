@@ -49,6 +49,29 @@ The security-sensitive parts — the trust fence, the one-time launch token, the
 session cookie, the framing, resume — are
 [Brobridge](https://github.com/praveenvijayan/brobridge), used unchanged.
 
+## Download the launcher
+
+Every [release](https://github.com/praveenvijayan/broapp/releases) ships the
+Autoapp launcher as one compiled binary per target, `broapp-autoapp-<target>`,
+next to `notes-starter.zip`: the Notes example with its dependencies pointed
+at the published packages. No Bun installation is needed on the machine that
+runs them.
+
+```bash
+tar -xzf broapp-autoapp-darwin-arm64.tar.gz   # unzip the .zip on Windows
+unzip notes-starter.zip
+./broapp-autoapp-darwin-arm64 import ./notes-starter --as notes --grant
+./broapp-autoapp-darwin-arm64 serve notes
+```
+
+`import` installs the starter's dependencies from npm — the one time the
+launcher reaches the network — builds the first release and makes it current.
+`serve` runs it as its own process and opens a browser tab. Run the launcher
+with no arguments for its own tab, where the engineer proposes changes as
+candidate releases. The binaries are unsigned; on macOS remove the quarantine
+attribute first (`xattr -d com.apple.quarantine <binary>`), and see
+[docs/packaging.md](docs/packaging.md) for Windows.
+
 ## What is in here
 
 | Path | What it is |
