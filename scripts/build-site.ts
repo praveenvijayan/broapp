@@ -7,15 +7,26 @@
  * renderer is small and deliberate: a documentation site whose build pulls a
  * toolchain is a documentation site that eventually stops building.
  *
- *   bun run scripts/build-site.ts   →  site/dist/
+ *   bun run scripts/build-site.ts                →  site/dist/
+ *   bun run scripts/build-site.ts --out <dir>    →  <dir>/
  */
 import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { dirname as posixDirname, join as posixJoin, normalize as posixNormalize } from 'node:path/posix';
 import { fileURLToPath } from 'node:url';
+import manifest from '../packages/broapp/package.json' with { type: 'json' };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const out = join(root, 'site', 'dist');
+
+/**
+ * Where the site is written. The tests build into a temporary directory so
+ * they never touch a `site/dist` someone is looking at.
+ */
+function outputDir(argv: readonly string[]): string {
+  const at = argv.indexOf('--out');
+  const value = at === -1 ? undefined : argv[at + 1];
+  return value === undefined ? join(root, 'site', 'dist') : resolve(value);
+}
 
 /** One page in the site. */
 interface Page {
@@ -45,11 +56,14 @@ const PAGES: readonly Page[] = [
   { slug: 'limitations.html', title: 'Scope and limitations', source: 'docs/limitations.md', group: 'Reference' },
   { slug: 'publishing.html', title: 'Publishing', source: 'docs/publishing.md', group: 'Reference' },
 
-  { slug: 'autoapp.html', title: 'Autoapp: the design', source: 'docs/autoapp/design.md', group: 'Autoapp' },
-  { slug: 'autoapp-packaging.html', title: 'Autoapp: packaging and offline', source: 'docs/autoapp/packaging.md', group: 'Autoapp' },
-  { slug: 'autoapp-security.html', title: 'Autoapp: approvals and limits', source: 'docs/autoapp/security.md', group: 'Autoapp' },
-  { slug: 'autoapp-learning.html', title: 'Autoapp: what the launcher remembers', source: 'docs/autoapp/learning.md', group: 'Autoapp' },
-  { slug: 'autoapp-backlog.html', title: 'Autoapp: phase 2 backlog', source: 'docs/autoapp/backlog.md', group: 'Autoapp' },
+  // The group heading already says Autoapp, in the sidebar, the footer and the
+  // header tab, so the titles below do not say it again.
+  { slug: 'autoapp.html', title: 'Autoapp', source: 'docs/autoapp/README.md', group: 'Autoapp' },
+  { slug: 'autoapp-design.html', title: 'Design', source: 'docs/autoapp/design.md', group: 'Autoapp' },
+  { slug: 'autoapp-learning.html', title: 'What the launcher remembers', source: 'docs/autoapp/learning.md', group: 'Autoapp' },
+  { slug: 'autoapp-security.html', title: 'Approvals and limits', source: 'docs/autoapp/security.md', group: 'Autoapp' },
+  { slug: 'autoapp-packaging.html', title: 'Packaging and offline', source: 'docs/autoapp/packaging.md', group: 'Autoapp' },
+  { slug: 'autoapp-backlog.html', title: 'Phase 2 backlog', source: 'docs/autoapp/backlog.md', group: 'Autoapp' },
 
   { slug: 'contributing.html', title: 'Contributing', source: 'CONTRIBUTING.md', group: 'Reference' },
 ];
@@ -72,23 +86,33 @@ const ASSET_DIRS = ['diagrams'] as const;
  */
 let sourceDir = 'docs';
 
-/** Rewrite a repository-relative link to its place in the site. */
-function rewriteLink(href: string): string {
+/**
+ * Rewrite a repository-relative link to its place in the site.
+ *
+ * `from` is the directory of the document that wrote the link; it defaults to
+ * the page being rendered, and a test passes it to check one link on its own.
+ */
+export function rewriteLink(href: string, from: string = sourceDir): string {
   if (/^(?:https?:|mailto:|#)/.test(href)) return href;
 
-  // Resolved from the document that wrote it first; the flatter forms below are
-  // kept because a link may also be written from the repository root.
-  const resolved = posixNormalize(posixJoin(sourceDir, href));
+  // Resolved from the document that wrote it first, and only then the flatter
+  // forms, which are kept because a link may also be written from the
+  // repository root. The order matters: `packaging.md` written in
+  // `docs/autoapp/` would otherwise match `docs/packaging.md` by its flat form
+  // before the Autoapp page is ever considered.
+  const resolved = posixNormalize(posixJoin(from, href));
   const clean = href.replace(/^\.\//, '').replace(/^\.\.\//, '');
-  const page = PAGES.find(
-    (candidate) =>
-      candidate.source === resolved ||
-      candidate.source === clean ||
-      candidate.source === `docs/${clean}`,
-  );
+  const page =
+    PAGES.find((candidate) => candidate.source === resolved) ??
+    PAGES.find((candidate) => candidate.source === clean || candidate.source === `docs/${clean}`);
   if (page !== undefined) return page.slug;
 
-  if (ASSET_DIRS.some((dir) => clean.startsWith(`${dir}/`))) return clean;
+  // Assets are checked against the resolved path too. `clean` strips only one
+  // `../`, and a document in `docs/autoapp/` is two directories deep, so its
+  // `../../diagrams/x.svg` would never look like a diagram.
+  for (const candidate of [resolved, clean]) {
+    if (ASSET_DIRS.some((dir) => candidate.startsWith(`${dir}/`))) return candidate;
+  }
 
   // Anything else — an example README, a source file — points at the
   // repository, which is where it actually lives.
@@ -319,6 +343,24 @@ function nav(current: Page): string {
   }).join('');
 }
 
+/**
+ * The header's primary menu: one tab per group, opening the group's first page.
+ *
+ * It is derived from `PAGES` so that a new group is a new tab without anyone
+ * remembering to add one. `Start` has no tab because the brand link is its
+ * first page; Architecture and Security stay reachable from its sidebar group.
+ */
+function headerMenu(current: Page): string {
+  return GROUPS.filter((group) => group !== 'Start')
+    .map((group) => {
+      const first = PAGES.find((page) => page.group === group);
+      if (first === undefined) return '';
+      const here = current.group === group ? ' aria-current="true"' : '';
+      return `<a href="${first.slug}"${here}>${escapeHtml(group)}</a>`;
+    })
+    .join('\n    ');
+}
+
 function footerColumns(): string {
   return GROUPS.map((group) => {
     const items = PAGES.filter((page) => page.group === group)
@@ -459,17 +501,14 @@ function shell(page: Page, body: string, headings: Rendered['headings']): string
 <a class="skip" href="#main">Skip to content</a>
 
 <div class="announce">
-  <p>Version 0.1.0 · Published to npm. Scaffold with <code>bun create broapp my-app</code>.
+  <p>Version ${escapeHtml(manifest.version)} · Published to npm. Scaffold with <code>bun create broapp my-app</code>.
   <a href="https://www.npmjs.com/package/create-broapp" rel="noopener">View on npm</a></p>
 </div>
 
 <header class="topbar">
   <a class="topbar__brand" href="index.html">Broapp</a>
   <nav class="topbar__menu" aria-label="Primary">
-    <a href="architecture.html">Architecture</a>
-    <a href="security.html">Security</a>
-    <a href="host-operations.html">Guides</a>
-    <a href="comparison.html">Reference</a>
+    ${headerMenu(page)}
   </nav>
   <div class="topbar__actions">
     <a class="button button--small" href="${REPO}" rel="noopener">GitHub</a>
@@ -635,7 +674,7 @@ img { max-width: 100%; height: auto; display: block; }
 .topbar__brand { font-family: var(--display); font-size: 20px; font-weight: 500; letter-spacing: -0.4px; color: var(--ink); text-decoration: none; }
 .topbar__menu { display: flex; gap: 1.75rem; justify-content: center; }
 .topbar__menu a { color: var(--ink); font-size: 14px; text-decoration: none; }
-.topbar__menu a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.topbar__menu a:hover, .topbar__menu a[aria-current="true"] { text-decoration: underline; text-underline-offset: 4px; }
 .topbar__actions { display: flex; justify-content: flex-end; align-items: center; gap: 0.75rem; }
 .topbar__toggle {
   display: none;
@@ -844,29 +883,34 @@ th { font-family: var(--mono); font-weight: 400; color: var(--slate); font-size:
 
 /* -------------------------------------------------------------------------- */
 
-await rm(out, { recursive: true, force: true });
-await mkdir(out, { recursive: true });
+async function build(out: string): Promise<void> {
+  await rm(out, { recursive: true, force: true });
+  await mkdir(out, { recursive: true });
 
-for (const page of PAGES) {
-  const markdown = await readFile(join(root, page.source), 'utf8');
-  sourceDir = posixDirname(page.source);
-  const rendered = renderMarkdown(markdown);
-  await writeFile(join(out, page.slug), shell(page, rendered.html, rendered.headings), 'utf8');
-  console.log(`  ${page.slug.padEnd(28)} <- ${page.source}`);
-}
-
-for (const dir of ASSET_DIRS) {
-  await mkdir(join(out, dir), { recursive: true });
-  for (const name of await readdir(join(root, dir))) {
-    if (!name.endsWith('.svg')) continue;
-    await copyFile(join(root, dir, name), join(out, dir, name));
-    console.log(`  ${`${dir}/${name}`.padEnd(28)} <- ${dir}/${name}`);
+  for (const page of PAGES) {
+    const markdown = await readFile(join(root, page.source), 'utf8');
+    sourceDir = posixDirname(page.source);
+    const rendered = renderMarkdown(markdown);
+    await writeFile(join(out, page.slug), shell(page, rendered.html, rendered.headings), 'utf8');
+    console.log(`  ${page.slug.padEnd(28)} <- ${page.source}`);
   }
+
+  for (const dir of ASSET_DIRS) {
+    await mkdir(join(out, dir), { recursive: true });
+    for (const name of await readdir(join(root, dir))) {
+      if (!name.endsWith('.svg')) continue;
+      await copyFile(join(root, dir, name), join(out, dir, name));
+      console.log(`  ${`${dir}/${name}`.padEnd(28)} <- ${dir}/${name}`);
+    }
+  }
+
+  // Tells GitHub Pages not to run the output through Jekyll, which would ignore
+  // files and directories beginning with an underscore.
+  await writeFile(join(out, '.nojekyll'), '', 'utf8');
+
+  const built = await readdir(out);
+  console.log(`\n${String(built.length)} files in ${out}`);
 }
 
-// Tells GitHub Pages not to run the output through Jekyll, which would ignore
-// files and directories beginning with an underscore.
-await writeFile(join(out, '.nojekyll'), '', 'utf8');
-
-const built = await readdir(out);
-console.log(`\n${String(built.length)} files in site/dist`);
+// Built only when run, so a test can import `rewriteLink` without writing a site.
+if (import.meta.main) await build(outputDir(process.argv.slice(2)));

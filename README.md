@@ -38,7 +38,7 @@ The reusable developer experience around the pattern:
 - **A release pipeline.** Six compilation targets, native smoke tests where a runner exists, and cross-compiled binaries labelled as such.
 - **An optional AI layer.** Host-only and provider-independent: settings, key storage, context, tools derived from your contract, and a confirmation step before anything changes. Off until a user sets it up.
 
-- **An optional launcher.** [Autoapp](docs/autoapp/design.md) is a separate
+- **An optional launcher.** [Autoapp](docs/autoapp/README.md) is a separate
   package that supervises applications, previews a proposed change on a copy of
   your data, and activates it with a recovery path — so an application can be
   reshaped by its owner while they use it. A candidate release runs as
@@ -89,7 +89,9 @@ point:
 unzip notes-starter.zip
 ./broapp-autoapp-darwin-arm64 import ./notes-starter --as notes --grant
 ./broapp-autoapp-darwin-arm64 serve notes
-``` The binaries are unsigned; on macOS remove the quarantine
+```
+
+The binaries are unsigned; on macOS remove the quarantine
 attribute first (`xattr -d com.apple.quarantine <binary>`), and see
 [docs/packaging.md](docs/packaging.md) for Windows.
 

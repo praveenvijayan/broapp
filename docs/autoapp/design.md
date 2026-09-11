@@ -5,7 +5,8 @@ it. An AI engineer, running in the host, proposes a change to the
 application's specification and code; the change is built as a candidate
 release, previewed against a copy of the user's data, and activated with a
 recovery path. External agents reach the same operations over an MCP adapter,
-through the same gate.
+through the same gate. The short version, with a picture, is the
+[Autoapp overview](README.md).
 
 Everything is built on the existing Broapp packages. Brobridge is unchanged.
 The single-document, hash-pinned-CSP page model is unchanged.
