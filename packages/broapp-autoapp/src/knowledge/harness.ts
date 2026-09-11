@@ -192,6 +192,7 @@ export interface RunHandle {
 
 /** The questions a run answers yes to. Activation and creation are declined, always. */
 export const RUN_APPROVES: ReadonlySet<string> = new Set([
+  'candidate.cycle',
   'source.edit',
   'source.change',
   'candidate.build',

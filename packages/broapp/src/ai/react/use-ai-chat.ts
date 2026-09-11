@@ -24,6 +24,56 @@ export interface ToolCallState {
   readonly output?: unknown;
   /** While awaiting confirmation: when the question stops waiting. */
   readonly expiresAt?: number;
+  /**
+   * While awaiting confirmation for one of this call's own steps: the id the
+   * answer goes to (`<callId>.<step>`), what that step runs and its input.
+   * Absent when the question is about the call itself.
+   */
+  readonly confirmId?: string;
+  readonly asks?: string;
+  readonly asksInput?: unknown;
+}
+
+/**
+ * Put a question on the card it belongs to.
+ *
+ * A question about the call itself names the call's own id. A tool that runs
+ * several gated steps — the launcher's `candidate.cycle` builds and previews
+ * after the patch it was called with — asks once per step, as `<callId>.<step>`,
+ * so each answer is to exactly one action. Those questions go on the parent's
+ * card, which then says what it is asking about.
+ */
+export function attachConfirm(
+  calls: readonly ToolCallState[],
+  event: { readonly callId?: string; readonly tool?: string; readonly input?: unknown; readonly expiresAt?: number },
+): ToolCallState[] {
+  const id = event.callId ?? '';
+  const exact = calls.some((call) => call.callId === id);
+  return calls.map((call) => {
+    const own = call.callId === id;
+    const step = !exact && id.startsWith(`${call.callId}.`);
+    if (!own && !step) return call;
+    const { confirmId: _confirmId, asks: _asks, asksInput: _asksInput, ...rest } = call;
+    return {
+      ...rest,
+      status: 'awaiting-confirmation',
+      ...(event.expiresAt === undefined ? {} : { expiresAt: event.expiresAt }),
+      ...(step ? { confirmId: id, asks: event.tool ?? '', asksInput: event.input } : {}),
+    };
+  });
+}
+
+/**
+ * An answer was accepted: the card goes back to running until its result or
+ * its next question arrives. Without this a card whose tool asks again later
+ * would keep offering buttons for a question already answered.
+ */
+export function settleAnswer(calls: readonly ToolCallState[], answeredId: string): ToolCallState[] {
+  return calls.map((call) => {
+    if (call.status !== 'awaiting-confirmation' || (call.callId !== answeredId && call.confirmId !== answeredId)) return call;
+    const { confirmId: _confirmId, asks: _asks, asksInput: _asksInput, expiresAt: _expiresAt, ...rest } = call;
+    return { ...rest, status: 'running' };
+  });
 }
 
 /** One message in the transcript. */
@@ -152,18 +202,7 @@ export function useAiChat(options: AiChatOptions = {}): AiChatHook {
           break;
         case 'confirm':
           setStatus('awaiting-confirmation');
-          patchPending((message) => ({
-            ...message,
-            toolCalls: message.toolCalls.map((call) =>
-              call.callId === event.callId
-                ? {
-                    ...call,
-                    status: 'awaiting-confirmation',
-                    ...(event.expiresAt === undefined ? {} : { expiresAt: event.expiresAt }),
-                  }
-                : call,
-            ),
-          }));
+          patchPending((message) => ({ ...message, toolCalls: attachConfirm(message.toolCalls, event) }));
           break;
         case 'tool-result': {
           setStatus((current) => (current === 'awaiting-confirmation' ? 'streaming' : current));
@@ -296,12 +335,15 @@ export function useAiChat(options: AiChatOptions = {}): AiChatHook {
           // Nobody was waiting: the turn timed out or was cancelled while the
           // question was on screen.
           setError('That request has expired.');
+          return;
         }
+        patchPending((message) => ({ ...message, toolCalls: settleAnswer(message.toolCalls, callId) }));
+        setStatus((current) => (current === 'awaiting-confirmation' ? 'streaming' : current));
       } catch (cause) {
         setError(cause instanceof BroappError ? cause.message : 'That answer could not be sent.');
       }
     },
-    [shared],
+    [shared, patchPending],
   );
 
   const clear = React.useCallback((): void => {

@@ -17,19 +17,19 @@ import { guardedTool } from 'broapp/ai/host';
 import type { GuardedTool } from 'broapp/ai/host';
 import { publicError } from 'broapp/host';
 import type { Envelope, Gate, HostLogger } from 'broapp/host';
-import { s } from 'broapp/shared';
+import { isPublicError, s } from 'broapp/shared';
 
 import { showLesson } from '../knowledge/cli.ts';
 import { exampleHash, type Evidence, type OpenEpisode } from '../knowledge/evidence.ts';
 import { origin as originOf, type FullOrigin } from '../knowledge/ids.ts';
 import type { EventLog } from '../knowledge/log.ts';
-import { scoreBuild, scoreCheck } from '../knowledge/scoring.ts';
+import { problemSignature, scoreBuild, scoreCheck } from '../knowledge/scoring.ts';
 import type { Hint, Serve } from '../knowledge/serve.ts';
 import type { Session } from '../knowledge/session.ts';
 import type { Knowledge } from '../knowledge/store.ts';
 import { activate } from '../launcher/activate.ts';
 import { listApps } from '../launcher/apps.ts';
-import { buildCandidate, type BuildProblem } from '../launcher/candidate.ts';
+import { buildCandidate, SOURCE, type BuildProblem } from '../launcher/candidate.ts';
 import { createApplication } from '../launcher/create.ts';
 import type { Journal } from '../launcher/journal.ts';
 import type { StarterTemplate } from '../launcher/starter.ts';
@@ -118,6 +118,70 @@ const MAX_REWRITE_LINES = 60;
 
 /** Just an application id, which is most of these tools' whole input. */
 const appIdInput = s.object({ appId: s.string({ min: 1, max: 40 }) });
+
+/** Where in the workspace a build problem points, and the lines there. */
+export interface ProblemLocation {
+  readonly path: string;
+  readonly line: number;
+  /** Two lines either side, each prefixed with its number. */
+  readonly excerpt: string;
+}
+
+/**
+ * Find the lines a build problem is about.
+ *
+ * In order: a workspace path with a line in the message, as a bundler writes
+ * one; else a component the message names, at its `id` in `views.ts`; else a
+ * route the message names, at its key in `contract.ts`. `null` when none of
+ * them is there — the problem is still returned, only without a place.
+ */
+export function locateProblem(sourceDir: string, problem: BuildProblem): ProblemLocation | null {
+  const lines = (path: string): string[] | null => {
+    try {
+      return readWorkspaceFile(sourceDir, path).split(/\r?\n/);
+    } catch {
+      return null;
+    }
+  };
+  const around = (path: string, line: number): ProblemLocation | null => {
+    const text = lines(path);
+    if (text === null || line < 1 || line > text.length) return null;
+    const from = Math.max(1, line - 2);
+    const to = Math.min(text.length, line + 2);
+    const excerpt = text
+      .slice(from - 1, to)
+      .map((content, index) => `${String(from + index).padStart(4)}| ${content.slice(0, 200)}`)
+      .join('\n');
+    return { path, line, excerpt };
+  };
+  const find = (path: string, needles: readonly string[]): ProblemLocation | null => {
+    const text = lines(path);
+    const index = text?.findIndex((line) => needles.some((needle) => line.includes(needle))) ?? -1;
+    return index < 0 ? null : around(path, index + 1);
+  };
+
+  const explicit = /(?:^|[\s'"`(/\\])((?:src\/[\w./-]+?\.\w+)|autoapp\.json):(\d+)/.exec(problem.message);
+  if (explicit?.[1] !== undefined && explicit[2] !== undefined) {
+    const found = around(explicit[1], Number(explicit[2]));
+    if (found !== null) return found;
+  }
+  const component = /component "([^"]+)"/.exec(problem.message)?.[1];
+  if (component !== undefined) {
+    const found = find(SOURCE.views, [`id: '${component}'`, `id: "${component}"`]);
+    if (found !== null) return found;
+  }
+  const route = /"([a-z][\w-]*\.[A-Za-z][\w-]*)"/.exec(problem.message)?.[1];
+  if (route !== undefined) {
+    const found = find(SOURCE.contract, [`'${route}'`, `"${route}"`]);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/** Whether a gated call failed because nobody allowed it. */
+function wasDeclined(cause: unknown): boolean {
+  return isPublicError(cause) && cause.code === 'rejected';
+}
 
 /** The release that is current, or a refusal that says why not. */
 function currentRelease(root: Layout, appId: string): { releaseId: string; spec: AppSpec } {
@@ -219,6 +283,51 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       logger.error(`[autoapp] could not look up hints: ${String(cause instanceof Error ? cause.message : cause)}`);
       return [];
     }
+  };
+
+  /**
+   * Apply hunks to a workspace and write down that they were applied.
+   *
+   * `source.edit` and `candidate.cycle` both land edits through here, so an
+   * edit is recorded, counted and summarised the same way whichever asked.
+   */
+  const editHunks = (
+    appId: string,
+    message: string,
+    hunks: readonly { path: string; find: string; replace: string }[],
+    envelope: Envelope | undefined,
+  ): { changed: readonly string[]; undo: string; matchedBy: readonly string[]; diff: string; verification: ReturnType<typeof verification> } => {
+    select(appId);
+    const sourceDir = root.app(appId).source;
+    const before = snapshot(sourceDir);
+    const applied = applyEdits(sourceDir, hunks, message);
+    const summary = diffSummary(before, snapshot(sourceDir));
+    states.update(appId, { changed: applied.changed });
+    note('an edit', (k) => {
+      // The size of what the model composed, which is the number report 08b
+      // measured the stall against.
+      k.log.event(
+        'edit',
+        `edited ${String(applied.changed.length)} file(s)`,
+        {
+          paths: applied.changed,
+          hunks: hunks.length,
+          matchedBy: applied.matchedBy ?? [],
+          bytes: Buffer.byteLength(JSON.stringify(hunks), 'utf8'),
+        },
+        identity(envelope, appId, null),
+      );
+      k.evidence.appendEdit(appId, `${message}\n${summary}`);
+    });
+    return {
+      changed: applied.changed,
+      undo: applied.undo,
+      // Told rather than hidden: a hunk that only matched once whitespace was
+      // ignored is a hunk the model should write more carefully next time.
+      matchedBy: applied.matchedBy ?? [],
+      diff: summary,
+      verification: verification(appId),
+    };
   };
 
   tools['apps.list'] = guardedTool(gate, {
@@ -455,37 +564,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'write',
     run: (input, _signal, envelope) => {
       const { appId, message, hunks } = editInput.parse(input);
-      select(appId);
-      const sourceDir = root.app(appId).source;
-      const before = snapshot(sourceDir);
-      const applied = applyEdits(sourceDir, hunks, message);
-      const summary = diffSummary(before, snapshot(sourceDir));
-      states.update(appId, { changed: applied.changed });
-      note('an edit', (k) => {
-        // The size of what the model composed, which is the number report 08b
-        // measured the stall against.
-        k.log.event(
-          'edit',
-          `edited ${String(applied.changed.length)} file(s)`,
-          {
-            paths: applied.changed,
-            hunks: hunks.length,
-            matchedBy: applied.matchedBy ?? [],
-            bytes: Buffer.byteLength(JSON.stringify(hunks), 'utf8'),
-          },
-          identity(envelope, appId, null),
-        );
-        k.evidence.appendEdit(appId, `${message}\n${summary}`);
-      });
-      return Promise.resolve({
-        changed: applied.changed,
-        undo: applied.undo,
-        // Told rather than hidden: a hunk that only matched once whitespace was
-        // ignored is a hunk the model should write more carefully next time.
-        matchedBy: applied.matchedBy ?? [],
-        diff: summary,
-        verification: verification(appId),
-      });
+      return Promise.resolve(editHunks(appId, message, hunks, envelope));
     },
   });
 
@@ -651,6 +730,158 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         }
       });
       return { results };
+    },
+  });
+
+  const cycleInput = s.object({
+    appId: s.string({ min: 1, max: 40 }),
+    message: s.string({ min: 1, max: 500 }),
+    hunks: s.array(
+      s.object({
+        path: s.string({ min: 1, max: 400 }),
+        find: s.string({ min: 1, max: 20_000 }),
+        replace: s.string({ max: 20_000 }),
+      }),
+      { max: 50 },
+    ),
+    create: s.optional(
+      s.array(s.object({ path: s.string({ min: 1, max: 400 }), content: s.string({ max: 200_000 }) }), { max: 20 }),
+    ),
+  });
+  /**
+   * The host's change cycle: patch, build, and — when the build passes —
+   * preview and check, in one call.
+   *
+   * Report 08c watched a model make correct edits and then plan for twenty
+   * minutes without building; every step between an edit and a verified
+   * preview was a decision it had to make. Here the host makes them. The model
+   * decides the patch and reads what came back: each build problem at the lines
+   * it points at, whether it is the failure the last build had, or which
+   * examples failed and why.
+   *
+   * Authorisation is unchanged. This call's own question is the patch's; the
+   * build and the preview are the existing tools, each asking its own question
+   * under `<requestId>.build` and `<requestId>.preview`, and the check is a
+   * read. A person approves each action exactly as if the model had called
+   * them one by one — the preview runs application code, and an approval of a
+   * patch is not an approval of that.
+   */
+  tools['candidate.cycle'] = guardedTool(gate, {
+    name: 'candidate.cycle',
+    description:
+      'Apply hunks (as source.edit takes them) and any new files, build, and when the build passes start the preview and run the acceptance examples. The person is asked before each of those steps. Returns each build problem with the lines it points at, whether it is the same failure as the last build, or which examples failed. Use it for every change, then fix what it reports with another candidate.cycle.',
+    inputSchema: cycleInput.toJsonSchema(),
+    effect: 'write',
+    run: async (input, signal, envelope) => {
+      const { appId, message, hunks, create } = cycleInput.parse(input);
+      const files = create ?? [];
+      if (hunks.length === 0 && files.length === 0) {
+        throw publicError.invalidInput('Give hunks to apply, files to create, or both.');
+      }
+      if (envelope === undefined) {
+        // Each step asks through the turn's approver; without one nobody could.
+        throw publicError.unavailable('candidate.cycle runs only inside a turn.');
+      }
+      select(appId);
+      const sourceDir = root.app(appId).source;
+      const previous = new Set(states.get(appId).problems.map((problem) => problemSignature(problem.stage, problem.message)));
+
+      // 1. The patch, which this call's own question approved. Hunks first, all
+      //    or nothing, then new files, which no hunk can have been about.
+      const edited = hunks.length === 0 ? null : editHunks(appId, message, hunks, envelope);
+      const created: string[] = [];
+      if (files.length > 0) {
+        const before = snapshot(sourceDir);
+        for (const file of files) {
+          if (before.has(file.path.split('\\').join('/'))) {
+            throw publicError.rejected(`${file.path} already exists; change it with hunks.`);
+          }
+        }
+        const applied = applyChange(sourceDir, files, message);
+        created.push(...applied.changed);
+        states.update(appId, { changed: applied.changed });
+        note('a change', (k) => {
+          k.log.event(
+            'edit',
+            `created ${String(applied.changed.length)} file(s)`,
+            { paths: applied.changed, hunks: files.length, bytes: Buffer.byteLength(JSON.stringify(files), 'utf8') },
+            identity(envelope, appId, null),
+          );
+          k.evidence.appendEdit(appId, `${message}\n${diffSummary(before, snapshot(sourceDir))}`);
+        });
+      }
+      const applied = { changed: [...(edited?.changed ?? []), ...created], matchedBy: edited?.matchedBy ?? [], diff: edited?.diff ?? '' };
+
+      /** One of this call's own steps, as the existing tool, under its own request id. */
+      const step = (name: string): Envelope => ({ ...envelope, requestId: `${envelope.requestId}.${name}` });
+      const run = async (tool: string, stepName: string, toolInput: unknown): Promise<{ declined: true } | { output: unknown }> => {
+        const definition = tools[tool];
+        if (definition === undefined) throw new TypeError(`no tool named ${tool}`);
+        try {
+          return { output: await definition.execute(toolInput, step(stepName), signal) };
+        } catch (cause) {
+          if (wasDeclined(cause)) return { declined: true };
+          throw cause;
+        }
+      };
+
+      // 2. The build.
+      const built = await run('candidate.build', 'build', { appId });
+      if ('declined' in built) {
+        return { applied, build: { declined: true }, next: 'The person declined the build. Ask what they want changed before another cycle.' };
+      }
+      const build = built.output as
+        | { ok: true; releaseId: string; schemaVersion: number }
+        | { ok: false; problems: readonly BuildProblem[]; hints?: readonly Hint[] };
+      if (!build.ok) {
+        const signatures = build.problems.map((problem) => problemSignature(problem.stage, problem.message));
+        const sameAsLastBuild = signatures.length > 0 && signatures.every((signature) => previous.has(signature));
+        return {
+          applied,
+          build: {
+            ok: false,
+            problems: build.problems.map((problem) => {
+              const at = locateProblem(sourceDir, problem);
+              return at === null ? problem : { ...problem, at };
+            }),
+            ...(build.hints === undefined ? {} : { hints: build.hints }),
+            sameAsLastBuild,
+          },
+          next: sameAsLastBuild
+            ? 'These are the problems the last build had: the change did not reach them. Read the lines each one points at before the next candidate.cycle.'
+            : 'Fix these problems with another candidate.cycle.',
+        };
+      }
+
+      // 3. The preview, on a fresh copy of the data.
+      const previewed = await run('candidate.preview', 'preview', { appId, releaseId: build.releaseId });
+      if ('declined' in previewed) {
+        return {
+          applied,
+          build: { ok: true, releaseId: build.releaseId },
+          preview: { declined: true },
+          next: 'The build passed and the person declined the preview. Ask them before trying again.',
+        };
+      }
+
+      // 4. The checks, a read against the preview just started.
+      const checked = await run('candidate.check', 'check', { appId, releaseId: build.releaseId });
+      const results = 'declined' in checked ? [] : (checked.output as { results: readonly CheckResult[] }).results;
+      const failed = results.filter((result) => !result.passed);
+      return {
+        applied,
+        build: { ok: true, releaseId: build.releaseId, schemaVersion: build.schemaVersion },
+        preview: { running: true },
+        check: {
+          passed: results.length - failed.length,
+          of: results.length,
+          failed: failed.map((result) => ({ id: result.id, title: result.title, detail: result.detail ?? '' })),
+        },
+        next:
+          failed.length === 0
+            ? 'Every check passed. Call candidate.explain, then ask the person to open the preview.'
+            : 'Fix what the failed checks say with another candidate.cycle.',
+      };
     },
   });
 

@@ -212,8 +212,8 @@ serving.
 
 **Replay and evaluation answer their own questions.** `knowledge replay` and
 `knowledge evaluate` run the engineer with nobody watching, so the run stands in
-for the person: it allows `source.edit`, `source.change`, `candidate.build`,
-`candidate.preview` and `preview.stop`, and declines everything else —
+for the person: it allows `candidate.cycle`, `source.edit`, `source.change`,
+`candidate.build`, `candidate.preview` and `preview.stop`, and declines everything else —
 `release.activate` and `apps.create` above all — through the same gate and
 approval table a click would use. What it allows can only reach the run's own
 directory under `<root>/replay/` or `<root>/evaluate/`: a clone of the workspace,
@@ -223,6 +223,16 @@ copied. A person starts both commands from a terminal; nothing starts them on
 its own. They send the case's request, the instructions and the documents a run
 is served to the configured provider, which is what the engineer's own turn
 sends. Their results are shown by `knowledge confirm`; they confirm nothing.
+
+**The change cycle asks once per action.** `candidate.cycle` patches, builds,
+and when the build passes previews and checks, in one tool call. It does not
+widen any approval: its own question is the patch's, and the build and the
+preview are the existing tools, each asking its own question under
+`<requestId>.build` and `<requestId>.preview`, so each answer binds to one
+action and its own arguments. The check is a read. The chat puts a step's
+question on the cycle's card and says which step it is. The preview runs the
+candidate's code with the application's permissions on a copy of the data, and
+approving a patch is not approving that.
 
 ## What none of this protects against
 

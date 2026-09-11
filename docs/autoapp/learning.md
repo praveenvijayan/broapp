@@ -162,6 +162,16 @@ ranks anything.** An outcome is a fact about one attempt.
 last build's result, and `next: candidate.build`. From the third unverified
 edit it adds a warning. It is advice; nothing is refused and nothing times out.
 
+**The change cycle.** The instructions send every change through
+`candidate.cycle`, which applies the hunks, builds, and when the build passes
+starts the preview and runs the checks, asking the person before the patch,
+the build and the preview. What it returns is the next thing to do: each build
+problem with the file, line and lines around it that it points at; whether
+those are the problems the last build had (the change did not reach them); or
+which examples failed and why. Its build and preview are the existing tools
+under their own request ids (`<callId>.build`, `<callId>.preview`), so their
+events, cases and servings are written down exactly as before.
+
 ## Distillation
 
 When a turn ends, every resolved case that has not been asked about is queued,

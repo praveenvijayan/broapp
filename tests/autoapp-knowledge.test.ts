@@ -679,6 +679,31 @@ describe.skipIf(!available)('with children', () => {
     return { releaseId: built.releaseId, passed: checked.results[0]?.passed === true };
   }
 
+  test('a passing cycle asks for the patch, the build and the preview, and runs the checks', async () => {
+    const where = makeWorld({ git: true });
+    const { output, asked } = await callAnswering(
+      where,
+      'candidate.cycle',
+      { appId: 'items', message: 'Rename a header', hunks: [{ path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'What it is'" }] },
+      () => true,
+      'run-p:call-1',
+    );
+    // The check is a read, and asks nobody.
+    expect(asked).toEqual([
+      { route: 'candidate.cycle', requestId: 'run-p:call-1' },
+      { route: 'candidate.build', requestId: 'run-p:call-1.build' },
+      { route: 'candidate.preview', requestId: 'run-p:call-1.preview' },
+    ]);
+    const result = output as { build: { ok: boolean; releaseId: string }; preview: unknown; check: { passed: number; of: number; failed: unknown[] }; next: string };
+    expect(result.build.ok).toBe(true);
+    expect(result.preview).toEqual({ running: true });
+    expect(result.check.of).toBeGreaterThan(0);
+    expect(result.check).toMatchObject({ passed: result.check.of, failed: [] });
+    expect(result.next).toContain('candidate.explain');
+    expect(where.states.status('items').checksVerified).toBe(true);
+    await callTool(where, 'preview.stop', { appId: 'items' }, { approve: true });
+  }, 240_000);
+
   test('a check refuses a preview of another release', async () => {
     const where = makeWorld();
     const first = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true })) as { ok: boolean; releaseId: string };
@@ -2152,6 +2177,104 @@ const IDLE = [{ kind: 'text' as const, chunks: ['I would rather not change anyth
 function editing(input: unknown): Parameters<typeof createFakeAdapter>[0] {
   return { script: [{ kind: 'tool', name: 'source.edit', input, then: [{ kind: 'text', chunks: ['done'] }] }] };
 }
+
+/** Call a tool as the engineer, answering every question it asks with `answer`, and say what was asked. */
+async function callAnswering(
+  where: World,
+  name: string,
+  input: unknown,
+  answer: (route: string) => boolean,
+  requestId: string,
+): Promise<{ output: unknown; asked: { route: string; requestId: string }[] }> {
+  const approvals = createPendingApprovals(quiet);
+  const tool = where.tools[name];
+  if (tool === undefined) throw new Error(`no tool named ${name}`);
+  const envelope: Envelope = { requestId, channel: 'ai', caller: 'ai:test', approver: approvals };
+  const asked: { route: string; requestId: string }[] = [];
+  let finished = false;
+  const running = tool.execute(input, envelope, new AbortController().signal).finally(() => {
+    finished = true;
+  });
+  while (!finished) {
+    const question = approvals.pending[0];
+    if (question !== undefined) {
+      asked.push({ route: question.route, requestId: question.requestId });
+      approvals.answer({
+        requestId: question.requestId,
+        approved: answer(question.route),
+        releaseId: question.releaseId,
+        argumentsHash: question.argumentsHash,
+      });
+    }
+    await Bun.sleep(5);
+  }
+  return { output: await running, asked };
+}
+
+describe('the host’s change cycle', () => {
+  test('a failing cycle asks for the patch and the build, and returns each problem at its lines', async () => {
+    const where = makeWorld({ git: true });
+    const first = await callAnswering(
+      where,
+      'candidate.cycle',
+      { appId: 'items', message: 'Add items.tag', hunks: [{ path: 'src/shared/contract.ts', find: "'items.ping': {", replace: TAG_ROUTE }] },
+      () => true,
+      'run-c:call-1',
+    );
+    // One question per action, each under its own request id.
+    expect(first.asked).toEqual([
+      { route: 'candidate.cycle', requestId: 'run-c:call-1' },
+      { route: 'candidate.build', requestId: 'run-c:call-1.build' },
+    ]);
+    const result = first.output as {
+      applied: { changed: string[] };
+      build: { ok: boolean; sameAsLastBuild: boolean; problems: { stage: string; at?: { path: string; line: number; excerpt: string } }[] };
+      preview?: unknown;
+      next: string;
+    };
+    expect(result.applied.changed).toEqual(['src/shared/contract.ts']);
+    expect(result.build.ok).toBe(false);
+    expect(result.build.sameAsLastBuild).toBe(false);
+    expect(result.preview).toBeUndefined();
+    const problem = result.build.problems.find((entry) => entry.stage === 'contract');
+    expect(problem?.at?.path).toBe('src/shared/contract.ts');
+    expect(problem?.at?.excerpt).toContain("'items.tag'");
+    expect(problem?.at?.line).toBe(lineOf(join(where.source, 'src', 'shared', 'contract.ts'), "'items.tag'"));
+    // The build was written down as this call's own step, with the turn's run.
+    const [build] = events(where.knowledge, 'build');
+    expect(build?.run_id).toBe('run-c');
+    expect(build?.call_id).toBe('call-1.build');
+
+    // A change somewhere else leaves the same failure, and the cycle says so.
+    const again = await callAnswering(
+      where,
+      'candidate.cycle',
+      { appId: 'items', message: 'Rename a header', hunks: [{ path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'What it is'" }] },
+      () => true,
+      'run-c:call-2',
+    );
+    expect(again.output).toMatchObject({ build: { ok: false, sameAsLastBuild: true } });
+    expect((again.output as { next: string }).next).toContain('did not reach them');
+
+    // A declined build: the patch stands, and nothing after it runs.
+    const declined = await callAnswering(
+      where,
+      'candidate.cycle',
+      { ...DECLARE_EFFECT },
+      (route) => route !== 'candidate.build',
+      'run-c:call-3',
+    );
+    expect(declined.asked.map((question) => question.route)).toEqual(['candidate.cycle', 'candidate.build']);
+    expect(declined.output).toMatchObject({ applied: { changed: ['src/shared/contract.ts'] }, build: { declined: true } });
+    expect(readFileSync(join(where.source, 'src', 'shared', 'contract.ts'), 'utf8')).toContain("effect: 'write'");
+  }, 120_000);
+
+  test('the instructions send every change through the cycle', () => {
+    const flat = ENGINEER_INSTRUCTIONS.replace(/\s+/g, ' ');
+    expect(flat).toContain('make the change with `candidate.cycle`');
+    expect(flat).toContain('fix them with another `candidate.cycle` until every check passes');
+  });
+});
 
 describe('12d follow-up: one judge for every check', () => {
   test('expect is exact and blind to key order; match needs every named key and the same array length', () => {

@@ -58,21 +58,21 @@ network once.
 2. Say what the application will do differently, in one or two sentences, and
    add or update an acceptance example in \`autoapp.json\` that would fail today
    and pass afterwards.
-3. Read the file with \`source.read\`, then change it with \`source.edit\`.
-   Make each \`find\` the smallest block that occurs only once — three to eight
-   lines is right. Leading whitespace need not match: the file keeps its own
-   indentation, so copy the lines and do not worry about the spaces. Send
-   several small hunks rather than one large one; hunks under a kilobyte land,
-   and ones over two kilobytes have been measured not to. Use \`source.change\`
-   only to create a new file: it replaces a whole file, and for anything but a
-   tiny one that costs far more than the edit is worth.
-4. Build with \`candidate.build\`. If it reports problems, fix them and build
-   again. Keep going until it passes. When a build fails, its \`hints\` are facts
-   from earlier work; a hint marked provisional has not been confirmed.
-5. Preview with \`candidate.preview\`, then \`candidate.check\`.
-6. Call \`candidate.explain\` and turn what it gives you into two short
+3. Read the file with \`source.read\`, then make the change with \`candidate.cycle\`:
+   it takes the hunks \`source.edit\` takes, applies them, builds, and when the
+   build passes starts the preview and runs the checks, asking the person at
+   each. Make each \`find\` the smallest block that occurs only once — three to
+   eight lines is right. Leading whitespace need not match: the file keeps its
+   own indentation. Send several small hunks rather than one large one; hunks
+   under a kilobyte land, and ones over two kilobytes have been measured not to.
+   Use \`source.change\` only to create a new file, or \`create\` in the cycle.
+4. If the cycle reports problems, each names the lines it points at: fix them
+   with another \`candidate.cycle\` until every check passes. When a build fails,
+   its \`hints\` are facts from earlier work; a hint marked provisional has not
+   been confirmed.
+5. Call \`candidate.explain\` and turn what it gives you into two short
    paragraphs: what changed, and what new permissions it asks for.
-7. Ask the person to open the preview and look. Only after they say they are
+6. Ask the person to open the preview and look. Only after they say they are
    happy, request activation.
 
 # What you may not do

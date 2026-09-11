@@ -71,20 +71,24 @@ function ToolCall({
         <div
           className={`ai-chat__confirm${urgent ? ' ai-chat__confirm--urgent' : ''}`}
           role="group"
-          aria-label={`Allow ${call.tool}?`}
+          aria-label={`Allow ${call.asks ?? call.tool}?`}
         >
-          <span>Allow this?</span>
+          {/* A question about one of this call's own steps says which step. */}
+          <span>{call.asks === undefined ? 'Allow this?' : `Allow ${call.asks}?`}</span>
+          {call.asks === undefined || call.asksInput === undefined ? null : (
+            <pre className="ai-chat__json">{JSON.stringify(call.asksInput, null, 2)}</pre>
+          )}
           {call.expiresAt === undefined ? null : (
             <span className="ai-chat__expires">expires in {countdown(call.expiresAt, now)}</span>
           )}
           <button
             className="button button--primary"
             type="button"
-            onClick={() => onConfirm(call.callId, true)}
+            onClick={() => onConfirm(call.confirmId ?? call.callId, true)}
           >
             Allow
           </button>
-          <button className="button" type="button" onClick={() => onConfirm(call.callId, false)}>
+          <button className="button" type="button" onClick={() => onConfirm(call.confirmId ?? call.callId, false)}>
             Decline
           </button>
         </div>
