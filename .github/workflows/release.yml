@@ -40,7 +40,12 @@ jobs:
       matrix:
         include:
           - { os: macos-latest, target: darwin-arm64, native: true }
-          - { os: macos-13, target: darwin-x64, native: true }
+          # `macos-13` was the last hosted Intel runner and is retired: a job
+          # asking for it queued for ten hours and was cancelled by GitHub,
+          # which cancelled the draft with it — on v0.3.0 and again on v0.3.1.
+          # Intel macOS is cross-compiled from Linux and labelled, like the
+          # two Linux targets below and every launcher target.
+          - { os: ubuntu-latest, target: darwin-x64, native: false }
           - { os: ubuntu-latest, target: linux-x64, native: true }
           - { os: windows-latest, target: windows-x64, native: true }
           # No hosted runner for these, so they are cross-compiled and labelled.
@@ -189,7 +194,7 @@ jobs:
             | Target | Compiled | Executed in CI |
             | --- | --- | --- |
             | darwin-arm64 | yes | yes |
-            | darwin-x64 | yes | yes |
+            | darwin-x64 | yes | **no** — cross-compiled, no Intel runner |
             | linux-x64 | yes | yes |
             | windows-x64 | yes | yes |
             | linux-arm64 | yes | **no** — cross-compiled, no runner |
