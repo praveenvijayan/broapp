@@ -223,10 +223,21 @@ jobs:
             it. `create <appId>` does the same from a terminal.
 
             ```
-            tar -xzf broapp-autoapp-darwin-arm64.tar.gz      # or unzip the .zip on Windows
-            xattr -d com.apple.quarantine broapp-autoapp-darwin-arm64   # macOS only
+            curl -fsSL https://github.com/praveenvijayan/broapp/releases/latest/download/broapp-autoapp-darwin-arm64.tar.gz | tar xz
             ./broapp-autoapp-darwin-arm64
             ```
+
+            **Downloaded with a browser instead?** macOS quarantines the file
+            and, because the binary carries no Apple developer identity,
+            Gatekeeper calls it "damaged" and offers only the bin. It is not
+            damaged. Remove the tag and run it:
+
+            ```
+            xattr -d com.apple.quarantine broapp-autoapp-darwin-arm64
+            ```
+
+            Windows shows SmartScreen for the same reason: *More info*, then
+            *Run anyway*.
 
             For a fuller starting point, `notes-starter.zip` is the Notes
             example with its AI panel, its dependencies pointed at the

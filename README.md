@@ -57,9 +57,23 @@ No Bun installation is needed on the machine that runs it; the launcher
 carries a starter application inside it.
 
 ```bash
-tar -xzf broapp-autoapp-darwin-arm64.tar.gz   # unzip the .zip on Windows
+curl -fsSL https://github.com/praveenvijayan/broapp/releases/latest/download/broapp-autoapp-darwin-arm64.tar.gz | tar xz
 ./broapp-autoapp-darwin-arm64
 ```
+
+Download it from a terminal, as above, and macOS runs it. Download it with a
+browser and macOS tags the file as quarantined; because the binary is not
+signed with an Apple developer identity, Gatekeeper then reports it as
+"damaged" and offers only the bin. It is not damaged. Remove the tag and it
+runs:
+
+```bash
+xattr -d com.apple.quarantine broapp-autoapp-darwin-arm64
+```
+
+Windows shows SmartScreen's "protected your PC" for the same reason; choose
+*More info*, then *Run anyway*. Signing and notarisation are the fix, and they
+are in the backlog.
 
 The launcher opens its own tab. Press **New application**, give it a name, and
 it writes the starter to disk, installs its dependencies from npm — the one
