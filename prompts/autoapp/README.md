@@ -7,7 +7,7 @@ using it, with an engineer built into the experience. It lives on the
 field on the contract. Nothing lands on `main` until every stage below has
 cleared.
 
-Twelve prompts, run in order, one per agent session. Each prompt is
+The prompts below, run in order, one per agent session. Each prompt is
 self-contained but assumes the previous ones landed. Every prompt ends by
 writing a short report to `prompts/autoapp/reports/NN-<name>.md`; the next
 prompt starts by reading the reports so far.
@@ -28,6 +28,10 @@ prompt starts by reading the reports so far.
 | 09 | `09-packaging-matrix.md` | Linux and Windows coverage for the supervision chain; fixed packaged dependencies; the three offline tiers documented as tested. | CI green on every OS. |
 | 10 | `10-phase-2-backlog.md` | Not a build prompt. What was deliberately deferred and why. | — |
 | 11 | `11-new-application.md` | A starter workspace embedded in the launcher binary; `launcher.appCreate`, a `create` command and an `apps.create` tool sharing one implementation with `import`; a **New application** button in the tab. | Tests green. Smoke test's create step passes. |
+| 12a | `12a-knowledge-foundations.md` | `knowledge.sqlite`: every build, check, edit and activation as a sanitised event with the run id, call id and source revision it had at the time; failures and repairs as immutable cases with the context as delivered; the candidate durable across a restart; `launcher.previewStart`. Five optional core hooks. | Tests green. `tests/ai-chat.test.ts` unchanged. |
+| 12b | `12b-knowledge-path.md` | Orientation and task-evidence documents on every turn; `source.search`; curated facts as build-failure hints; `verification` on every edit result; servings with delivered-or-not and stage-aware outcomes. No model calls. | Tests green. 08c request rerun: tool calls before the first edit and whether a build was reached. |
+| 12c | `12c-knowledge-distillation.md` | One structured question to the model per resolved case; six diagnoses; provisional lessons with provenance; supersession and review flags; `knowledge list/show/confirm/retire/export`; `Ai.model()`. | Tests green. One real distillation logged. |
+| 12d | `12d-knowledge-replay.md` | Replay a case with and without its lesson from a manifest into fresh checkouts with a frozen corpus; `knowledge confirm` shows the table; `knowledge evaluate` runs four conditions on three tasks. | Tests green. Evaluation table beside the 08c numbers. |
 
 ## How to run one prompt
 
