@@ -30,9 +30,24 @@
 
 Local Ollama, `qwen3.8:27b-mlx`, as 08c/12b/12c; nothing left the machine, no key entered.
 
-TBD-DISTIL
+**The case** (scratch script, reconstructed as 12c's was): Notes imported; request "Add a Mark done button to each row of the notes table…"; a row action on `notes.update` with no `confirmText` fails at `views`; adding it passes. The instructions never mention `confirmText`. Views seeds 1 and 5 were hinted for it and credited `resolved` — stage-matched, still unrelated.
 
-TBD-REPLAY
+**Distillation** is the weak link on this model: 6 case runs, 14 questions, 2 valid answers, both `knowledge_missing` with a lesson. The first lesson was dropped by deviation 8's bug; the second (lesson 8, detail 560 characters, which the old rule would also have dropped) was stored. The 12 failures: 5 unparsable, 4 over the 60 s limit, 3 with `reasoning` over its 600-character schema limit.
+
+**Replay of case 1 with lesson 8** (`knowledge replay 1 --with 8 --runs 3`, 40 steps, 20 min a turn):
+
+| run | with | without |
+|---|---|---|
+| 1 | passed — 15 calls, 3m59s, 128,375 tokens, built | passed — 21 calls, 16m13s, 220,686 tokens, built |
+| 2 | failed — 4 calls, 2m34s, 18,419 tokens | inconclusive — provider error after 9 calls, 10m14s |
+| 3 | passed — 15 calls, 10m44s, 99,989 tokens, built | passed — 20 calls, 15m50s, 209,120 tokens, built |
+| | 2/3 | 2/3 |
+
+Verdict **unrelated**: the build error names `confirmText`, so the engineer repairs it either way. Regression: no other confirmed case. `knowledge confirm 8`, answered `n`, printed this table and left the lesson provisional.
+
+**This batch is contaminated for time.** From 20:01:44 another Claude session ran `knowledge evaluate --runs 1` with the compiled binary against this demo root, on the same local model. Only `with 1` ran alone; the other five shared the model, and `without 2`'s provider error may be that. Outcomes stand; times and tokens are not comparable. I stopped my own evaluation (three minutes in) rather than let it overlap too, and reran the replay and the evaluation after that process exited:
+
+TBD-REPLAY2
 
 TBD-EVAL
 
@@ -46,4 +61,8 @@ TBD-ACCEPTANCE
 
 ## Open questions
 
-TBD-OPEN
+- **The distiller is unreliable on this model**: 2 valid answers in 14, the failures unparsable, over 60 s, or over the reasoning limit the schema states. Whether a longer limit or a smaller answer shape fixes that is 12c's question, measured here, not changed here.
+- **Stage matching still credits unrelated hints.** Views seeds 1 and 5 were hinted for a `confirmText` failure and credited `resolved`. `applies.files` or `routes` would narrow a hint further; the column counts routes only.
+- **The verdict word hides cost.** "Unrelated" holds when the lesson changes nothing but time and tokens; the table shows them, the word does not.
+- **Nothing stops two processes sharing a root.** Another session's `knowledge evaluate` ran against this demo root during the replay (see above). The backlog's multiple-instances lock would have refused it.
+- **`bun test tests` cannot bundle a package from a nested `node_modules`** (deviation 7). A Bun behaviour worth a minimal reproduction upstream.
