@@ -79,4 +79,5 @@ release commit's message rather than here.
 - **Stage matching still credits unrelated hints.** Views seeds 1 and 5 were hinted for a `confirmText` failure and credited `resolved`. `applies.files` or `routes` would narrow a hint further; the column counts routes only.
 - **The verdict word hides cost.** "Unrelated" holds when the lesson changes nothing but time and tokens; the table shows them, the word does not.
 - **Nothing stops two processes sharing a root.** Another session's `knowledge evaluate` ran against this demo root during the replay (see above). The backlog's multiple-instances lock would have refused it.
+- **A tool's own input check reads as "The tool failed."** In the clean replay the model called `knowledge.show` with `lessonId: 0`; the tool's `parse` throws a `ValidationError`, not a `PublicError`, so the model is not told which field was wrong. Every engineer tool parses the same way; predates 12d.
 - **`bun test tests` cannot bundle a package from a nested `node_modules`** (deviation 7). A Bun behaviour worth a minimal reproduction upstream.
