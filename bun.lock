@@ -85,7 +85,7 @@
     },
     "packages/broapp": {
       "name": "broapp",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "bin": {
         "broapp": "src/cli/main.ts",
       },
@@ -109,7 +109,7 @@
     },
     "packages/broapp-ai-anthropic": {
       "name": "broapp-ai-anthropic",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@ai-sdk/anthropic": "4.0.49",
         "ai": "7.0.93",
@@ -120,12 +120,12 @@
         "typescript": "^5.7.2",
       },
       "peerDependencies": {
-        "broapp": ">=0.3.0",
+        "broapp": ">=0.4.0",
       },
     },
     "packages/broapp-ai-compatible": {
       "name": "broapp-ai-compatible",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@ai-sdk/openai-compatible": "3.0.44",
         "ai": "7.0.93",
@@ -136,12 +136,12 @@
         "typescript": "^5.7.2",
       },
       "peerDependencies": {
-        "broapp": ">=0.3.0",
+        "broapp": ">=0.4.0",
       },
     },
     "packages/broapp-ai-elements": {
       "name": "broapp-ai-elements",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@ai-sdk/react": "4.0.96",
         "ai": "7.0.93",
@@ -167,20 +167,20 @@
         "typescript": "^5.7.2",
       },
       "peerDependencies": {
-        "broapp": ">=0.3.0",
+        "broapp": ">=0.4.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
       },
     },
     "packages/broapp-autoapp": {
       "name": "broapp-autoapp",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "broapp-autoapp": "src/launcher/main.ts",
       },
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.30.0",
-        "broapp": "^0.3.0",
+        "broapp": "^0.4.0",
         "broapp-ai-anthropic": "^0.3.0",
         "broapp-ai-compatible": "^0.3.0",
         "broapp-ai-elements": "^0.3.0",
@@ -201,7 +201,7 @@
     },
     "packages/create-broapp": {
       "name": "create-broapp",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "bin": {
         "create-broapp": "./src/main.ts",
       },
@@ -1003,6 +1003,12 @@
     "@tailwindcss/oxide-wasm32-wasi/tslib": ["tslib@2.8.1", "", { "bundled": true }, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
 
     "body-parser/content-type": ["content-type@2.1.0", "", {}, "sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag=="],
+
+    "broapp-autoapp/broapp-ai-anthropic": ["broapp-ai-anthropic@0.3.0", "", { "dependencies": { "@ai-sdk/anthropic": "4.0.49", "ai": "7.0.93" }, "peerDependencies": { "broapp": ">=0.3.0" } }, "sha512-nt8W4a303o1ENFDv8fu6hx3xt8qQD8DEjyfVsi8Ls2BS8eFNiMlloBhc2Vyq0DCl/sQ1aFogiSBdjHMRdd6auQ=="],
+
+    "broapp-autoapp/broapp-ai-compatible": ["broapp-ai-compatible@0.3.0", "", { "dependencies": { "@ai-sdk/openai-compatible": "3.0.44", "ai": "7.0.93" }, "peerDependencies": { "broapp": ">=0.3.0" } }, "sha512-g+17RxoegLWgC8shGVPLHI13Ks6algh4wAF+DbLKn8/h4I9is0TNezPadDeRiP4ckGGRdXFvmlXuSO+X1Ua88g=="],
+
+    "broapp-autoapp/broapp-ai-elements": ["broapp-ai-elements@0.3.0", "", { "dependencies": { "@ai-sdk/react": "4.0.96", "ai": "7.0.93", "class-variance-authority": "0.7.1", "clsx": "2.1.1", "cmdk": "1.1.1", "lucide-react": "1.42.0", "nanoid": "6.0.1", "radix-ui": "1.6.7", "streamdown": "2.6.0", "tailwind-merge": "3.6.0", "use-stick-to-bottom": "1.1.6" }, "peerDependencies": { "broapp": ">=0.3.0", "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-c0rMk0TSYwz2MdQEyTh7lwhqG93MmxLyAc0vEndXXybnum3GIzqgNJBabxONpJL4KhWc2oGuOEibzdmwo55LbQ=="],
 
     "lightningcss/detect-libc": ["detect-libc@2.1.2", "", {}, "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="],
 

@@ -7,17 +7,17 @@ what a maintainer has to do, and what they have to decide.
 
 Published on npm from the `Publish to npm` workflow, each with provenance:
 `broapp`, `create-broapp`, `broapp-ai-anthropic`, `broapp-ai-compatible` and
-`broapp-ai-elements` at 0.3.0, and `broapp-autoapp` at 0.1.0 (its first
-release). Earlier: 0.1.0 on 2026-09-05, 0.2.0 after it. Version 0.2.1 was
-prepared in this repository and never published; 0.3.0 supersedes it. To
-generate from an unreleased checkout instead, see
-[troubleshooting.md](troubleshooting.md).
+`broapp-ai-elements` at 0.4.0, and `broapp-autoapp` at 0.2.0 (2026-09-11).
+Earlier: 0.1.0 on 2026-09-05, 0.2.0 after it, 0.3.0 on 2026-09-08 (0.2.1 was
+prepared and never published). To generate from an unreleased checkout instead,
+see [troubleshooting.md](troubleshooting.md).
 
-Repository release v0.3.1 (2026-09-10) shipped launcher binaries only — the New
+Repository release v0.4.0 ships the launcher binaries built from the same
+commit. v0.3.1 (2026-09-10) before it shipped launcher binaries only — the New
 application button and the Windows compiled-launcher fix — with every npm
-package unchanged. A created application installs `broapp@^0.3.0` and
-`broapp-autoapp@^0.1.0` from the registry, which is why the launcher's own
-package version did not move.
+package unchanged; 0.4.0 is the first release since 0.3.0 to move the packages,
+because the launcher now needs `broapp` host hooks that 0.3.0 does not have. A
+created application installs `broapp@^0.4.0` and `broapp-autoapp@^0.2.0`.
 
 ## Before publishing
 

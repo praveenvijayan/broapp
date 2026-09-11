@@ -202,12 +202,16 @@ development time or afterwards.
 
 ## Status
 
-Version 0.3.1 in this repository: a launcher release with the New
-application button and the Windows compiled-launcher fix. The npm packages are
-unchanged from 0.3.0 — `broapp`, `broapp-ai-anthropic`, `broapp-ai-compatible`,
-`broapp-ai-elements` and `create-broapp` at 0.3.0, `broapp-autoapp` at 0.1.0 —
-and a created application depends on those. `bun create broapp` generates a
-project on 0.3.0.
+Version 0.4.0: the knowledge loop. The launcher writes down every build, check
+and edit with the identity it had at the time, resumes where a person left off
+after a restart, opens every engineer turn with an orientation and evidence for
+the request, distils a provisional lesson from a resolved failure for a person
+to confirm, and can replay a case with and without that lesson. The `broapp` AI
+host gained `Ai.model()`, `Ai.turn()` and optional hooks for the delivered
+context and the end of a run. Every package moves: `broapp`,
+`broapp-ai-anthropic`, `broapp-ai-compatible`, `broapp-ai-elements` and
+`create-broapp` at 0.4.0, `broapp-autoapp` at 0.2.0. `bun create broapp`
+generates a project on 0.4.0.
 
 ## Licence
 

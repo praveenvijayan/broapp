@@ -354,10 +354,17 @@ async function main(): Promise<number> {
     const manifestPath = join(source, 'package.json');
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
       dependencies: Record<string, string>;
+      overrides?: Record<string, string>;
     };
     for (const name of Object.keys(manifest.dependencies)) {
       if (manifest.dependencies[name] === 'workspace:*') manifest.dependencies[name] = `file:${tarball(name)}`;
     }
+    // `broapp-autoapp` depends on `broapp` by a version range, and `bun install`
+    // resolves a range from the registry, so before a release is published the
+    // install would ask npm for a version that is not there yet. The dry run
+    // pins every Broapp package to its tarball with `overrides` for the same
+    // reason; this step tests the compiled binary's resolution, not the registry.
+    manifest.overrides = Object.fromEntries(packed.map((entry) => [entry.name, `file:${entry.tarball}`]));
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
     const data = join(outside, 'data');

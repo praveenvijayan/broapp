@@ -47,17 +47,31 @@ Verdict **unrelated**: the build error names `confirmText`, so the engineer repa
 
 **This batch is contaminated for time.** From 20:01:44 another Claude session ran `knowledge evaluate --runs 1` with the compiled binary against this demo root, on the same local model. Only `with 1` ran alone; the other five shared the model, and `without 2`'s provider error may be that. Outcomes stand; times and tokens are not comparable. I stopped my own evaluation (three minutes in) rather than let it overlap too, and reran the replay and the evaluation after that process exited:
 
-TBD-REPLAY2
+**Not rerun.** The release of 0.4.0 was started before the model was free: the other session's evaluation was stopped at nine of its twelve turns, and mine at four. The replay table above stands, with its timing caveat. A clean replay, one process on the root, is the first measurement to take after the release.
 
-TBD-EVAL
+**No evaluation table.** `knowledge evaluate` writes its table only once every cell has run; neither of the two `--runs 1` attempts reached that point (9 of 12 turns, then 4 of 12). Their run directories and stores are still under `<root>/evaluate/` for anyone who wants to read them; no number below is taken from them. The four-condition comparison is therefore **not measured** by this prompt, and the backlog's "What was measured" table says so beside the 08c and 12b numbers.
 
 ## Commands run
 
-TBD-COMMANDS
+```
+bun run typecheck                                   exit 0
+bun test tests/autoapp-knowledge.test.ts            50 pass, 0 fail
+bun test tests                                      650 pass, 0 fail (39 files)
+bun install && bun run check                        exit 0
+knowledge replay 1 --with 8 --runs 3                table above (contaminated for time)
+knowledge confirm 8                                 printed the table, answered n
+knowledge evaluate --runs 1                         started twice, stopped both times, no table
+```
+
+The 0.4.0 release gate was run after this report's commit; its lines are in the
+release commit's message rather than here.
 
 ## Acceptance criteria
 
-TBD-ACCEPTANCE
+- **A case replays from its manifest into fresh directories with a frozen corpus, and the production learning records are untouched by it** — pass (tests 2 and 3; the real replay wrote only `replays` rows).
+- **`knowledge confirm` shows the with/without table and the regression result and leaves the decision to the person** — pass (the real run printed the table; answered `n`; lesson 8 stayed provisional).
+- **`knowledge evaluate` produces the four-condition table from real runs on the configured model** — **not met.** The command and its test (test 6, fake adapter, child process) pass; the real run was stopped for the release before any table existed.
+- **`bun run check` green; every command above exits 0** — pass at the commit; the evaluation was stopped, not failed.
 
 ## Open questions
 
