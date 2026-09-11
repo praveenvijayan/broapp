@@ -21,7 +21,7 @@
 import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { CandidateStates } from '../engineer/state.ts';
+import { MAX_REPAIR_ATTEMPTS, type CandidateStates } from '../engineer/state.ts';
 import { within } from '../engineer/workspace.ts';
 import type { AppRow } from '../launcher/apps.ts';
 import { SOURCE } from '../launcher/candidate.ts';
@@ -196,8 +196,37 @@ export function orientation(input: {
         : 'Preview: none',
   );
 
+  // The last change cycle, when there was one: where it stopped, and what it
+  // left. Absent before any cycle, so an application nobody has cycled reads
+  // as it always did.
+  const cycle = state.cycle;
+  const unfinished = cycle !== null && (cycle.step === 'patched' || cycle.step === 'built' || cycle.step === 'previewed');
+  const failing = cycle !== null && cycle.failures.length > 0 && (cycle.step === 'build-failed' || cycle.step === 'checked');
+  const stalled = failing && cycle.attempts >= MAX_REPAIR_ATTEMPTS;
+  if (cycle !== null) {
+    const attempt = failing ? ` (attempt ${String(cycle.attempts)} of ${String(MAX_REPAIR_ATTEMPTS)})` : '';
+    const what =
+      cycle.step === 'build-failed'
+        ? `build failed at ${cut(cycle.failures[0]?.summary ?? 'an unknown stage', PROBLEM_CHARS)}${attempt}`
+        : cycle.step === 'checked'
+          ? failing
+            ? `${String(cycle.failures.length)} check${cycle.failures.length === 1 ? '' : 's'} failed: ${cut(cycle.failures[0]?.summary ?? '', PROBLEM_CHARS)}${attempt}`
+            : 'every check passed'
+          : cycle.step === 'patched'
+            ? 'patched and not built — it stopped there'
+            : cycle.step === 'built' || cycle.step === 'previewed'
+              ? `built ${cycle.releaseId?.slice(0, 8) ?? ''} and not checked — it stopped there`
+              : cycle.step === 'build-declined'
+                ? 'the person declined the build'
+                : 'the person declined the preview';
+    lines.push(`Last cycle: ${what}, ${ago(cycle.at, now)}`);
+  }
+
   let next: string;
-  if (built === null || state.editsSinceBuild) next = 'candidate.build';
+  if (stalled) next = 'the last cycles ended with the same failure: read the lines it points at and change approach, or ask the person';
+  else if (unfinished) next = 'candidate.cycle with no hunks, to finish verifying the last change';
+  else if (failing) next = 'fix what the last cycle reported, with another candidate.cycle';
+  else if (built === null || state.editsSinceBuild) next = 'candidate.build';
   else if (built === current) next = 'nothing to verify: the candidate is the current release';
   else if (status.previewLost) next = 'launcher.previewStart (the person’s Start preview), or candidate.preview';
   else if (!status.previewRunning) next = 'candidate.preview';

@@ -30,6 +30,12 @@ export type {
 
 export { CHECK_STEP_TIMEOUT_MS, contains, runAcceptance, stepFailure } from './check.ts';
 
+export { CYCLE_STEPS, MAX_REPAIR_ATTEMPTS } from './state.ts';
+export type { CycleProgress } from './state.ts';
+
+export { locateProblem } from './tools.ts';
+export type { ProblemLocation } from './tools.ts';
+
 export { startPreview } from './preview.ts';
 export type { PreviewDeps } from './preview.ts';
 

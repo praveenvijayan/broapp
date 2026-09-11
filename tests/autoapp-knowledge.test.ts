@@ -38,6 +38,7 @@ import { createRunStore, type RunStore } from 'broapp-autoapp/host';
 import {
   ENGINEER_INSTRUCTIONS,
   INSTRUCTION_SECTIONS,
+  MAX_REPAIR_ATTEMPTS,
   contains,
   stepFailure,
   createCandidateStates,
@@ -701,6 +702,13 @@ describe.skipIf(!available)('with children', () => {
     expect(result.check).toMatchObject({ passed: result.check.of, failed: [] });
     expect(result.next).toContain('candidate.explain');
     expect(where.states.status('items').checksVerified).toBe(true);
+    expect(where.states.get('items').cycle).toMatchObject({ step: 'checked', failures: [], attempts: 0 });
+
+    // With nothing to apply, a cycle verifies the workspace as it is: how an
+    // interrupted cycle is finished. No patch, so no patch is asked about.
+    const resumed = await callAnswering(where, 'candidate.cycle', { appId: 'items', message: 'Verify again', hunks: [] }, () => true, 'run-p:call-2');
+    expect(resumed.asked.map((question) => question.route)).toEqual(['candidate.cycle', 'candidate.build', 'candidate.preview']);
+    expect(resumed.output).toMatchObject({ applied: { changed: [] }, build: { ok: true }, check: { failed: [] } });
     await callTool(where, 'preview.stop', { appId: 'items' }, { approve: true });
   }, 240_000);
 
@@ -2195,6 +2203,9 @@ async function callAnswering(
   const running = tool.execute(input, envelope, new AbortController().signal).finally(() => {
     finished = true;
   });
+  // Handled now, awaited below: a call refused while the loop is still polling
+  // would otherwise be an unhandled rejection that fails the test on the spot.
+  running.catch(() => undefined);
   while (!finished) {
     const question = approvals.pending[0];
     if (question !== undefined) {
@@ -2268,6 +2279,82 @@ describe('the host’s change cycle', () => {
     expect(declined.output).toMatchObject({ applied: { changed: ['src/shared/contract.ts'] }, build: { declined: true } });
     expect(readFileSync(join(where.source, 'src', 'shared', 'contract.ts'), 'utf8')).toContain("effect: 'write'");
   }, 120_000);
+
+  test('a cycle writes down where it stopped, and a restart and the next turn read it', async () => {
+    const where = makeWorld({ git: true });
+    await callAnswering(
+      where,
+      'candidate.cycle',
+      { appId: 'items', message: 'Add items.tag', hunks: [{ path: 'src/shared/contract.ts', find: "'items.ping': {", replace: TAG_ROUTE }] },
+      () => true,
+      'run-s:call-1',
+    );
+    // What a restart reads back.
+    const resumed = createCandidateStates(where.root, quiet);
+    const cycle = resumed.get('items').cycle;
+    expect(cycle).toMatchObject({ step: 'build-failed', attempts: 1, runId: 'run-s', rev: git(where.source, 'rev-parse', 'HEAD') });
+    expect(cycle?.failures).toHaveLength(1);
+    expect(cycle?.failures[0]?.summary).toMatch(/^contract: /);
+    expect(cycle?.next).toContain('candidate.cycle');
+    // What the next turn opens with.
+    const told = orientation({ layout: where.root, appId: 'items', states: resumed, apps: listApps(where.root, where.supervisor, where.journal) });
+    expect(told.text).toContain(`Last cycle: build failed at contract: `);
+    expect(told.text).toContain(`(attempt 1 of ${String(MAX_REPAIR_ATTEMPTS)})`);
+    expect(told.text).toContain('Next: fix what the last cycle reported, with another candidate.cycle');
+  }, 120_000);
+
+  test('three cycles in a turn that end with the same failure stall, and the fourth waits for the person', async () => {
+    const where = makeWorld({ git: true });
+    const cycle = (requestId: string, hunks: readonly { path: string; find: string; replace: string }[]) =>
+      callAnswering(where, 'candidate.cycle', { appId: 'items', message: 'Try again', hunks }, () => true, requestId);
+    const header = (from: string, to: string) => [{ path: 'src/shared/views.ts', find: `header: '${from}'`, replace: `header: '${to}'` }];
+
+    expect((await cycle('run-b:call-1', [{ path: 'src/shared/contract.ts', find: "'items.ping': {", replace: TAG_ROUTE }])).output).toMatchObject({
+      attempt: { n: 1, of: MAX_REPAIR_ATTEMPTS },
+      stalled: false,
+    });
+    expect((await cycle('run-b:call-2', header('Label', 'One'))).output).toMatchObject({ attempt: { n: 2 }, stalled: false });
+    const third = await cycle('run-b:call-3', header('One', 'Two'));
+    expect(third.output).toMatchObject({ attempt: { n: 3 }, stalled: true });
+    expect((third.output as { next: string }).next).toContain('ask how to go on');
+    const stuck = orientation({ layout: where.root, appId: 'items', states: where.states, apps: listApps(where.root, where.supervisor, where.journal) });
+    expect(stuck.text).toContain('Next: the last cycles ended with the same failure');
+
+    // A fourth in the same turn is refused — as a conflict, not as the person saying no.
+    await expect(cycle('run-b:call-4', header('Two', 'Three'))).rejects.toMatchObject({ code: 'conflict' });
+    // The person's next message is a new turn, and the count starts again.
+    expect((await cycle('run-b2:call-1', header('Two', 'Three'))).output).toMatchObject({ attempt: { n: 1 }, stalled: false });
+  }, 180_000);
+
+  test('a third identical read in a turn says so, and a change to the workspace starts the count again', async () => {
+    const where = makeWorld({ git: true });
+    const read = (requestId: string) =>
+      callTool(where, 'source.read', { appId: 'items', path: 'src/shared/views.ts' }, { id: requestId }) as Promise<{ repeated?: { times: number } }>;
+    expect((await read('run-r:c1')).repeated).toBeUndefined();
+    expect((await read('run-r:c2')).repeated).toBeUndefined();
+    expect((await read('run-r:c3')).repeated?.times).toBe(3);
+    // Another turn has its own count.
+    expect((await read('run-q:c1')).repeated).toBeUndefined();
+    // After an edit in the turn the same read can return something new.
+    await callTool(
+      where,
+      'source.edit',
+      { appId: 'items', message: 'Rename a header', hunks: [{ path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'What it is'" }] },
+      { approve: true, id: 'run-r:c4' },
+    );
+    expect((await read('run-r:c5')).repeated).toBeUndefined();
+  }, 60_000);
+
+  test('a progress record that will not read is dropped, and the candidate beside it is kept', () => {
+    const where = makeWorld();
+    writeFileSync(
+      where.root.app('items').candidate,
+      JSON.stringify({ releaseId: 'a'.repeat(32), problems: [], cycle: { step: 'somewhere else', attempts: 'many' } }),
+    );
+    const state = createCandidateStates(where.root, quiet).get('items');
+    expect(state.releaseId).toBe('a'.repeat(32));
+    expect(state.cycle).toBeNull();
+  });
 
   test('the instructions send every change through the cycle', () => {
     const flat = ENGINEER_INSTRUCTIONS.replace(/\s+/g, ' ');

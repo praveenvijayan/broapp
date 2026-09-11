@@ -48,6 +48,39 @@ export interface StoredChecks {
   readonly at: number;
 }
 
+/**
+ * How many change cycles in one turn may end with the same failure.
+ *
+ * At this many the cycle says to stop and ask the person; one more in the same
+ * turn is refused. A new turn — the person has said something — starts again.
+ */
+export const MAX_REPAIR_ATTEMPTS = 3;
+
+/** The steps a change cycle can have reached. */
+export const CYCLE_STEPS = ['patched', 'build-declined', 'build-failed', 'built', 'preview-declined', 'previewed', 'checked'] as const;
+
+/**
+ * Where the last change cycle got to, written at every step.
+ *
+ * So a turn that was interrupted — the launcher stopped, the model's turn ran
+ * out — can be picked up where it stopped by the next one, which reads this in
+ * its orientation, and so a failure that keeps coming back is noticed.
+ */
+export interface CycleProgress {
+  readonly step: (typeof CYCLE_STEPS)[number];
+  /** The workspace revision at that step. */
+  readonly rev: string;
+  readonly releaseId: string | null;
+  /** What was still wrong: each build problem or failed example, by signature. */
+  readonly failures: readonly { readonly signature: string; readonly summary: string }[];
+  /** Cycles in a row, in this turn, that ended with these same failures. */
+  readonly attempts: number;
+  /** The turn the cycle ran in. */
+  readonly runId: string;
+  readonly next: string;
+  readonly at: number;
+}
+
 /** The part of a candidate that survives a restart. */
 export interface StoredCandidate {
   /** The last build's release, when it succeeded. */
@@ -63,6 +96,8 @@ export interface StoredCandidate {
   /** The files the last applied change touched. */
   readonly changed: readonly string[];
   readonly capabilityDiff: CapabilityDiff | null;
+  /** The last change cycle's progress, or `null` when none has run. */
+  readonly cycle: CycleProgress | null;
 }
 
 /** What the engineer has done for one application, so far. */
@@ -138,6 +173,7 @@ const EMPTY: StoredCandidate = {
   previewWasRunning: false,
   changed: [],
   capabilityDiff: null,
+  cycle: null,
 };
 
 /** How long a workspace revision is trusted before `git` is asked again. */
@@ -395,5 +431,49 @@ function parseStored(raw: unknown): StoredCandidate {
     previewWasRunning: value['previewWasRunning'] === true,
     changed: list('changed', (item: unknown): item is string => typeof item === 'string'),
     capabilityDiff,
+    cycle: parseCycle(value['cycle']),
+  };
+}
+
+/**
+ * The last cycle's progress, or `null` when there is none or it will not read.
+ *
+ * Unlike the fields above, a progress record that will not read is dropped
+ * rather than refusing the whole file: it is advice for the next turn, and the
+ * candidate it sits beside is worth more than it is.
+ */
+function parseCycle(raw: unknown): CycleProgress | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  const failures = value['failures'];
+  const releaseId = value['releaseId'];
+  if (
+    !(CYCLE_STEPS as readonly unknown[]).includes(value['step']) ||
+    typeof value['rev'] !== 'string' ||
+    (releaseId !== null && typeof releaseId !== 'string') ||
+    !Array.isArray(failures) ||
+    !failures.every(
+      (item: unknown) =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as { signature?: unknown }).signature === 'string' &&
+        typeof (item as { summary?: unknown }).summary === 'string',
+    ) ||
+    typeof value['attempts'] !== 'number' ||
+    typeof value['runId'] !== 'string' ||
+    typeof value['next'] !== 'string' ||
+    typeof value['at'] !== 'number'
+  ) {
+    return null;
+  }
+  return {
+    step: value['step'] as CycleProgress['step'],
+    rev: value['rev'],
+    releaseId,
+    failures: failures as CycleProgress['failures'],
+    attempts: value['attempts'],
+    runId: value['runId'],
+    next: value['next'],
+    at: value['at'],
   };
 }

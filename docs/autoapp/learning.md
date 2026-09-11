@@ -172,6 +172,24 @@ which examples failed and why. Its build and preview are the existing tools
 under their own request ids (`<callId>.build`, `<callId>.preview`), so their
 events, cases and servings are written down exactly as before.
 
+**Where a cycle stopped.** Every step of a cycle — patched, built, previewed,
+checked, a build or preview the person declined, a failing build — is written
+to `candidate.json` with the workspace revision, the release, the failures by
+signature and the next step. A turn that was interrupted, by a restart or by
+running out, is picked up by the next one: its orientation says "Last cycle:
+built … and not checked — it stopped there" and "Next: candidate.cycle with no
+hunks, to finish verifying the last change". A cycle with no hunks and no files
+verifies the workspace as it is.
+
+**When it goes round.** A failure is the same failure when its signatures are,
+for a build problem or a failed example alike, and a cycle says so
+(`sameAsLastBuild`, `sameAsLastCheck`). Three cycles in one turn that end with
+the same failure are the limit: the third says to stop, tell the person what
+was tried and ask how to go on, and a fourth in the same turn is refused. The
+person's next message is a new turn and the count starts again. A read the turn
+has already made twice, with nothing changed since, says so the third time;
+nothing is refused for it.
+
 ## Distillation
 
 When a turn ends, every resolved case that has not been asked about is queued,

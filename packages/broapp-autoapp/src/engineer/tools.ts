@@ -15,13 +15,13 @@ import { existsSync, rmSync } from 'node:fs';
 
 import { guardedTool } from 'broapp/ai/host';
 import type { GuardedTool } from 'broapp/ai/host';
-import { publicError } from 'broapp/host';
+import { canonicalJson, publicError } from 'broapp/host';
 import type { Envelope, Gate, HostLogger } from 'broapp/host';
 import { isPublicError, s } from 'broapp/shared';
 
 import { showLesson } from '../knowledge/cli.ts';
 import { exampleHash, type Evidence, type OpenEpisode } from '../knowledge/evidence.ts';
-import { origin as originOf, type FullOrigin } from '../knowledge/ids.ts';
+import { origin as originOf, sourceRevision, type FullOrigin } from '../knowledge/ids.ts';
 import type { EventLog } from '../knowledge/log.ts';
 import { problemSignature, scoreBuild, scoreCheck } from '../knowledge/scoring.ts';
 import type { Hint, Serve } from '../knowledge/serve.ts';
@@ -46,7 +46,7 @@ import {
 
 import { runAcceptance } from './check.ts';
 import { startPreview } from './preview.ts';
-import { previewIdOf, type CandidateStates, type CheckResult } from './state.ts';
+import { MAX_REPAIR_ATTEMPTS, previewIdOf, type CandidateStates, type CheckResult, type CycleProgress } from './state.ts';
 import {
   applyChange,
   applyEdits,
@@ -183,6 +183,38 @@ function wasDeclined(cause: unknown): boolean {
   return isPublicError(cause) && cause.code === 'rejected';
 }
 
+/**
+ * The turn a call belongs to: `<runId>` of a `<runId>:<callId>` request id, or
+ * `null` for a single-step call such as a person's click.
+ */
+function runIdOf(envelope: Envelope | undefined): string | null {
+  const id = envelope?.requestId ?? '';
+  const cut = id.indexOf(':');
+  return cut <= 0 ? null : id.slice(0, cut);
+}
+
+/** From this many identical reads in one turn, a read's result says so. */
+const REPEAT_NOTICE_AT = 3;
+/** How many turns' reads are remembered at once. */
+const REPEAT_TURNS = 50;
+
+/** One line of a failure, for a progress record and an orientation. */
+function summaryOf(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length <= 160 ? flat : `${flat.slice(0, 159)}…`;
+}
+
+/** Two non-empty lists of failures with the same signatures. */
+function sameFailures(
+  a: readonly { readonly signature: string }[],
+  b: readonly { readonly signature: string }[],
+): boolean {
+  if (a.length === 0 || b.length === 0) return false;
+  const left = new Set(a.map((failure) => failure.signature));
+  const right = new Set(b.map((failure) => failure.signature));
+  return left.size === right.size && [...left].every((signature) => right.has(signature));
+}
+
 /** The release that is current, or a refusal that says why not. */
 function currentRelease(root: Layout, appId: string): { releaseId: string; spec: AppSpec } {
   const releaseId = readCurrent(root, appId);
@@ -286,6 +318,51 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   };
 
   /**
+   * Identical reads in each turn, so a turn reading the same thing again and
+   * again is told so.
+   *
+   * Report 08c's stall was a model that had what it needed and kept going
+   * round. This does not refuse anything: a third identical read says it is
+   * the third, and that nothing has changed since. Any change to the workspace
+   * in the turn starts the count again, because after it the same read can
+   * return something new.
+   */
+  const reads = new Map<string, Map<string, number>>();
+  const noteRead = (
+    envelope: Envelope | undefined,
+    tool: string,
+    input: unknown,
+  ): { repeated?: { times: number; note: string } } => {
+    const runId = runIdOf(envelope);
+    if (runId === null) return {};
+    let calls = reads.get(runId);
+    if (calls === undefined) {
+      calls = new Map();
+      reads.set(runId, calls);
+      if (reads.size > REPEAT_TURNS) {
+        const oldest = reads.keys().next().value;
+        if (oldest !== undefined) reads.delete(oldest);
+      }
+    }
+    const key = `${tool} ${canonicalJson(input)}`;
+    const times = (calls.get(key) ?? 0) + 1;
+    calls.set(key, times);
+    return times < REPEAT_NOTICE_AT
+      ? {}
+      : {
+          repeated: {
+            times,
+            note: `You have made exactly this call ${String(times)} times in this turn and nothing has changed since: use what it returned, or change something.`,
+          },
+        };
+  };
+  /** The workspace changed in this turn: every read may now return something new. */
+  const workspaceChanged = (envelope: Envelope | undefined): void => {
+    const runId = runIdOf(envelope);
+    if (runId !== null) reads.delete(runId);
+  };
+
+  /**
    * Apply hunks to a workspace and write down that they were applied.
    *
    * `source.edit` and `candidate.cycle` both land edits through here, so an
@@ -303,6 +380,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     const applied = applyEdits(sourceDir, hunks, message);
     const summary = diffSummary(before, snapshot(sourceDir));
     states.update(appId, { changed: applied.changed });
+    workspaceChanged(envelope);
     note('an edit', (k) => {
       // The size of what the model composed, which is the number report 08b
       // measured the stall against.
@@ -401,7 +479,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       'The current release of an application: its manifest, its contract, its views, its migrations and its acceptance examples, plus what the person has granted it.',
     inputSchema: appIdInput.toJsonSchema(),
     effect: 'read',
-    run: (input) => {
+    run: (input, _signal, envelope) => {
       const { appId } = appIdInput.parse(input);
       select(appId);
       const { releaseId, spec } = currentRelease(root, appId);
@@ -414,6 +492,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         migrations: spec.migrations,
         acceptance: spec.acceptance,
         granted: grants?.capabilities ?? [],
+        ...noteRead(envelope, 'spec.read', { appId }),
       });
     },
   });
@@ -423,10 +502,10 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     description: "Every file in an application's source workspace, with its size in bytes.",
     inputSchema: appIdInput.toJsonSchema(),
     effect: 'read',
-    run: (input) => {
+    run: (input, _signal, envelope) => {
       const { appId } = appIdInput.parse(input);
       select(appId);
-      return Promise.resolve({ files: readTree(root.app(appId).source) });
+      return Promise.resolve({ files: readTree(root.app(appId).source), ...noteRead(envelope, 'source.list', { appId }) });
     },
   });
 
@@ -439,10 +518,14 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     description: 'The text of one file in an application’s source workspace.',
     inputSchema: readInput.toJsonSchema(),
     effect: 'read',
-    run: (input) => {
+    run: (input, _signal, envelope) => {
       const { appId, path } = readInput.parse(input);
       select(appId);
-      return Promise.resolve({ path, content: readWorkspaceFile(root.app(appId).source, path) });
+      return Promise.resolve({
+        path,
+        content: readWorkspaceFile(root.app(appId).source, path),
+        ...noteRead(envelope, 'source.read', { appId, path }),
+      });
     },
   });
 
@@ -458,15 +541,16 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       'Search an application’s source workspace for a regular expression, or for plain text with literal: true. Returns at most 50 matching lines as path, line and text. files is a glob over workspace paths, default src/**. Use it where the evidence says unknown.',
     inputSchema: searchInput.toJsonSchema(),
     effect: 'read',
-    run: (input) => {
+    run: (input, _signal, envelope) => {
       const { appId, pattern, literal, files } = searchInput.parse(input);
       select(appId);
-      return Promise.resolve(
-        searchWorkspace(root.app(appId).source, pattern, {
+      return Promise.resolve({
+        ...searchWorkspace(root.app(appId).source, pattern, {
           ...(literal === undefined ? {} : { literal }),
           ...(files === undefined ? {} : { files }),
         }),
-      );
+        ...noteRead(envelope, 'source.search', { appId, pattern, literal, files }),
+      });
     },
   });
 
@@ -521,6 +605,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       );
       const summary = diffSummary(before, snapshot(sourceDir));
       states.update(appId, { changed: applied.changed });
+      workspaceChanged(envelope);
       note('a change', (k) => {
         // After the commit, so the revision is the one this change produced.
         k.log.event(
@@ -769,15 +854,12 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   tools['candidate.cycle'] = guardedTool(gate, {
     name: 'candidate.cycle',
     description:
-      'Apply hunks (as source.edit takes them) and any new files, build, and when the build passes start the preview and run the acceptance examples. The person is asked before each of those steps. Returns each build problem with the lines it points at, whether it is the same failure as the last build, or which examples failed. Use it for every change, then fix what it reports with another candidate.cycle.',
+      'Apply hunks (as source.edit takes them) and any new files, build, and when the build passes start the preview and run the acceptance examples. The person is asked before each of those steps. Returns each build problem with the lines it points at, whether it is the same failure as the last build, or which examples failed. Use it for every change, then fix what it reports with another candidate.cycle. With no hunks and no files it verifies the workspace as it is, which is how to finish a cycle that was interrupted. Three cycles in one turn that end with the same failure are the limit: after them, stop and ask the person.',
     inputSchema: cycleInput.toJsonSchema(),
     effect: 'write',
     run: async (input, signal, envelope) => {
       const { appId, message, hunks, create } = cycleInput.parse(input);
       const files = create ?? [];
-      if (hunks.length === 0 && files.length === 0) {
-        throw publicError.invalidInput('Give hunks to apply, files to create, or both.');
-      }
       if (envelope === undefined) {
         // Each step asks through the turn's approver; without one nobody could.
         throw publicError.unavailable('candidate.cycle runs only inside a turn.');
@@ -785,9 +867,40 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       select(appId);
       const sourceDir = root.app(appId).source;
       const previous = new Set(states.get(appId).problems.map((problem) => problemSignature(problem.stage, problem.message)));
+      const runId = runIdOf(envelope) ?? envelope.requestId;
+      const before = states.get(appId).cycle;
+      const sameTurn = before !== null && before.runId === runId;
+
+      // Bounded repair. A turn that has already ended three cycles with the
+      // same failure stops here until the person says something, which is a
+      // new turn. `conflict`, not `rejected`: nobody declined anything, and the
+      // run loop reports a rejection to the model as the person saying no.
+      if (sameTurn && before.failures.length > 0 && before.attempts >= MAX_REPAIR_ATTEMPTS) {
+        throw publicError.conflict(
+          `${String(MAX_REPAIR_ATTEMPTS)} cycles in this turn have ended with the same failure (${before.failures[0]?.summary ?? 'unknown'}). Stop, tell the person what you tried and what still fails, and ask how to go on; their next message starts a new turn.`,
+        );
+      }
+
+      /** Write down where the cycle is, so an interrupted turn can be picked up here. */
+      const progress = (patch: Omit<CycleProgress, 'rev' | 'at' | 'runId'>): void => {
+        const cycle: CycleProgress = { ...patch, runId, rev: sourceRevision(sourceDir), at: Date.now() };
+        states.update(appId, { cycle });
+      };
+      /** How many cycles in a row, in this turn, have ended with these failures. */
+      const attemptsFor = (failures: CycleProgress['failures']): number =>
+        sameTurn && sameFailures(before.failures, failures) ? before.attempts + 1 : 1;
+      /** The step after a failure: fix it, or — at the limit — stop and ask. */
+      const afterFailure = (attempts: number, fix: string): { stalled: boolean; next: string } =>
+        attempts >= MAX_REPAIR_ATTEMPTS
+          ? {
+              stalled: true,
+              next: `${String(MAX_REPAIR_ATTEMPTS)} cycles in this turn have ended with the same failure. Stop, tell the person what you tried and what still fails, and ask how to go on. Another cycle in this turn will be refused.`,
+            }
+          : { stalled: false, next: fix };
 
       // 1. The patch, which this call's own question approved. Hunks first, all
-      //    or nothing, then new files, which no hunk can have been about.
+      //    or nothing, then new files, which no hunk can have been about. With
+      //    neither, the cycle verifies the workspace as it is.
       const edited = hunks.length === 0 ? null : editHunks(appId, message, hunks, envelope);
       const created: string[] = [];
       if (files.length > 0) {
@@ -800,6 +913,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         const applied = applyChange(sourceDir, files, message);
         created.push(...applied.changed);
         states.update(appId, { changed: applied.changed });
+        workspaceChanged(envelope);
         note('a change', (k) => {
           k.log.event(
             'edit',
@@ -811,6 +925,10 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         });
       }
       const applied = { changed: [...(edited?.changed ?? []), ...created], matchedBy: edited?.matchedBy ?? [], diff: edited?.diff ?? '' };
+      const carried = { failures: before?.failures ?? [], attempts: sameTurn ? before.attempts : 0 };
+      if (applied.changed.length > 0) {
+        progress({ step: 'patched', releaseId: null, ...carried, next: 'candidate.cycle with no hunks, to build and check this patch' });
+      }
 
       /** One of this call's own steps, as the existing tool, under its own request id. */
       const step = (name: string): Envelope => ({ ...envelope, requestId: `${envelope.requestId}.${name}` });
@@ -828,14 +946,27 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       // 2. The build.
       const built = await run('candidate.build', 'build', { appId });
       if ('declined' in built) {
-        return { applied, build: { declined: true }, next: 'The person declined the build. Ask what they want changed before another cycle.' };
+        const next = 'The person declined the build. Ask what they want changed before another cycle.';
+        progress({ step: 'build-declined', releaseId: null, ...carried, next });
+        return { applied, build: { declined: true }, next };
       }
       const build = built.output as
         | { ok: true; releaseId: string; schemaVersion: number }
         | { ok: false; problems: readonly BuildProblem[]; hints?: readonly Hint[] };
       if (!build.ok) {
-        const signatures = build.problems.map((problem) => problemSignature(problem.stage, problem.message));
-        const sameAsLastBuild = signatures.length > 0 && signatures.every((signature) => previous.has(signature));
+        const failures = build.problems.map((problem) => ({
+          signature: problemSignature(problem.stage, problem.message),
+          summary: summaryOf(`${problem.stage}: ${problem.message}`),
+        }));
+        const sameAsLastBuild = failures.length > 0 && failures.every((failure) => previous.has(failure.signature));
+        const attempts = attemptsFor(failures);
+        const { stalled, next } = afterFailure(
+          attempts,
+          sameAsLastBuild
+            ? 'These are the problems the last build had: the change did not reach them. Read the lines each one points at before the next candidate.cycle.'
+            : 'Fix these problems with another candidate.cycle.',
+        );
+        progress({ step: 'build-failed', releaseId: null, failures, attempts, next });
         return {
           applied,
           build: {
@@ -847,27 +978,54 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
             ...(build.hints === undefined ? {} : { hints: build.hints }),
             sameAsLastBuild,
           },
-          next: sameAsLastBuild
-            ? 'These are the problems the last build had: the change did not reach them. Read the lines each one points at before the next candidate.cycle.'
-            : 'Fix these problems with another candidate.cycle.',
+          attempt: { n: attempts, of: MAX_REPAIR_ATTEMPTS },
+          stalled,
+          next,
         };
       }
+      progress({
+        step: 'built',
+        releaseId: build.releaseId,
+        failures: [],
+        attempts: 0,
+        next: 'candidate.cycle with no hunks, to preview and check this build',
+      });
 
       // 3. The preview, on a fresh copy of the data.
       const previewed = await run('candidate.preview', 'preview', { appId, releaseId: build.releaseId });
       if ('declined' in previewed) {
-        return {
-          applied,
-          build: { ok: true, releaseId: build.releaseId },
-          preview: { declined: true },
-          next: 'The build passed and the person declined the preview. Ask them before trying again.',
-        };
+        const next = 'The build passed and the person declined the preview. Ask them before trying again.';
+        progress({ step: 'preview-declined', releaseId: build.releaseId, failures: [], attempts: 0, next });
+        return { applied, build: { ok: true, releaseId: build.releaseId }, preview: { declined: true }, next };
       }
+      progress({
+        step: 'previewed',
+        releaseId: build.releaseId,
+        failures: [],
+        attempts: 0,
+        next: 'candidate.cycle with no hunks, to run the checks on a fresh preview',
+      });
 
       // 4. The checks, a read against the preview just started.
       const checked = await run('candidate.check', 'check', { appId, releaseId: build.releaseId });
       const results = 'declined' in checked ? [] : (checked.output as { results: readonly CheckResult[] }).results;
       const failed = results.filter((result) => !result.passed);
+      const failures = failed.map((result) => ({
+        signature: problemSignature('check', `${result.id} ${result.detail ?? ''}`),
+        summary: summaryOf(`${result.id}: ${result.detail ?? 'failed'}`),
+      }));
+      const sameAsLastCheck = sameTurn && sameFailures(before.failures, failures);
+      const attempts = failures.length === 0 ? 0 : attemptsFor(failures);
+      const { stalled, next } =
+        failures.length === 0
+          ? { stalled: false, next: 'Every check passed. Call candidate.explain, then ask the person to open the preview.' }
+          : afterFailure(
+              attempts,
+              sameAsLastCheck
+                ? 'The same examples fail as after the last cycle: the change did not reach them. Read what each one called before the next candidate.cycle.'
+                : 'Fix what the failed checks say with another candidate.cycle.',
+            );
+      progress({ step: 'checked', releaseId: build.releaseId, failures, attempts, next });
       return {
         applied,
         build: { ok: true, releaseId: build.releaseId, schemaVersion: build.schemaVersion },
@@ -876,11 +1034,10 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
           passed: results.length - failed.length,
           of: results.length,
           failed: failed.map((result) => ({ id: result.id, title: result.title, detail: result.detail ?? '' })),
+          sameAsLastCheck,
         },
-        next:
-          failed.length === 0
-            ? 'Every check passed. Call candidate.explain, then ask the person to open the preview.'
-            : 'Fix what the failed checks say with another candidate.cycle.',
+        ...(failures.length === 0 ? {} : { attempt: { n: attempts, of: MAX_REPAIR_ATTEMPTS }, stalled }),
+        next,
       };
     },
   });
