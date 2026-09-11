@@ -210,6 +210,20 @@ lesson's status except superseding a provisional one; confirming and retiring
 are the `knowledge` command, run by a person, which refuses while a launcher is
 serving.
 
+**Replay and evaluation answer their own questions.** `knowledge replay` and
+`knowledge evaluate` run the engineer with nobody watching, so the run stands in
+for the person: it allows `source.edit`, `source.change`, `candidate.build`,
+`candidate.preview` and `preview.stop`, and declines everything else —
+`release.activate` and `apps.create` above all — through the same gate and
+approval table a click would use. What it allows can only reach the run's own
+directory under `<root>/replay/` or `<root>/evaluate/`: a clone of the workspace,
+a copied release, a copied data snapshot, and children started on those. The
+live workspace is only read (`git clone`), the live release and data only
+copied. A person starts both commands from a terminal; nothing starts them on
+its own. They send the case's request, the instructions and the documents a run
+is served to the configured provider, which is what the engineer's own turn
+sends. Their results are shown by `knowledge confirm`; they confirm nothing.
+
 ## What none of this protects against
 
 A candidate release's host code is **trusted local code**: crash-isolated in

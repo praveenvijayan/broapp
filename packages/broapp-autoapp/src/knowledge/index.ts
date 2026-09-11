@@ -30,10 +30,32 @@ export { EVIDENCE_MAX_CHARS, ORIENTATION_MAX_CHARS, indexWorkspace, orientation,
 export type { EvidenceEntry, IndexedSymbol, Orientation, SymbolIndex, TaskEvidence } from './path.ts';
 
 export { createServe } from './serve.ts';
-export type { CreateServeInput, Hint, Serve, ServedTurn } from './serve.ts';
+export type { Corpus, CreateServeInput, Hint, Serve, ServedDocuments, ServedTurn } from './serve.ts';
 
-export { problemSignature, scoreBuild, scoreCheck, scoreRunEnd } from './scoring.ts';
-export type { Outcome } from './scoring.ts';
+export { problemSignature, scoreBuild, scoreCheck, scoreRunEnd, unrelatedHintCredit } from './scoring.ts';
+export type { Outcome, UnrelatedCredit } from './scoring.ts';
+
+export { RUN_APPROVES, git, identityOf, openRun, prepareRun, providersFor } from './harness.ts';
+export type { OpenRunOptions, ProvidersFor, RunHandle, RunLabel, RunSource, ToolCall, TurnOutcome } from './harness.ts';
+
+export {
+  DEFAULT_REPLAY_RUNS,
+  DEFAULT_TURN_TIMEOUT_MS,
+  MAX_RUNS_KEPT,
+  copyLessons,
+  manifestFor,
+  regression,
+  replay,
+  rowOf,
+  runReplayCommand,
+} from './replay.ts';
+export type { ReplayCommandOptions, ReplayManifest, ReplayOptions, ReplayResult } from './replay.ts';
+
+export { CONDITIONS, EVALUATION_TASKS, evaluate, evaluationTable, runEvaluateCommand } from './evaluate.ts';
+export type { Condition, EvaluateCommandOptions, EvaluateOptions, EvaluationRow, EvaluationTask } from './evaluate.ts';
+
+export { duration, replayTable, verdictOf } from './verdict.ts';
+export type { ReplayRow, Verdict } from './verdict.ts';
 
 export { SEED_LESSONS, seedLessons } from './seed.ts';
 export type { LessonApplies, SeedLesson } from './seed.ts';
@@ -43,7 +65,7 @@ export type { CreateDistillerInput, Diagnosis, Distiller } from './distil.ts';
 
 export { REVIEW_REASONS, instructionsHash, reviewFlags } from './freshness.ts';
 
-export { runKnowledgeCommand, showLesson } from './cli.ts';
+export { replayEvidence, runKnowledgeCommand, showLesson } from './cli.ts';
 export type { KnowledgeCommandOptions, LessonProvenance, LessonRecord, LessonServing } from './cli.ts';
 
 export { SESSION_FILE, openSession } from './session.ts';

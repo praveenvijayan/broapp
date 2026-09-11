@@ -77,6 +77,30 @@ export interface Serve extends AiContextProviders {
   hints(appId: string, problems: readonly BuildProblem[], origin: FullOrigin): readonly Hint[];
 }
 
+/**
+ * Which lessons a serving may offer.
+ *
+ * The launcher serves every lesson it holds. A replay freezes the corpus to the
+ * one lesson under test, or to nothing, so that what it measures is that lesson
+ * and not whatever else a person happened to have confirmed since; the
+ * evaluation compares corpora the same way.
+ */
+export interface Corpus {
+  /**
+   * Lessons given to every turn about an application, whatever its words, and
+   * hinted beside a failure of their stage. A replay pins the lesson under test.
+   */
+  readonly pinned?: readonly number[];
+  /** Which other lessons may match: all of them (the default), the curated seeds, the confirmed ones, or none. */
+  readonly match?: 'all' | 'curated' | 'confirmed' | 'none';
+}
+
+/** Which of an application's two documents a turn is given. Both, unless said otherwise. */
+export interface ServedDocuments {
+  readonly digest: boolean;
+  readonly evidence: boolean;
+}
+
 /** What {@link createServe} needs. */
 export interface CreateServeInput {
   readonly knowledge: Knowledge;
@@ -88,6 +112,14 @@ export interface CreateServeInput {
   readonly instructions: string;
   /** Every application, as the launcher's own list has them. */
   readonly apps: () => readonly AppRow[];
+  /** Which lessons may be served. Defaults to every one. */
+  readonly corpus?: Corpus;
+  readonly documents?: ServedDocuments;
+  /**
+   * Whether the curated seeds are written into the store. Defaults to `true`;
+   * a replay's store holds only the lesson under test.
+   */
+  readonly seed?: boolean;
 }
 
 /** How many lessons one turn may be given, and one build problem. */
@@ -174,11 +206,17 @@ function namesId(text: string, appId: string): boolean {
 export function createServe(input: CreateServeInput): Serve {
   const { knowledge, log, layout, states, session } = input;
   const { db } = knowledge;
+  const match = input.corpus?.match ?? 'all';
+  // Integers by type and by check, because they are written into the SQL below.
+  const pinned = (input.corpus?.pinned ?? []).filter((id) => Number.isInteger(id) && id > 0);
+  const documents: ServedDocuments = input.documents ?? { digest: true, evidence: true };
 
-  try {
-    seedLessons(knowledge, input.instructions);
-  } catch (cause) {
-    log.error(`[autoapp] the starting lessons could not be written: ${String(cause instanceof Error ? cause.message : cause)}`);
+  if (input.seed !== false) {
+    try {
+      seedLessons(knowledge, input.instructions);
+    } catch (cause) {
+      log.error(`[autoapp] the starting lessons could not be written: ${String(cause instanceof Error ? cause.message : cause)}`);
+    }
   }
 
   const turns = new Map<string, Turn>();
@@ -225,27 +263,67 @@ export function createServe(input: CreateServeInput): Serve {
     return rows.length === 1 ? (rows[0]?.appId ?? null) : null;
   }
 
+  /** The SQL that admits a lesson from the corpus, or from the pinned list. */
+  function admitted(from: 'corpus' | 'pinned'): string | null {
+    if (from === 'pinned') return pinned.length === 0 ? null : `l.id IN (${pinned.map(String).join(', ')})`;
+    if (match === 'none') return null;
+    if (match === 'curated') return "l.origin = 'curated'";
+    if (match === 'confirmed') return "l.status = 'confirmed'";
+    return '1 = 1';
+  }
+
   /**
    * Lessons matching a text: confirmed ranked above provisional, never a
    * `method_unclear` one, global or this application's own, and, for a build
-   * problem, only those about its stage or about no stage in particular.
+   * problem, only those about exactly its stage.
+   *
+   * A lesson with no stage is never a hint. Report 12c watched the MCP seed,
+   * which names no stage, be hinted for a contract failure through the one word
+   * "effect" and then credited `resolved` beside the lesson that actually
+   * applied; a hint is a claim about the part of the build that failed, and a
+   * lesson that names no part cannot make it. Such a lesson can still be served
+   * to a turn, where its words have to earn it.
    */
-  function findLessons(text: string, appId: string | null, limit: number, stage?: string): LessonHit[] {
+  function findLessons(
+    text: string,
+    appId: string | null,
+    limit: number,
+    stage?: string,
+    from: 'corpus' | 'pinned' = 'corpus',
+  ): LessonHit[] {
     const query = ftsQuery(text);
-    if (query === null) return [];
+    const admit = admitted(from);
+    if (query === null || admit === null) return [];
     return db
       .query<LessonHit, [string, string, string | null, string | null, number]>(
         `SELECT l.id, l.status, l.review, l.summary, l.trigger, l.applies
            FROM lessons_fts JOIN lessons l ON l.id = lessons_fts.rowid
           WHERE lessons_fts MATCH ?
+            AND ${admit}
             AND l.status IN ('confirmed', 'provisional')
             AND (l.diagnosis IS NULL OR l.diagnosis <> 'method_unclear')
             AND (l.scope = 'global' OR l.scope = ?)
-            AND (? IS NULL OR json_extract(l.applies, '$.stage') IS NULL OR json_extract(l.applies, '$.stage') = ?)
+            AND (? IS NULL OR json_extract(l.applies, '$.stage') = ?)
           ORDER BY bm25(lessons_fts, 1.0, 2.0) * CASE l.status WHEN 'confirmed' THEN 1.0 ELSE 0.6 END
           LIMIT ?`,
       )
       .all(query, appId === null ? '' : `app:${appId}`, stage ?? null, stage ?? null, limit);
+  }
+
+  /** The pinned lessons that may be served to a turn about this application, words or not. */
+  function pinnedLessons(appId: string): LessonHit[] {
+    const admit = admitted('pinned');
+    if (admit === null) return [];
+    return db
+      .query<LessonHit, [string]>(
+        `SELECT l.id, l.status, l.review, l.summary, l.trigger, l.applies FROM lessons l
+          WHERE ${admit}
+            AND l.status IN ('confirmed', 'provisional')
+            AND (l.diagnosis IS NULL OR l.diagnosis <> 'method_unclear')
+            AND (l.scope = 'global' OR l.scope = ?)
+          ORDER BY l.id`,
+      )
+      .all(`app:${appId}`);
   }
 
   /** Write one serving; the unique index makes a repeat a no-op. */
@@ -295,18 +373,23 @@ export function createServe(input: CreateServeInput): Serve {
         const routes = new Set(
           (evidence?.entries ?? []).filter((entry) => entry.kind === 'route').map((entry) => entry.name),
         );
-        const lessons =
-          appId === null
-            ? []
-            : findLessons(query.text, appId, TURN_CANDIDATES)
-                .filter((lesson) => strongMatch(lesson, words, routes))
-                .slice(0, TURN_LESSONS);
+        const lessons: LessonHit[] = [];
+        if (appId !== null) {
+          const matched = findLessons(query.text, appId, TURN_CANDIDATES).filter((lesson) =>
+            strongMatch(lesson, words, routes),
+          );
+          for (const lesson of [...pinnedLessons(appId), ...matched]) {
+            if (lessons.length < TURN_LESSONS && !lessons.some((held) => held.id === lesson.id)) lessons.push(lesson);
+          }
+        }
         const refs: ContextRef[] =
           appId === null
             ? []
             : [
-                { ref: `digest:${appId}`, title: `Where ${appId} stands` },
-                { ref: `evidence:${appId}`, title: `What this request touches in ${appId}` },
+                ...(documents.digest ? [{ ref: `digest:${appId}`, title: `Where ${appId} stands` }] : []),
+                ...(documents.evidence
+                  ? [{ ref: `evidence:${appId}`, title: `What this request touches in ${appId}` }]
+                  : []),
                 ...lessons.map((lesson) => ({ ref: `lesson:${String(lesson.id)}`, title: 'A lesson from earlier work' })),
               ];
         const offered = refs.slice(0, query.limit);
@@ -414,7 +497,12 @@ export function createServe(input: CreateServeInput): Serve {
         if (out.length >= MAX_HINTS) break;
         // One shared word is enough here, unlike a turn: the stage filter has
         // already narrowed the lessons to the part of the build that failed.
-        for (const lesson of findLessons(problem.message, appId, HINTS_PER_PROBLEM, problem.stage)) {
+        // A pinned lesson is looked for first, under the same two rules.
+        const found = [
+          ...findLessons(problem.message, appId, HINTS_PER_PROBLEM, problem.stage, 'pinned'),
+          ...findLessons(problem.message, appId, HINTS_PER_PROBLEM, problem.stage),
+        ];
+        for (const lesson of found) {
           if (out.length >= MAX_HINTS || seen.has(lesson.id)) continue;
           seen.add(lesson.id);
           out.push({

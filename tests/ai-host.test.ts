@@ -11,10 +11,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { AdapterError, createAi, createFakeAdapter } from 'broapp/ai/host';
+import { AdapterError, createAi, createFakeAdapter, guardedTool } from 'broapp/ai/host';
 import type { ProviderAdapter } from 'broapp/ai/host';
 import { aiContract } from 'broapp/ai';
-import { createHostApp } from 'broapp/host';
+import { createGate, createHostApp } from 'broapp/host';
 import { defineContract, mergeContracts, s } from 'broapp/shared';
 
 import { harness, type Harness } from './harness.ts';
@@ -253,6 +253,63 @@ describe('Ai.model()', () => {
       // A conversation may pin a model within the configured provider.
       expect(await ai.model({ modelId: 'fake-2' })).toMatchObject({ modelId: 'fake-2' });
       ai.close();
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Ai.turn()', () => {
+  test('runs one turn in-process: the gate asks, the answer decides, and no provider is a failed turn', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'broapp-ai-turn-'));
+    try {
+      let ran = 0;
+      const gate = createGate({ appId: 'app', releaseId: 'r1', confirmTimeoutMs: 5_000 });
+      const write = guardedTool(gate, {
+        name: 'demo.write',
+        description: 'Write one thing.',
+        inputSchema: s.object({ n: s.number() }).toJsonSchema(),
+        effect: 'write',
+        run: () => {
+          ran += 1;
+          return Promise.resolve({ wrote: true });
+        },
+      });
+      // A fresh adapter each time, so each turn's script starts at its beginning.
+      const make = (): ReturnType<typeof createAi> =>
+        createAi({
+          dataDir,
+          providers: [
+            createFakeAdapter({
+              script: [{ kind: 'tool', name: 'demo.write', input: { n: 1 }, then: [{ kind: 'text', chunks: ['done'] }] }],
+            }),
+          ],
+          app: { name: 'test', purpose: 'testing Ai.turn' },
+          tools: { 'demo.write': write },
+          fetch: noNetwork,
+        });
+
+      const unset = await make().turn({ runId: 'turn-unset-1', message: 'write one' }, { answer: () => true });
+      expect(unset.status).toBe('failed');
+      expect(unset.error).toContain('not set up');
+
+      const ai = make();
+      await ai.registry.update({ provider: 'fake', modelId: 'fake-1' });
+      const asked: string[] = [];
+      const allowed = await ai.turn(
+        { runId: 'turn-allow-1', message: 'write one' },
+        { answer: ({ tool }) => (asked.push(tool), true) },
+      );
+      expect(allowed.status).toBe('succeeded');
+      expect(asked).toEqual(['demo.write']);
+      expect(ran).toBe(1);
+      expect(allowed.events.map((event) => event.type)).toContain('confirm');
+
+      // Declined: the tool never runs, and the model is told, as it would be by a person's No.
+      const declined = await make().turn({ runId: 'turn-decline-1', message: 'write one' }, { answer: () => false });
+      expect(declined.status).toBe('succeeded');
+      expect(ran).toBe(1);
+      expect(declined.events.some((event) => event.type === 'tool-result' && event.denied === true)).toBe(true);
     } finally {
       await rm(dataDir, { recursive: true, force: true });
     }

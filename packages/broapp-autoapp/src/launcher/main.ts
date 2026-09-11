@@ -28,7 +28,9 @@ import {
   createEventLog,
   createEvidence,
   openKnowledge,
+  runEvaluateCommand,
   runKnowledgeCommand,
+  runReplayCommand,
   type EventLog,
   type Knowledge,
 } from '../knowledge/index.ts';
@@ -102,11 +104,16 @@ Usage:
   broapp-autoapp mcp <appId>            Serve one application over MCP, on stdio
   broapp-autoapp knowledge list [--provisional|--confirmed|--review|--method]
   broapp-autoapp knowledge show <id>
-  broapp-autoapp knowledge confirm <id> [--by <name>]
+  broapp-autoapp knowledge confirm <id> [--by <name>] [--yes]
   broapp-autoapp knowledge retire <id>
   broapp-autoapp knowledge export [--json]
                                         Review what the engineer learnt. A lesson
                                         stays provisional until a person confirms it.
+  broapp-autoapp knowledge replay <caseId> [--with <lessonId>] [--runs n]
+                                        Run the engineer again on a resolved case,
+                                        with the lesson and without it.
+  broapp-autoapp knowledge evaluate [--runs n] [--out <path>] [--notes <dir>]
+                                        Three tasks under four conditions, as a table.
 
 Environment:
   BROAPP_DATA_DIR  Override where the launcher keeps everything.
@@ -531,10 +538,30 @@ async function main(): Promise<number> {
         return await runMcp({ appId, controlPath: root.control });
       }
 
-      case 'knowledge':
+      case 'knowledge': {
+        // Replay and evaluation run the engineer, so they need the providers
+        // and the launcher's AI settings; they write only `replays` rows and
+        // blobs to the launcher's store, and are allowed while it serves.
+        const providers = [anthropic(), ollama(), openai(), customServer()];
+        const aiDataDir = join(root.root, 'launcher');
+        if (argv[1] === 'replay') return await runReplayCommand({ root, argv: argv.slice(2), providers, aiDataDir });
+        if (argv[1] === 'evaluate') {
+          return await runEvaluateCommand({
+            root,
+            argv: argv.slice(2),
+            providers,
+            aiDataDir,
+            // Notes is not in the binary; the evaluation is a developer's
+            // measurement, run from a checkout.
+            notesDir: resolve(flagValue(argv, '--notes') ?? join('examples', 'notes')),
+            template: starter,
+            versions: VERSIONS,
+          });
+        }
         // Reads the database directly, like `status`, and refuses to change it
         // while a launcher is serving.
         return runKnowledgeCommand({ root, argv: argv.slice(1) });
+      }
 
       case 'status': {
         const appId = positional(argv, 1);

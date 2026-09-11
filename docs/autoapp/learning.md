@@ -6,10 +6,11 @@ had then, so that a restart resumes where the person left off and a later step
 can learn from what went wrong. The design is in [design.md](design.md); what is
 kept out of this record is in [security.md](security.md).
 
-Nothing described here calls a model beyond the engineer's own turn. This page
-covers what is written down and what is served back to the engineer from it.
-Turning cases into lessons and replaying them come later, and the last section
-says which later step does each.
+This page covers what is written down, what is served back to the engineer
+from it, how a resolved case becomes a provisional lesson, and how a case is
+replayed so that the person confirming a lesson has evidence to confirm on.
+The model is called by the engineer's own turn, by the distiller, and by a
+replay or an evaluation a person starts; nothing else calls one.
 
 ## Where
 
@@ -25,8 +26,9 @@ print to the terminal and write nothing here.
 | `blobs` | Text stored by the `sha256` of its bytes: requests, instructions, system prompts, documents, acceptance examples. |
 | `contexts` | What each turn was given: the instructions, the system prompt as sent, and each delivered document. |
 | `episodes` | Cases. A failure, the edits after it, and the build or check that repaired it. |
-| `lessons`, `lessons_fts`, `corpus_versions` | Facts served to the engineer. Six curated seeds are written the first time the table is empty, one corpus version each. |
+| `lessons`, `lessons_fts`, `corpus_versions` | Facts served to the engineer. Seven curated seeds, each written once when the table does not hold it, one corpus version each; and lessons distilled from cases. |
 | `servings` | One row per lesson a turn or a build failure was given, whether it reached the model, and what the next build or check found. |
+| `replays` | One row per replayed run: the case, the lesson under test, the arm, the outcome, the calls, time and tokens, and the manifest it ran from. |
 
 The application the person last selected, by a row click or through any tool
 that names an application, is kept in `<root>/launcher/session.json`.
@@ -115,9 +117,11 @@ change by three sentences only: read the documents first, and treat a build's
 3. **Supporting evidence.** A `lessons` document with up to three lessons that
    share at least two words with the request, or that apply to a route the task
    evidence names; and, beside a failed build, up to three `hints` that share a
-   word with its problems and whose stage is the problem's stage or none. One
-   shared word is not enough for a turn: in 12b's rerun "list" served the
-   migration seed to a request about tags. A provisional lesson is labelled
+   word with its problems and whose stage is exactly the problem's stage. A
+   lesson that names no stage is never a hint (12c watched the stageless MCP
+   seed be hinted for a contract failure through the word "effect", and be
+   credited with its repair). One shared word is not enough for a turn: in
+   12b's rerun "list" served the migration seed to a request about tags. A provisional lesson is labelled
    `(provisional)`, and one a person should look at again
    `(needs review: <reason>)`.
 
@@ -222,12 +226,109 @@ broapp-autoapp knowledge export [--json]
 ```
 
 `list` shows each lesson's servings as resolved/recurred/blocked/unrelated.
+`show` adds each outcome's count, and beside `resolved` how many of those were
+hints whose lesson named another stage, or none: "of which unrelated by stage".
+A repair resolves every hint served for its failure, the one that helped and
+the one that only shared a word, so that number is the noise in the count.
 `confirm` and `retire` record who and when, clear the flag and write a corpus
 version; `retire` takes the lesson out of the index. Both refuse while a
 launcher is serving from the same root, because it holds the database and
 serves lessons from memory. The engineer can read one lesson's detail with the
 `knowledge.show` tool (a `read`), which omits the reviewer's name and refuses a
 `method_unclear` lesson.
+
+## Replay
+
+A provisional lesson claims that knowing it would have avoided a failure. A
+replay tests the claim:
+
+```
+broapp-autoapp knowledge replay <caseId> [--with <lessonId>] [--runs n]
+```
+
+It runs the engineer again on the case's original request, from the source
+revision the failure was met at, several times with the lesson and several
+times without it (three each by default, interleaved), and judges each run by
+what failed: a **build case** passes when the build runs the failing stage and
+no problem carries the case's signature; a **check case** passes when the
+acceptance example — the case's own, by its content hash, never the
+workspace's copy — passes on a preview of what the run left. Activation is
+never part of it. Without `--with`, the lesson distilled from the case is the
+one under test; with none, only the `without` arm runs.
+
+**What is held still.** Everything is named in a manifest, written before
+anything runs and stored as a blob on every result row: the case, the two
+revisions and the release, the data snapshot for a check case, the hashes of
+`package.json` and the lockfile at that revision, the request, the
+instructions the replay runs with and the ones the case's turn was given, the
+example, the model, the launcher version, the lesson, the runs, the step cap
+(40) and the time a turn is given (20 minutes; a run that runs out of time is
+judged by what it left). Each run is a fresh `git clone` of the workspace at
+that revision under `<root>/replay/<caseId>/<arm>/<n>/`, the workspace's own
+`node_modules` linked in, the release copied and made current, and for a check
+case a copy of the data. The corpus is frozen: the `with` arm is given the
+lesson under test on every turn and nothing else, the `without` arm no lesson
+at all, and curated facts reach neither. Orientation and task evidence stay on
+in both, because they are not what is being tested. The run answers the
+engineer's questions itself: yes to edits, builds and previews, no to
+activation and creation.
+
+**What a replay is not.** It is the same machine, the same vendored
+dependencies and a copy of the data. It is not the same model sample and not
+the same conversation, and the instructions are this launcher's, which may
+have changed since the case. Cases do not record a data snapshot today, so a
+check case is replayed on a copy of the application's data taken the first
+time it is replayed; the manifest says `from: live` when that is so.
+
+**Where it writes.** Each case's runs write to a store of their own,
+`<root>/replay/<caseId>/knowledge.sqlite`, logged with source `replay`, and
+nothing is distilled there. The launcher's own store gains the manifest blob
+and one `replays` row per run, and no serving, case or context: a replay can
+never be what a learning query learns from. Run directories are kept for a
+person to look at; the oldest beyond twenty per case are removed on the next
+replay.
+
+**The verdict.** Printed beside the two arms, never applied:
+
+| Word | Meaning |
+|---|---|
+| `supports` | Passed only with the lesson. |
+| `unrelated` | Passed with it and without it. |
+| `no effect` | Failed both ways. |
+| `against` | Passed only without it — the case the other three leave out. |
+| `inconclusive` | An arm had no run that could be judged: every one failed on its provider, lost its preview child, or could not be prepared. |
+
+After the arms, the **regression set** runs: every other resolved case of the
+application whose lesson is confirmed, replayed once with the new lesson and
+the confirmed corpus. A regression that fails is printed; it blocks nothing.
+
+**Confirmation stays a person's.** `knowledge confirm <id>` prints the latest
+replay's table, its verdict and the regression results, and asks `y/N`;
+`--yes` skips the question. With no replay it says so — "no replay has been
+run; `knowledge replay …` first" — and confirms as before, because a person may
+have other evidence. No number here promotes anything.
+
+## Evaluation
+
+```
+broapp-autoapp knowledge evaluate [--runs n] [--out <path>] [--notes <dir>]
+```
+
+The same harness, measuring the knowledge path itself: three tasks (the 07/08c
+Notes request; "add a `done` filter to the items table" on the starter; "add
+tags to notes and a filter by tag" on Notes), each under four conditions —
+`baseline` (no documents and no hints, the launcher before 12b),
+`orientation` (the digest alone), `orientation+facts` (12b as shipped) and
+`learned` (that, plus every provisional and confirmed distilled lesson in the
+launcher's store) — `n` runs each on the configured model. Each task's
+acceptance example is added to the workspace before any run and judged from
+the evaluation's own copy, by hash. The table gives verified completions,
+calls to the first edit and to the first build, runs that reached a build,
+time, tokens, failure signatures that recurred from earlier runs, the files the
+turn's documents named that it then read or edited (and ignored), the files it
+read that nothing named, and the unrelated hint credit above. It installs
+nothing, so it is run from a checkout, where the workspaces resolve their
+dependencies from the repository.
 
 ## Retention
 
@@ -239,6 +340,6 @@ are deleted. Cases and contexts are never deleted.
 
 | What | Where |
 |---|---|
-| Replaying a case against a later launcher to see whether it still fails | 12d |
-| A Lessons panel in the launcher tab | [backlog](backlog.md) |
+| A Lessons panel in the launcher tab, with the replay table beside each lesson | [backlog](backlog.md) |
 | Promoting a lesson without a person | [backlog](backlog.md) |
+| Recording a data snapshot when a check case opens | [backlog](backlog.md) |

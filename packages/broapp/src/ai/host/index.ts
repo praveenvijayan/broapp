@@ -12,8 +12,12 @@ export type {
   AiAppDescription,
   CreateAiOptions,
   DeliveredContext,
+  InProcessTurn,
+  InProcessTurnOptions,
+  InProcessTurnResult,
   RunEndDetail,
 } from './create-ai.ts';
+export type { ChatEvent } from './run-types.ts';
 
 export { AdapterError, isLoopbackUrl, toPublicError } from './adapter.ts';
 export type { AdapterConfig, AdapterErrorCode, ProviderAdapter } from './adapter.ts';

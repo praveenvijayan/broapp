@@ -40,6 +40,11 @@ export const DIAGNOSES = [
 /** The two causes that may carry a lesson. */
 const TEACHABLE: readonly string[] = ['knowledge_missing', 'method_unclear'];
 
+/** A lesson's field limits, stated once for the schema and for the refusal below. */
+const SUMMARY_MAX = 400;
+const DETAIL_MAX = 2_000;
+const TRIGGER_WORD_MAX = 40;
+
 /** The one answer the distiller asks for. The `parse` is the validation. */
 export const DIAGNOSIS = s.object({
   diagnosis: s.enum(DIAGNOSES),
@@ -54,9 +59,9 @@ export const DIAGNOSIS = s.object({
         files: s.optional(s.array(s.string({ max: 120 }), { max: 5 })),
         routes: s.optional(s.array(s.string({ max: 80 }), { max: 5 })),
       }),
-      summary: s.string({ min: 20, max: 400 }),
-      detail: s.string({ min: 20, max: 2000 }),
-      trigger: s.array(s.string({ min: 3, max: 40 }), { min: 3, max: 8 }),
+      summary: s.string({ min: 20, max: SUMMARY_MAX }),
+      detail: s.string({ min: 20, max: DETAIL_MAX }),
+      trigger: s.array(s.string({ min: 3, max: TRIGGER_WORD_MAX }), { min: 3, max: 8 }),
     }),
   ),
 });
@@ -143,9 +148,17 @@ interface Prior {
 const ABSOLUTE_PATH = /(?:^|[\s'"`(=])(?:~\/|\/(?:[\w.-]+\/)+[\w.-]*|[A-Za-z]:[\\/])/;
 const URL_WITH_PORT = /\b[a-z][a-z0-9+.-]*:\/\/[^\s/?#]*:\d+/i;
 
-/** Why a lesson's text is refused, or `null` when it may be stored. */
-function refusal(text: string): string | null {
-  if (text.length > 400) return 'it is longer than 400 characters';
+/**
+ * Why a lesson's text is refused, or `null` when it may be stored.
+ *
+ * The length is the field's own limit from {@link DIAGNOSIS}, which is what the
+ * model is shown. 12c measured every field against 400, the summary's limit, so
+ * a detail the schema allowed up to 2,000 characters was validated and then
+ * dropped: 12d's real distillation lost its one lesson that way, to a rule the
+ * model could not have known.
+ */
+function refusal(text: string, max: number): string | null {
+  if (text.length > max) return `it is longer than ${String(max)} characters`;
   if (ABSOLUTE_PATH.test(text)) return 'it names a path on this machine';
   if (URL_WITH_PORT.test(text)) return 'it names an address with a port';
   if (sanitise(text) !== text) return 'it contains something shaped like a secret';
@@ -408,8 +421,12 @@ export function createDistiller(input: CreateDistillerInput): Distiller {
         notes.push(`a lesson came with ${answer.diagnosis}, which does not carry one; it was dropped`);
         return;
       }
-      const texts = [lesson.summary, lesson.detail, ...lesson.trigger];
-      const refused = texts.map(refusal).find((reason) => reason !== null);
+      const texts: readonly (readonly [string, number])[] = [
+        [lesson.summary, SUMMARY_MAX],
+        [lesson.detail, DETAIL_MAX],
+        ...lesson.trigger.map((word) => [word, TRIGGER_WORD_MAX] as const),
+      ];
+      const refused = texts.map(([text, max]) => refusal(text, max)).find((reason) => reason !== null);
       if (refused !== undefined && refused !== null) {
         notes.push(`the lesson was dropped because ${refused}`);
         return;

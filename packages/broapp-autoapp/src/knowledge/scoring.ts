@@ -184,6 +184,61 @@ export function scoreCheck(
   }
 }
 
+/** Hint servings credited `resolved` for a failure their lesson was not about. */
+export interface UnrelatedCredit {
+  /** The lesson names no stage, or another stage than the failure's. */
+  readonly byStage: number;
+  /** That, or the lesson names routes and the failure mentions none of them. */
+  readonly byStageOrRoutes: number;
+}
+
+/**
+ * How much `resolved` credit went to hints that did not match their failure.
+ *
+ * Association noise, counted so the person confirming a lesson can see it. A
+ * repair resolves every hint served for its failure, the one that helped and
+ * the one that merely shared a word; report 12c watched a stageless MCP fact be
+ * credited beside the contract lesson that applied. Hints are stage-matched
+ * since 12d, so new noise is by routes; the old rows keep their count.
+ */
+export function unrelatedHintCredit(knowledge: Knowledge, lessonId?: number): UnrelatedCredit {
+  const rows = knowledge.db
+    .query<{ app_id: string; for_stage: string; for_signature: string; applies: string }, [number | null, number | null]>(
+      `SELECT s.app_id, s.for_stage, s.for_signature, l.applies
+         FROM servings s JOIN lessons l ON l.id = s.lesson_id
+        WHERE s.how = 'hint' AND s.outcome = 'resolved' AND (? IS NULL OR s.lesson_id = ?)`,
+    )
+    .all(lessonId ?? null, lessonId ?? null);
+  let byStage = 0;
+  let byStageOrRoutes = 0;
+  for (const row of rows) {
+    let stage: unknown;
+    let routes: readonly string[] = [];
+    try {
+      const applies = JSON.parse(row.applies) as { stage?: unknown; routes?: unknown };
+      stage = applies.stage;
+      if (Array.isArray(applies.routes)) routes = applies.routes.filter((route): route is string => typeof route === 'string');
+    } catch {
+      // Unreadable applicability names no stage.
+    }
+    const stageMismatch = typeof stage !== 'string' || stage !== row.for_stage;
+    let routeMismatch = false;
+    if (routes.length > 0) {
+      // The failure's text is the case's, found by the same signature.
+      const problem =
+        knowledge.db
+          .query<{ problem: string }, [string, string]>(
+            'SELECT problem FROM episodes WHERE app_id = ? AND signature = ? ORDER BY id DESC LIMIT 1',
+          )
+          .get(row.app_id, row.for_signature)?.problem ?? '';
+      routeMismatch = !routes.some((route) => problem.includes(route));
+    }
+    if (stageMismatch) byStage += 1;
+    if (stageMismatch || routeMismatch) byStageOrRoutes += 1;
+  }
+  return { byStage, byStageOrRoutes };
+}
+
 /** A turn has ended: whatever it was served and never tested is `none`. */
 export function scoreRunEnd(knowledge: Knowledge, runId: string): void {
   knowledge.db

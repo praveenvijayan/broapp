@@ -15,7 +15,9 @@ import { join } from 'node:path';
 
 import type { Layout } from '../spec/index.ts';
 
+import { unrelatedHintCredit } from './scoring.ts';
 import { openKnowledge, type Knowledge } from './store.ts';
+import { replayTable, type ReplayRow } from './verdict.ts';
 
 /** One time a lesson was served, and what came of it. */
 export interface LessonServing {
@@ -262,9 +264,74 @@ export interface KnowledgeCommandOptions {
   /** Who confirms, when `--by` does not say. Defaults to `$USER`. */
   readonly user?: string;
   readonly now?: number;
+  /** Ask the person a question and return their answer. Defaults to reading a line from the terminal. */
+  readonly ask?: (question: string) => string | null;
 }
 
-const USAGE = 'knowledge <list [--provisional|--confirmed|--review|--method] | show <id> | confirm <id> [--by <name>] | retire <id> | export [--json]>';
+const USAGE =
+  'knowledge <list [--provisional|--confirmed|--review|--method] | show <id> | confirm <id> [--by <name>] [--yes] | retire <id> | export [--json] | replay <caseId> [--with <lessonId>] [--runs n] | evaluate [--runs n] [--out <path>]>';
+
+/** A `replays` row, as the table wants it. */
+function replayRows(knowledge: Knowledge, where: string, ...params: number[]): (ReplayRow & { manifest: string; at: number })[] {
+  return knowledge.db
+    .query<
+      {
+        episode_id: number;
+        arm: string;
+        n: number;
+        outcome: string;
+        steps: number;
+        ms: number;
+        input_tokens: number | null;
+        output_tokens: number | null;
+        build_reached: number;
+        manifest_blob: string;
+        at: number;
+      },
+      number[]
+    >(
+      `SELECT episode_id, arm, n, outcome, steps, ms, input_tokens, output_tokens, build_reached, manifest_blob, at
+         FROM replays WHERE ${where} ORDER BY id`,
+    )
+    .all(...params)
+    .map((row) => ({
+      arm: row.arm,
+      n: row.n,
+      episodeId: row.episode_id,
+      outcome: row.outcome,
+      steps: row.steps,
+      ms: row.ms,
+      inputTokens: row.input_tokens,
+      outputTokens: row.output_tokens,
+      buildReached: row.build_reached === 1,
+      manifest: row.manifest_blob,
+      at: row.at,
+    }));
+}
+
+/**
+ * What the replays say about a lesson: its latest replay's table, and the
+ * latest regression result for each other case. Empty when none was run.
+ */
+export function replayEvidence(knowledge: Knowledge, lessonId: number): string[] {
+  const armRows = replayRows(knowledge, "lesson_id = ? AND arm IN ('with', 'without')", lessonId);
+  const regressions = replayRows(knowledge, "lesson_id = ? AND arm = 'regression'", lessonId);
+  if (armRows.length === 0 && regressions.length === 0) return [];
+  const lines: string[] = [];
+  const latest = armRows.at(-1)?.manifest;
+  if (latest !== undefined) {
+    const batch = armRows.filter((row) => row.manifest === latest);
+    lines.push(`replay of case ${String(batch[0]?.episodeId ?? '?')}, ${new Date(batch[0]?.at ?? 0).toISOString()}:`);
+    lines.push(...replayTable(batch).map((line) => `  ${line}`));
+  }
+  const byCase = new Map<number, (typeof regressions)[number]>();
+  for (const row of regressions) byCase.set(row.episodeId, row);
+  if (byCase.size > 0) {
+    lines.push('regression (a failure is shown, and blocks nothing):');
+    for (const [episodeId, row] of byCase) lines.push(`  case ${String(episodeId)}: ${row.outcome}`);
+  }
+  return lines;
+}
 
 /** At most `max` characters, marked when cut. */
 function cut(text: string, max: number): string {
@@ -272,7 +339,7 @@ function cut(text: string, max: number): string {
 }
 
 /** A lesson as `show` prints it. */
-function render(record: LessonRecord): string[] {
+function render(record: LessonRecord, counts?: { blocked: number; unrelatedByStage: number }): string[] {
   const lines = [
     `lesson ${String(record.id)}  ${record.status}${record.review === null ? '' : `  ${record.review}`}`,
     `  summary:   ${record.summary}`,
@@ -297,6 +364,14 @@ function render(record: LessonRecord): string[] {
     );
   }
   lines.push(`  servings:  ${String(record.servings.length)}`);
+  if (counts !== undefined) {
+    const count = (outcome: string): number => record.servings.filter((serving) => serving.outcome === outcome).length;
+    // The association noise beside the counts it inflates: `resolved` credit
+    // that went to a hint whose stage was not the failure's.
+    lines.push(
+      `  outcomes:  resolved ${String(count('resolved'))} (of which unrelated by stage: ${String(counts.unrelatedByStage)}), recurred ${String(count('recurred'))}, blocked ${String(counts.blocked)}, inconclusive ${String(count('inconclusive'))}, unrelated ${String(count('unrelated'))}, none ${String(count('none'))}`,
+    );
+  }
   for (const serving of record.servings) {
     lines.push(
       `    ${new Date(serving.servedAt).toISOString()} ${serving.how} run ${serving.runId}${serving.included ? '' : ' (not delivered)'}: ${serving.outcome ?? 'open'}${serving.attemptKind === null ? '' : ` by ${serving.attemptKind} ${serving.attemptCallId ?? ''}${serving.attemptRelease === null ? '' : ` → ${serving.attemptRelease.slice(0, 8)}`}`}`,
@@ -392,7 +467,9 @@ export function runKnowledgeCommand(options: KnowledgeCommandOptions): number {
           err(`there is no lesson ${String(id)}`);
           return 1;
         }
-        for (const line of render(record)) out(line);
+        const counts = { blocked: blockedCount(knowledge, id), unrelatedByStage: unrelatedHintCredit(knowledge, id).byStage };
+        for (const line of render(record, counts)) out(line);
+        for (const line of replayEvidence(knowledge, id)) out(`  ${line}`);
         return 0;
       }
 
@@ -407,6 +484,24 @@ export function runKnowledgeCommand(options: KnowledgeCommandOptions): number {
         const by = (at < 0 ? undefined : rest[at + 1]) ?? options.user ?? Bun.env['USER'] ?? 'unknown';
         const now = options.now ?? Date.now();
         const status = command === 'confirm' ? 'confirmed' : 'retired';
+        if (command === 'confirm') {
+          // The evidence a replay gathered, shown to the person deciding. It
+          // decides nothing itself: a person may have other evidence, so the
+          // absence of a replay is said and does not stop them.
+          const evidence = replayEvidence(knowledge, id);
+          if (evidence.length === 0) {
+            out(`no replay has been run; \`knowledge replay <caseId> --with ${String(id)}\` first`);
+          } else {
+            for (const line of evidence) out(line);
+            if (!rest.includes('--yes')) {
+              const answer = (options.ask ?? ((question: string) => prompt(question)))(`Confirm lesson ${String(id)}? [y/N]`);
+              if ((answer ?? '').trim().toLowerCase() !== 'y') {
+                out(`lesson ${String(id)} was not confirmed`);
+                return 1;
+              }
+            }
+          }
+        }
         const changed = db.transaction((): boolean => {
           const updated = db
             .query<null, [string, string, number, number, number]>(

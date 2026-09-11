@@ -44,6 +44,7 @@ import {
   type Layout,
 } from '../spec/index.ts';
 
+import { runAcceptance } from './check.ts';
 import { startPreview } from './preview.ts';
 import { previewIdOf, type CandidateStates, type CheckResult } from './state.ts';
 import {
@@ -110,8 +111,6 @@ const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seve
 /** How many unverified edits earn a warning. */
 const UNVERIFIED_WARNING_AT = 3;
 
-/** How long one acceptance step may take. */
-const CHECK_STEP_TIMEOUT_MS = 30_000;
 const STOP_DEADLINE_MS = 10_000;
 
 /** The most lines of an existing file `source.change` will replace wholesale. */
@@ -600,41 +599,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         throw publicError.unavailable('There is no preview running for this application.');
       }
       const spec = readRelease(root, appId, releaseId);
-      const results: CheckResult[] = [];
-      // Over the child's IPC channel, not over HTTP with its launch URL: that
-      // URL's token is single-use, and spending it here is what left the
-      // person's Open preview answering 403.
-      {
-        for (const example of spec.acceptance) {
-          try {
-            let detail = '';
-            let passed = true;
-            for (const step of example.steps) {
-              const output: unknown = await preview.invoke({
-                route: step.route,
-                input: step.input,
-                client: 'launcher',
-                requestId: crypto.randomUUID(),
-                timeoutMs: CHECK_STEP_TIMEOUT_MS,
-                as: 'check',
-              });
-              if (step.expect !== undefined && JSON.stringify(output) !== JSON.stringify(step.expect)) {
-                passed = false;
-                detail = `${step.route} returned ${JSON.stringify(output)}, not ${JSON.stringify(step.expect)}`;
-                break;
-              }
-            }
-            results.push({ id: example.id, title: example.title, passed, ...(detail === '' ? {} : { detail }) });
-          } catch (cause) {
-            results.push({
-              id: example.id,
-              title: example.title,
-              passed: false,
-              detail: String(cause instanceof Error ? cause.message : cause),
-            });
-          }
-        }
-      }
+      const results: CheckResult[] = await runAcceptance(preview, spec.acceptance);
       // Written down with the example and the child they are about, so a
       // restart, a rebuild or an edited example is not taken as verified.
       const previewId = previewIdOf(preview);

@@ -146,6 +146,14 @@ const MIGRATIONS: readonly string[] = [
    CREATE TRIGGER episodes_diagnosis_once BEFORE UPDATE OF diagnosis ON episodes
    WHEN OLD.diagnosis IS NOT NULL AND NEW.diagnosis IS NOT OLD.diagnosis
    BEGIN SELECT RAISE(ABORT, 'an episode''s diagnosis is written once'); END;`,
+  // 12d: one row per replayed run. The manifest a run was replayed from is a
+  // blob, named on every row, so a result can always say exactly what it was a
+  // result of. `arm` is `with`, `without` or `regression`.
+  `CREATE TABLE replays (
+     id INTEGER PRIMARY KEY, episode_id INTEGER NOT NULL, lesson_id INTEGER, arm TEXT NOT NULL, n INTEGER NOT NULL,
+     outcome TEXT NOT NULL, steps INTEGER NOT NULL, ms INTEGER NOT NULL, input_tokens INTEGER, output_tokens INTEGER,
+     build_reached INTEGER NOT NULL, manifest_blob TEXT NOT NULL, at INTEGER NOT NULL);
+   CREATE INDEX replays_lesson ON replays(lesson_id, at);`,
 ];
 
 /** The `sha256` of a string's UTF-8 bytes, hex. */
@@ -240,7 +248,8 @@ function retain(db: Database, now: number): void {
          UNION SELECT instructions_blob FROM contexts
          UNION SELECT system_blob FROM contexts
          UNION SELECT json_extract(item.value, '$.blob') FROM contexts, json_each(contexts.included) AS item
-           WHERE json_extract(item.value, '$.blob') IS NOT NULL)`,
+           WHERE json_extract(item.value, '$.blob') IS NOT NULL
+         UNION SELECT manifest_blob FROM replays)`,
     ).run(now - BLOB_RETENTION_MS);
   })();
 }

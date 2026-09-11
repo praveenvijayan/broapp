@@ -24,7 +24,7 @@ import { recordContext, type Evidence } from '../knowledge/evidence.ts';
 import { instructionsHash, reviewFlags } from '../knowledge/freshness.ts';
 import type { EventLog } from '../knowledge/log.ts';
 import { scoreRunEnd } from '../knowledge/scoring.ts';
-import { createServe, type Serve, type ServedTurn } from '../knowledge/serve.ts';
+import { createServe, type CreateServeInput, type Serve, type ServedTurn } from '../knowledge/serve.ts';
 import { openSession, type Session } from '../knowledge/session.ts';
 import type { Knowledge } from '../knowledge/store.ts';
 import { AUTOAPP_VERSION } from '../knowledge/version.ts';
@@ -79,6 +79,21 @@ export interface CreateLauncherTabOptions {
   readonly session?: Session;
   /** Model steps per turn. Defaults to the launcher's forty; tests shorten it. */
   readonly maxSteps?: number;
+  /**
+   * What the engineer is served. Defaults to everything the store holds.
+   *
+   * `'off'` is the launcher as it was before 12b: turns get no documents and a
+   * failed build no hints, though everything is still written down. A replay
+   * and the evaluation freeze the corpus or leave documents out; the launcher
+   * itself never does.
+   */
+  readonly serving?: 'off' | Pick<CreateServeInput, 'corpus' | 'documents' | 'seed'>;
+  /**
+   * Whether resolved cases are distilled at the end of a turn. Defaults to
+   * `true`. A replay turns it off: its cases are copies of one already asked
+   * about, and a question to the model about each would cost a call per run.
+   */
+  readonly distil?: boolean;
 }
 
 /** Everything that mounts on the launcher's bridge. */
@@ -125,8 +140,9 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
    * something is written down, because a serving that cannot be recorded is
    * one nothing can later say anything about.
    */
+  const serving = options.serving;
   const serve: Serve | null =
-    knowledge === undefined
+    knowledge === undefined || serving === 'off'
       ? null
       : createServe({
           knowledge: knowledge.store,
@@ -136,6 +152,9 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           session,
           instructions: ENGINEER_INSTRUCTIONS,
           apps: () => listApps(options.layout, options.supervisor, options.journal),
+          ...(serving?.corpus === undefined ? {} : { corpus: serving.corpus }),
+          ...(serving?.documents === undefined ? {} : { documents: serving.documents }),
+          ...(serving?.seed === undefined ? {} : { seed: serving.seed }),
         });
 
   if (knowledge !== undefined) {
@@ -157,7 +176,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
    * is asked for when a question is, never before.
    */
   const distiller: Distiller | null =
-    knowledge === undefined
+    knowledge === undefined || options.distil === false
       ? null
       : createDistiller({
           knowledge: knowledge.store,

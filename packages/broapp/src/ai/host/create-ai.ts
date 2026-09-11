@@ -19,7 +19,7 @@ import type { Bridge } from 'brobridge';
 // browser target polyfills `node:fs`, so the file stores alone would not stop
 // this code from being bundled into a page.
 import { createPendingApprovals, createReservedHostApp } from '../../host/index.ts';
-import type { HostApp, HostLogger } from '../../host/app.ts';
+import type { HostApp, HostLogger, StreamSink } from '../../host/app.ts';
 import { publicError } from '../../shared/errors.ts';
 import { aiContract, type AiContract } from '../shared/contract.ts';
 import type { ProviderInfo } from '../shared/types.ts';
@@ -27,6 +27,7 @@ import type { ProviderInfo } from '../shared/types.ts';
 import { AdapterError, toPublicError, type AdapterConfig, type ProviderAdapter } from './adapter.ts';
 import { createRegistry, type Registry } from './registry.ts';
 import { runChat, type RunDeps } from './run.ts';
+import type { ChatEvent } from './run-types.ts';
 import { createFileSecretStore, createMemorySecretStore } from './secrets.ts';
 import { createSettingsStore } from './settings.ts';
 import { openThreads, type ThreadStore } from './threads.ts';
@@ -55,6 +56,36 @@ export interface DeliveredContext {
   readonly message: string;
   /** The provider and model the turn was sent to. */
   readonly model: { readonly provider: string; readonly id: string };
+}
+
+/** One turn run in-process by {@link Ai.turn}. */
+export interface InProcessTurn {
+  readonly runId: string;
+  readonly message: string;
+  /** The model for this turn, within the configured provider. */
+  readonly modelId?: string;
+}
+
+/** How {@link Ai.turn} is answered and stopped. */
+export interface InProcessTurnOptions {
+  /**
+   * The answer to each question the gate asks during the turn.
+   *
+   * The caller is the person's stand-in, so it decides exactly as the person
+   * would have: the gate still asks, and still records the answer.
+   */
+  readonly answer: (question: { readonly tool: string; readonly input: unknown }) => boolean;
+  /** Aborting it cancels the turn, as a browser's cancel would. */
+  readonly signal?: AbortSignal;
+  readonly onEvent?: (event: ChatEvent) => void;
+}
+
+/** How an in-process turn ended, and everything it emitted. */
+export interface InProcessTurnResult {
+  readonly status: 'succeeded' | 'failed' | 'cancelled';
+  readonly events: readonly ChatEvent[];
+  /** The reason a turn that could not start gave, such as no provider being set up. */
+  readonly error?: string;
 }
 
 /** What the application is, in the words a model is given. */
@@ -147,7 +178,20 @@ export interface Ai {
    * string the AI SDK would send to its gateway.
    */
   model(override?: { readonly modelId?: string }): Promise<LanguageModel>;
+  /**
+   * Run one chat turn in this process, without a bridge or a browser.
+   *
+   * For scripts that drive the engineer themselves, such as a replay. It is
+   * the `ai.chat` route's own loop — the same tools, gate, context providers
+   * and hooks — with a sink that collects the events instead of writing them to
+   * a socket, and `answer` standing where the person's click would.
+   */
+  turn(turn: InProcessTurn, options: InProcessTurnOptions): Promise<InProcessTurnResult>;
 }
+
+/** How long an in-process answer waits for its question to be registered. */
+const ANSWER_ATTEMPTS = 200;
+const ANSWER_INTERVAL_MS = 5;
 
 /** How long a provider is given to answer a listing or a connection test. */
 const PROVIDER_TIMEOUT_MS = 20_000;
@@ -309,6 +353,76 @@ export function createAi(options: CreateAiOptions): Ai {
     model: async (override) => {
       const { adapter, config, modelId } = await registry.resolve(override);
       return adapter.model(config, modelId);
+    },
+    turn: async (turn, turnOptions) => {
+      const controller = new AbortController();
+      const relay = (): void => controller.abort(turnOptions.signal?.reason);
+      turnOptions.signal?.addEventListener('abort', relay, { once: true });
+      if (turnOptions.signal?.aborted === true) relay();
+
+      const events: ChatEvent[] = [];
+      /**
+       * Answer a question once the approval table holds it.
+       *
+       * The `confirm` event is emitted, and awaited, before the run's approver
+       * registers the question, so an answer given inside `emit` would find
+       * nobody waiting. This waits for it, briefly, the way a person's click
+       * necessarily arrives later.
+       */
+      const settle = async (requestId: string, approved: boolean): Promise<void> => {
+        for (let attempt = 0; attempt < ANSWER_ATTEMPTS; attempt += 1) {
+          if (approvals.answer({ requestId, approved }) !== 'unknown') return;
+          await Bun.sleep(ANSWER_INTERVAL_MS);
+        }
+      };
+      const sink: StreamSink<ChatEvent> = {
+        signal: controller.signal,
+        sessionId: 'in-process',
+        emit(event) {
+          if (controller.signal.aborted) return Promise.reject(new Error('stream is no longer open'));
+          events.push(event);
+          turnOptions.onEvent?.(event);
+          if (event.type === 'confirm') {
+            // The gate's request id is `<runId>:<callId>`, which is what an
+            // event without one would have named.
+            const requestId = event.requestId ?? `${turn.runId}:${event.callId}`;
+            void settle(requestId, turnOptions.answer({ tool: event.tool ?? '', input: event.input }));
+          }
+          return Promise.resolve();
+        },
+      };
+
+      let status: InProcessTurnResult['status'] | null = null;
+      const onRunEnd = runDeps.onRunEnd;
+      try {
+        await runChat(
+          {
+            runId: turn.runId,
+            message: turn.message,
+            refs: [],
+            history: [],
+            ...(turn.modelId === undefined ? {} : { modelId: turn.modelId }),
+          },
+          sink,
+          {
+            ...runDeps,
+            // The turn's own ending is what this returns; whoever the layer
+            // was built to tell is still told.
+            onRunEnd: (runId, ended, summary, detail) => {
+              status = ended;
+              onRunEnd?.(runId, ended, summary, detail);
+            },
+          },
+        );
+        return { status: status ?? 'succeeded', events };
+      } catch (cause) {
+        // A turn that could not start — no provider set up, most often — ends
+        // failed with the sentence the browser would have been shown.
+        const error = String(cause instanceof Error ? cause.message : cause);
+        return { status: status ?? 'failed', events, error };
+      } finally {
+        turnOptions.signal?.removeEventListener('abort', relay);
+      }
     },
   };
 }

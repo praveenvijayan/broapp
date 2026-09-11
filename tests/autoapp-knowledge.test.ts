@@ -30,8 +30,8 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { aiContract } from 'broapp/ai';
-import { createFakeAdapter } from 'broapp/ai/host';
-import { createGate, createPendingApprovals } from 'broapp/host';
+import { createAi, createFakeAdapter } from 'broapp/ai/host';
+import { canonicalJson, createGate, createPendingApprovals } from 'broapp/host';
 import type { Envelope, Gate, HostLogger } from 'broapp/host';
 import { mergeContracts } from 'broapp/shared';
 import { createRunStore, type RunStore } from 'broapp-autoapp/host';
@@ -46,8 +46,15 @@ import {
 } from 'broapp-autoapp/engineer';
 import {
   AUTOAPP_VERSION,
+  CONDITIONS,
+  EVALUATION_TASKS,
   KNOWLEDGE_FILE,
   SEED_LESSONS,
+  manifestFor,
+  replay,
+  runKnowledgeCommand,
+  sha256,
+  unrelatedHintCredit,
   createDistiller,
   createEventLog,
   createEvidence,
@@ -1481,7 +1488,8 @@ describe('12c step 0: the carry-overs', () => {
         .run(id, summary, trigger);
       return id;
     };
-    const weak = add('A colour is stored as plain text in the database.', 'palette shade', {});
+    // With a stage since 12d: a lesson that names none is never a hint.
+    const weak = add('A colour is stored as plain text in the database.', 'palette shade', { stage: 'views' });
     const strong = add('A tag reaches an item through a write route of its own.', 'label', {});
     const byRoute = add('Check the colour contrast before shipping.', 'contrast', { routes: ['items.add'] });
 
@@ -1993,4 +2001,593 @@ describe.skipIf(!available)('12c: the review command', () => {
       { lesson_id: second, change: 'retire' },
     ]);
   }, 60_000);
+});
+
+// ── 12d: replay and evaluation ─────────────────────────────────────────────
+
+const noNetwork = Object.assign(() => Promise.reject(new Error('no network in tests')), {
+  preconnect: () => undefined,
+}) as typeof fetch;
+
+/** The configured model, as a replay asks for it. */
+const fakeModel = (): ReturnType<ReturnType<typeof createAi>['model']> =>
+  Promise.resolve(createFakeAdapter().model({ apiKey: null, baseUrl: null, fetch: noNetwork }, 'fake-1'));
+
+/** A launcher data directory whose AI settings choose the fake provider, as a person would in Settings. */
+async function fakeSettings(dataDir: string): Promise<void> {
+  const ai = createAi({ dataDir, providers: [createFakeAdapter()], app: { name: 'test', purpose: 'test' }, fetch: noNetwork });
+  await ai.registry.update({ provider: 'fake', modelId: 'fake-1' });
+}
+
+/** What the person asked for in the turn the cases below were met in. */
+const REQUEST = 'add a tag route to the items';
+function recordedTurn(runId: string): TurnRecord | undefined {
+  return runId === 'run-1' ? { message: REQUEST, contextId: null, model: { provider: 'fake', id: 'fake-1' } } : undefined;
+}
+
+/** Insert a lesson with its index row; distilled and provisional unless said otherwise. */
+function storeLesson(
+  knowledge: Knowledge,
+  fields: {
+    applies: Record<string, unknown>;
+    summary: string;
+    trigger: string;
+    episodeId?: number;
+    status?: string;
+    origin?: string;
+  },
+): number {
+  const id = Number(
+    knowledge.db
+      .query<null, [string, string, number | null, string, string, string]>(
+        `INSERT INTO lessons (version, status, origin, episode_id, diagnosis, scope, applies, summary, detail, trigger,
+                              instructions_hash, autoapp_version, created_at, updated_at)
+         VALUES (1, ?, ?, ?, 'knowledge_missing', 'global', ?, ?, 'detail', ?, 'h', '0.1.0', 0, 0)`,
+      )
+      .run(
+        fields.status ?? 'provisional',
+        fields.origin ?? 'distilled',
+        fields.episodeId ?? null,
+        JSON.stringify(fields.applies),
+        fields.summary,
+        fields.trigger,
+      ).lastInsertRowid,
+  );
+  knowledge.db
+    .query<null, [number, string, string]>('INSERT INTO lessons_fts (rowid, summary, trigger) VALUES (?, ?, ?)')
+    .run(id, fields.summary, fields.trigger);
+  return id;
+}
+
+/** A route with no effect, added on one line's anchor so a CRLF checkout matches it too. */
+const TAG_ROUTE =
+  "'items.tag': {\n      summary: 'Tag an item.',\n      input: s.void(),\n      output: s.object({ ok: s.boolean() }),\n    },\n    'items.ping': {";
+const DECLARE_EFFECT = {
+  appId: 'items',
+  message: 'Declare the effect of items.tag',
+  hunks: [{ path: 'src/shared/contract.ts', find: "'items.tag': {", replace: "'items.tag': {\n      effect: 'write'," }],
+};
+
+/** A contract failure met through the tools, and its repair: one resolved build case. */
+async function buildCase(where: World): Promise<{ episodeId: number; rev: string }> {
+  await callTool(
+    where,
+    'source.edit',
+    { appId: 'items', message: 'Add items.tag', hunks: [{ path: 'src/shared/contract.ts', find: "'items.ping': {", replace: TAG_ROUTE }] },
+    { approve: true },
+  );
+  const rev = git(where.source, 'rev-parse', 'HEAD');
+  const failed = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true })) as { ok: boolean };
+  expect(failed.ok).toBe(false);
+  await callTool(where, 'source.edit', DECLARE_EFFECT, { approve: true });
+  const passed = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true })) as { ok: boolean };
+  expect(passed.ok).toBe(true);
+  const row = where.knowledge.db
+    .query<{ id: number }, []>("SELECT id FROM episodes WHERE stage = 'contract' AND resolved_at IS NOT NULL")
+    .get();
+  if (row === null) throw new Error('no resolved contract case');
+  return { episodeId: row.id, rev };
+}
+
+/** A miscounting host met by a check, and its repair: one resolved check case. */
+async function checkCase(where: World): Promise<{ episodeId: number }> {
+  const host = join(where.source, 'src', 'host', 'app.ts');
+  rewrite(host, /count: store\.count\(\) \}/, 'count: store.count() + 1 }');
+  const manifestPath = join(where.source, 'autoapp.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { acceptance: unknown[] };
+  manifest.acceptance = [
+    { id: 'count', title: 'The count is right', steps: [{ route: 'items.list', input: null, expect: { items: [], count: 0 } }] },
+  ];
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  git(where.source, 'add', '-A');
+  git(where.source, 'commit', '--quiet', '--no-gpg-sign', '-m', 'miscount');
+  const check = async (): Promise<boolean> => {
+    const built = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true })) as { ok: boolean; releaseId: string };
+    if (!built.ok) throw new Error('the build failed');
+    await callTool(where, 'candidate.preview', { appId: 'items', releaseId: built.releaseId }, { approve: true });
+    const checked = (await callTool(where, 'candidate.check', { appId: 'items', releaseId: built.releaseId })) as {
+      results: { passed: boolean }[];
+    };
+    return checked.results[0]?.passed === true;
+  };
+  expect(await check()).toBe(false);
+  rewrite(host, /count: store\.count\(\) \+ 1 \}/, 'count: store.count() }');
+  git(where.source, 'add', '-A');
+  git(where.source, 'commit', '--quiet', '--no-gpg-sign', '-m', 'count right');
+  expect(await check()).toBe(true);
+  await callTool(where, 'preview.stop', { appId: 'items' }, { approve: true });
+  const row = where.knowledge.db
+    .query<{ id: number }, []>("SELECT id FROM episodes WHERE stage = 'check' AND resolved_at IS NOT NULL")
+    .get();
+  if (row === null) throw new Error('no resolved check case');
+  return { episodeId: row.id };
+}
+
+/** A turn that says something and changes nothing. */
+const IDLE = [{ kind: 'text' as const, chunks: ['I would rather not change anything.'] }];
+
+/** A turn whose one step is a `source.edit`. */
+function editing(input: unknown): Parameters<typeof createFakeAdapter>[0] {
+  return { script: [{ kind: 'tool', name: 'source.edit', input, then: [{ kind: 'text', chunks: ['done'] }] }] };
+}
+
+describe('12d: a carry-over the real distillation found', () => {
+  test('a lesson detail within its own limit is kept; only a field over its own limit drops the lesson', async () => {
+    const where = makeWorld();
+    const long = 'The renderer refuses a row action on a write operation unless it carries confirmText. '.repeat(14).trim();
+    expect(long.length).toBeGreaterThan(1_000);
+    expect(long.length).toBeLessThanOrEqual(2_000);
+    const kept = resolvedCase(where);
+    const distiller = distillerOver(where, answering([{ ...MISSING, lesson: { ...MISSING.lesson, detail: long } }]).model);
+    distiller.enqueue([kept]);
+    await distiller.idle();
+    // 12c measured every field against the summary's 400 and dropped this one.
+    expect(lessonFrom(where.knowledge, kept)).not.toBeNull();
+
+    // A trigger word past its own limit is refused by the schema the model was shown.
+    const refused = resolvedCase(where, 'route "items.other" must declare an effect before it can be part of an Autoapp release');
+    const again = distillerOver(
+      where,
+      answering([{ ...MISSING, lesson: { ...MISSING.lesson, trigger: ['effect', 'tags', 'x'.repeat(41)] } }]).model,
+    );
+    again.enqueue([refused]);
+    await again.idle();
+    expect(lessonFrom(where.knowledge, refused)).toBeNull();
+  }, 30_000);
+});
+
+describe('12d step 0: hints and credit', () => {
+  test('a lesson with no stage is never a hint; one of the failure’s stage is', () => {
+    const where = makeWorld({ serve: true });
+    const stageless = storeLesson(where.knowledge, {
+      applies: {},
+      summary: 'An effect is written once per route.',
+      trigger: 'effect route declare',
+      status: 'confirmed',
+    });
+    const staged = storeLesson(where.knowledge, {
+      applies: { stage: 'contract' },
+      summary: 'A new route needs its effect before the contract stage exports it.',
+      trigger: 'effect route declare',
+      status: 'confirmed',
+    });
+    const hints = served(where)
+      .hints('items', [{ stage: 'contract', message: 'route "items.tag" must declare an effect' }], handOrigin('r-stage'))
+      .map((hint) => hint.lessonId);
+    expect(hints).toContain(staged);
+    expect(hints).not.toContain(stageless);
+    // The MCP seed, which 12c watched be hinted for a contract failure.
+    expect(hints).not.toContain(seedId(where.knowledge, 5));
+  });
+
+  test('resolved credit to a hint of another stage or route is counted, and show says so', () => {
+    const directory = tempDir();
+    const root = layout(join(directory, 'autoapp'));
+    const knowledge = openKnowledge(join(root.root, 'launcher'));
+    const log = createEventLog(knowledge, { source: 'test', tee: quiet });
+    const caseId = createEvidence(knowledge, log).open({
+      appId: 'items',
+      stage: 'contract',
+      problem: 'route "items.other" must declare an effect',
+      request: 'r',
+      contextId: null,
+      origin: handOrigin('r-credit'),
+      releaseBefore: null,
+      dataSnapshot: null,
+      model: null,
+      autoappVersion: AUTOAPP_VERSION,
+    });
+    const signatureOfCase =
+      knowledge.db.query<{ signature: string }, [number]>('SELECT signature FROM episodes WHERE id = ?').get(caseId ?? 0)?.signature ?? '';
+    const stageless = storeLesson(knowledge, { applies: {}, summary: 'An MCP fact.', trigger: 'mcp effect' });
+    const staged = storeLesson(knowledge, { applies: { stage: 'contract' }, summary: 'A contract fact.', trigger: 'effect' });
+    const routed = storeLesson(knowledge, {
+      applies: { stage: 'contract', routes: ['items.tag'] },
+      summary: 'A fact about items.tag.',
+      trigger: 'effect tag',
+    });
+    for (const lessonId of [stageless, staged, routed]) {
+      knowledge.db
+        .query<null, [number, string, string]>(
+          `INSERT INTO servings (lesson_id, run_id, app_id, how, for_signature, for_stage, included, served_at, outcome)
+           VALUES (?, ?, 'items', 'hint', ?, 'contract', 1, 0, 'resolved')`,
+        )
+        .run(lessonId, `r-${String(lessonId)}`, signatureOfCase);
+    }
+    expect(unrelatedHintCredit(knowledge)).toEqual({ byStage: 1, byStageOrRoutes: 2 });
+    expect(unrelatedHintCredit(knowledge, staged)).toEqual({ byStage: 0, byStageOrRoutes: 0 });
+    knowledge.close();
+
+    const lines: string[] = [];
+    expect(runKnowledgeCommand({ root, argv: ['show', String(stageless)], out: (line) => lines.push(line) })).toBe(0);
+    expect(lines.join('\n')).toContain('resolved 1 (of which unrelated by stage: 1)');
+  });
+});
+
+describe('12d: replay', () => {
+  test('a manifest names every field a replay depends on', async () => {
+    const where = makeWorld({ git: true, turn: recordedTurn });
+    const { episodeId, rev } = await buildCase(where);
+    const lessonId = storeLesson(where.knowledge, {
+      applies: { stage: 'contract' },
+      summary: 'A new route needs its effect declared.',
+      trigger: 'effect route',
+      episodeId,
+    });
+    const aiDataDir = join(where.directory, 'launcher');
+    const manifest = await manifestFor({
+      knowledge: where.knowledge,
+      layout: where.root,
+      episodeId,
+      lessonId,
+      runs: 2,
+      model: fakeModel,
+      providers: [createFakeAdapter()],
+      logger: quiet,
+      aiDataDir,
+    });
+    expect(Object.keys(manifest).sort()).toEqual(
+      [
+        'v', 'episodeId', 'appId', 'kind', 'stage', 'signature', 'sourceRevBefore', 'releaseBefore', 'dataSnapshot',
+        'packageJsonHash', 'lockfileHash', 'requestBlob', 'instructionsBlob', 'caseInstructionsBlob', 'exampleBlob',
+        'exampleHash', 'model', 'autoappVersion', 'lessonId', 'runs', 'maxSteps', 'turnTimeoutMs',
+      ].sort(),
+    );
+    expect(manifest).toMatchObject({
+      episodeId,
+      appId: 'items',
+      kind: 'build',
+      stage: 'contract',
+      sourceRevBefore: rev,
+      dataSnapshot: null,
+      model: { provider: 'fake', id: 'fake-1' },
+      autoappVersion: AUTOAPP_VERSION,
+      lessonId,
+      runs: 2,
+      maxSteps: LAUNCHER_MAX_STEPS,
+      exampleBlob: null,
+      exampleHash: null,
+    });
+    expect(where.knowledge.getBlob(manifest.requestBlob)).toBe(REQUEST);
+    expect(where.knowledge.getBlob(manifest.instructionsBlob)).toBe(ENGINEER_INSTRUCTIONS);
+    expect(manifest.signature).toMatch(/^[0-9a-f]{32}$/);
+    expect(manifest.packageJsonHash === null || /^[0-9a-f]{32}$/.test(manifest.packageJsonHash)).toBe(true);
+
+    // An open case, or one with no revision, is refused with a reason.
+    await expect(
+      manifestFor({ knowledge: where.knowledge, layout: where.root, episodeId: 999, lessonId: null, model: fakeModel, providers: [], logger: quiet, aiDataDir }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+  }, 120_000);
+
+  test('a build case replays into fresh checkouts with and without its lesson; the launcher’s store gains only the results', async () => {
+    const where = makeWorld({ git: true, turn: recordedTurn });
+    const { episodeId, rev } = await buildCase(where);
+    const lessonId = storeLesson(where.knowledge, {
+      applies: { stage: 'contract' },
+      summary: 'A new route needs its effect declared.',
+      trigger: 'effect route',
+      episodeId,
+    });
+    const aiDataDir = join(where.directory, 'launcher');
+    await fakeSettings(aiDataDir);
+    const count = (table: string): number =>
+      where.knowledge.db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n ?? 0;
+    const before = { servings: count('servings'), episodes: count('episodes'), contexts: count('contexts') };
+
+    const { manifest, results } = await replay({
+      knowledge: where.knowledge,
+      layout: where.root,
+      episodeId,
+      lessonId,
+      runs: 2,
+      model: fakeModel,
+      // Scripted arms: with the lesson the engineer declares the effect; without it, it does nothing.
+      providers: (run) => [createFakeAdapter(run.label === 'with' ? editing(DECLARE_EFFECT) : { script: IDLE })],
+      logger: quiet,
+      aiDataDir,
+      execPath: LAUNCHER,
+      fetch: noNetwork,
+      turnTimeoutMs: 60_000,
+    });
+    expect(results.map((result) => `${result.arm}:${result.outcome}`)).toEqual([
+      'with:passed',
+      'without:failed',
+      'with:passed',
+      'without:failed',
+    ]);
+
+    // Four fresh checkouts of the case's revision.
+    const base = join(where.root.root, 'replay', String(episodeId));
+    for (const arm of ['with', 'without']) {
+      expect(readdirSync(join(base, arm)).sort()).toEqual(['1', '2']);
+      for (const n of ['1', '2']) {
+        const source = join(base, arm, n, 'apps', 'items', 'source');
+        const ancestor = Bun.spawnSync({ cmd: ['git', 'merge-base', '--is-ancestor', rev, 'HEAD'], cwd: source });
+        expect(ancestor.exitCode).toBe(0);
+      }
+      const unchanged = git(join(base, 'without', '1', 'apps', 'items', 'source'), 'rev-parse', 'HEAD');
+      expect(unchanged).toBe(rev);
+    }
+
+    // The replay's own store: the lesson reached only the `with` arm, and nothing curated reached either.
+    const replayed = new Database(join(base, KNOWLEDGE_FILE), { readonly: true });
+    closers.push(() => replayed.close());
+    const contexts = replayed
+      .query<{ run_id: string; resolved: string; included: string }, []>('SELECT run_id, resolved, included FROM contexts ORDER BY id')
+      .all();
+    const refs = (row: { included: string }): string[] => (JSON.parse(row.included) as { ref: string }[]).map((entry) => entry.ref);
+    const withContexts = contexts.filter((row) => row.run_id.includes('-with-'));
+    const withoutContexts = contexts.filter((row) => row.run_id.includes('-without-'));
+    expect(withContexts).toHaveLength(2);
+    expect(withoutContexts).toHaveLength(2);
+    for (const row of withContexts) {
+      expect(JSON.parse(row.resolved) as string[]).toContain(`lesson:${String(lessonId)}`);
+      expect(refs(row)).toContain('lessons:items');
+    }
+    for (const row of withoutContexts) {
+      expect(JSON.parse(row.resolved) as string[]).not.toContain(`lesson:${String(lessonId)}`);
+      expect(refs(row)).not.toContain('lessons:items');
+    }
+    expect(replayed.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM lessons WHERE origin = 'curated'").get()?.n).toBe(0);
+    expect(replayed.query<{ lesson_id: number }, []>('SELECT DISTINCT lesson_id FROM servings').all()).toEqual([
+      { lesson_id: lessonId },
+    ]);
+
+    // The launcher's store: four result rows, each naming the manifest's blob, and nothing else.
+    expect(count('replays')).toBe(4);
+    expect({ servings: count('servings'), episodes: count('episodes'), contexts: count('contexts') }).toEqual(before);
+    const blob = sha256(canonicalJson(manifest));
+    const rows = where.knowledge.db.query<{ manifest_blob: string; lesson_id: number }, []>('SELECT manifest_blob, lesson_id FROM replays').all();
+    expect(rows.every((row) => row.manifest_blob === blob && row.lesson_id === lessonId)).toBe(true);
+    expect(JSON.parse(where.knowledge.getBlob(blob) ?? 'null')).toEqual(manifest);
+  }, 240_000);
+
+  test('confirm shows the replay table and asks; without a replay it says so and still confirms', () => {
+    const directory = tempDir();
+    const root = layout(join(directory, 'autoapp'));
+    const knowledge = openKnowledge(join(root.root, 'launcher'));
+    const replayed = storeLesson(knowledge, { applies: { stage: 'contract' }, summary: 'A replayed lesson.', trigger: 'one' });
+    const second = storeLesson(knowledge, { applies: { stage: 'contract' }, summary: 'Another replayed lesson.', trigger: 'two' });
+    const unreplayed = storeLesson(knowledge, { applies: { stage: 'contract' }, summary: 'Nobody replayed this one.', trigger: 'three' });
+    const blob = knowledge.putBlob('{"v":1}');
+    const insert = (lessonId: number, arm: string, outcome: string, episodeId: number): void => {
+      knowledge.db
+        .query<null, [number, number, string, string, string]>(
+          `INSERT INTO replays (episode_id, lesson_id, arm, n, outcome, steps, ms, input_tokens, output_tokens, build_reached, manifest_blob, at)
+           VALUES (?, ?, ?, 1, ?, 3, 1000, 10, 5, 0, ?, 0)`,
+        )
+        .run(episodeId, lessonId, arm, outcome, blob);
+    };
+    for (const lessonId of [replayed, second]) {
+      insert(lessonId, 'with', 'passed', 1);
+      insert(lessonId, 'without', 'failed', 1);
+      insert(lessonId, 'regression', 'failed', 2);
+    }
+    knowledge.close();
+
+    const statusOf = (id: number): string | undefined => {
+      const reader = openKnowledge(join(root.root, 'launcher'));
+      try {
+        return reader.db.query<{ status: string }, [number]>('SELECT status FROM lessons WHERE id = ?').get(id)?.status;
+      } finally {
+        reader.close();
+      }
+    };
+    const never = (): string => {
+      throw new Error('the person was asked');
+    };
+    let lines: string[] = [];
+    const out = (line: string): void => {
+      lines.push(line);
+    };
+
+    const asked: string[] = [];
+    expect(runKnowledgeCommand({ root, argv: ['confirm', String(replayed)], out, err: out, ask: (question) => (asked.push(question), 'n') })).toBe(1);
+    expect(asked).toHaveLength(1);
+    expect(lines.join('\n')).toContain('verdict: supports');
+    expect(lines.join('\n')).toContain('case 2: failed');
+    expect(statusOf(replayed)).toBe('provisional');
+
+    expect(runKnowledgeCommand({ root, argv: ['confirm', String(replayed)], out, err: out, ask: () => 'y' })).toBe(0);
+    expect(statusOf(replayed)).toBe('confirmed');
+    expect(runKnowledgeCommand({ root, argv: ['confirm', String(second), '--yes'], out, err: out, ask: never })).toBe(0);
+    expect(statusOf(second)).toBe('confirmed');
+
+    lines = [];
+    expect(runKnowledgeCommand({ root, argv: ['confirm', String(unreplayed)], out, err: out, ask: never })).toBe(0);
+    expect(lines.join('\n')).toContain('no replay has been run');
+    expect(statusOf(unreplayed)).toBe('confirmed');
+  });
+});
+
+describe.skipIf(!available)('12d: replay with children, and the evaluation', () => {
+  test('a check case runs on a copy of the data and is judged by its example, by hash', async () => {
+    const where = makeWorld({ git: true, turn: recordedTurn });
+    const { episodeId } = await checkCase(where);
+    // Something in the live data only a copy of it would carry.
+    const live = where.root.app('items').data;
+    mkdirSync(live, { recursive: true });
+    const marker = new Database(join(live, 'marker.sqlite'), { create: true });
+    marker.exec("CREATE TABLE marker (v TEXT); INSERT INTO marker VALUES ('from the live data')");
+    marker.close();
+    const lessonId = storeLesson(where.knowledge, {
+      applies: { stage: 'check' },
+      summary: 'The count is of items, not of items plus one.',
+      trigger: 'count items',
+      episodeId,
+    });
+    const aiDataDir = join(where.directory, 'launcher');
+    await fakeSettings(aiDataDir);
+    const fix = {
+      appId: 'items',
+      message: 'Count right',
+      hunks: [{ path: 'src/host/app.ts', find: 'count: store.count() + 1 }', replace: 'count: store.count() }' }],
+    };
+    const { manifest, results } = await replay({
+      knowledge: where.knowledge,
+      layout: where.root,
+      episodeId,
+      lessonId,
+      runs: 1,
+      model: fakeModel,
+      providers: (run) => [createFakeAdapter(run.label === 'with' ? editing(fix) : { script: IDLE })],
+      logger: quiet,
+      aiDataDir,
+      execPath: LAUNCHER,
+      fetch: noNetwork,
+      turnTimeoutMs: 60_000,
+    });
+    expect(manifest.kind).toBe('check');
+    expect(manifest.dataSnapshot).toEqual({ path: `replay/${String(episodeId)}/data`, from: 'live' });
+    expect(manifest.exampleHash).toBe(where.evidence.get(episodeId)?.exampleHash ?? '');
+    expect(results.map((result) => `${result.arm}:${result.outcome}`)).toEqual(['with:passed', 'without:failed']);
+    const copied = new Database(join(where.root.root, 'replay', String(episodeId), 'with', '1', 'apps', 'items', 'data', 'marker.sqlite'), {
+      readonly: true,
+    });
+    closers.push(() => copied.close());
+    expect(copied.query<{ v: string }, []>('SELECT v FROM marker').get()?.v).toBe('from the live data');
+  }, 300_000);
+
+  test('a run whose child dies is inconclusive, not failed', async () => {
+    const where = makeWorld({ git: true, turn: recordedTurn });
+    const { episodeId } = await checkCase(where);
+    const aiDataDir = join(where.directory, 'launcher');
+    await fakeSettings(aiDataDir);
+    const die = {
+      appId: 'items',
+      message: 'Stop on a list',
+      hunks: [
+        {
+          path: 'src/host/app.ts',
+          find: "app.operation('items.list', () => ({ items: store.list(), count: store.count() + 1 }));",
+          replace: "app.operation('items.list', () => process.exit(3));",
+        },
+      ],
+    };
+    const { results } = await replay({
+      knowledge: where.knowledge,
+      layout: where.root,
+      episodeId,
+      lessonId: null,
+      runs: 1,
+      model: fakeModel,
+      providers: () => [createFakeAdapter(editing(die))],
+      logger: quiet,
+      aiDataDir,
+      execPath: LAUNCHER,
+      fetch: noNetwork,
+      turnTimeoutMs: 60_000,
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ arm: 'without', outcome: 'inconclusive', detail: 'the preview child died' });
+    const row = where.knowledge.db.query<{ outcome: string; lesson_id: number | null }, []>('SELECT outcome, lesson_id FROM replays').get();
+    expect(row).toEqual({ outcome: 'inconclusive', lesson_id: null });
+  }, 300_000);
+
+  test('evaluate --runs 1 writes every column for every condition and task', async () => {
+    mkdirSync(runRoot, { recursive: true });
+    const directory = mkdtempSync(join(runRoot, 'knowledge-evaluate-'));
+    scratch.push(directory);
+    const setup = openKnowledge(join(directory, 'launcher'));
+    const learned = storeLesson(setup, {
+      applies: { stage: 'views' },
+      summary: 'A distilled lesson the learned condition carries.',
+      trigger: 'items table filter done',
+    });
+    setup.close();
+
+    // In a child process, for the reason `autoapp-evaluate-child.ts` gives:
+    // under `bun test tests`, a bundle of Notes cannot resolve its provider
+    // packages in this process.
+    const child = Bun.spawn({
+      cmd: [process.execPath, 'run', join(import.meta.dir, 'autoapp-evaluate-child.ts'), directory],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    closers.push(() => {
+      child.kill();
+    });
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    if (code !== 0) throw new Error(`the evaluation failed: ${stderr}`);
+    const { rows, markdown, runs } = JSON.parse(stdout) as {
+      rows: {
+        condition: string;
+        task: string;
+        includedUsed: number;
+        includedIgnored: number;
+      }[];
+      markdown: string;
+      runs: string[];
+    };
+    expect(runs).toHaveLength(CONDITIONS.length * EVALUATION_TASKS.length);
+    expect(rows).toHaveLength(CONDITIONS.length * EVALUATION_TASKS.length);
+    for (const condition of CONDITIONS) {
+      for (const task of EVALUATION_TASKS) {
+        const row = rows.find((entry) => entry.condition === condition && entry.task === task.id);
+        expect(row).toMatchObject({
+          runs: 1,
+          verified: 0,
+          callsToFirstEdit: { mean: 1, of: 1 },
+          callsToFirstBuild: { mean: null, of: 0 },
+          reachedBuild: 0,
+          recurringSignatures: 0,
+          timedOut: 0,
+        });
+      }
+    }
+    // The baseline was given nothing; 12b as shipped names files.
+    const offered = (condition: string): number =>
+      rows
+        .filter((row) => row.condition === condition)
+        .reduce((total, row) => total + row.includedUsed + row.includedIgnored, 0);
+    expect(offered('baseline')).toBe(0);
+    expect(offered('orientation+facts')).toBeGreaterThan(0);
+
+    const header = markdown.split('\n').find((line) => line.startsWith('| condition'));
+    for (const column of [
+      'condition', 'task', 'runs', 'verified', 'calls to first edit', 'calls to first build', 'reached a build',
+      'timed out', 'mean time', 'mean tokens', 'recurring signatures', 'included refs used', 'included refs ignored',
+      'reads not offered', 'unrelated hint credit',
+    ]) {
+      expect(header).toContain(` ${column} |`);
+    }
+    expect(markdown.split('\n').filter((line) => /^\| (baseline|orientation|learned)/.test(line))).toHaveLength(12);
+
+    // Only the learned condition carried the distilled lesson.
+    const stamp = readdirSync(join(directory, 'evaluate'))[0] ?? '';
+    const lessonsIn = (condition: string): number[] => {
+      const store = new Database(join(directory, 'evaluate', stamp, condition, 'starter-done-filter', '1', KNOWLEDGE_FILE), { readonly: true });
+      try {
+        return store.query<{ id: number }, []>("SELECT id FROM lessons WHERE origin = 'distilled'").all().map((row) => row.id);
+      } finally {
+        store.close();
+      }
+    };
+    expect(lessonsIn('learned')).toEqual([learned]);
+    expect(lessonsIn('orientation+facts')).toEqual([]);
+  }, 600_000);
 });

@@ -28,6 +28,8 @@ export type {
   StoredChecks,
 } from './state.ts';
 
+export { CHECK_STEP_TIMEOUT_MS, runAcceptance } from './check.ts';
+
 export { startPreview } from './preview.ts';
 export type { PreviewDeps } from './preview.ts';
 
