@@ -36,6 +36,7 @@ export {
   listReleases,
   readCurrent,
   readRelease,
+  releasePageBytes,
   setCurrent,
   writeRelease,
 } from './store.ts';

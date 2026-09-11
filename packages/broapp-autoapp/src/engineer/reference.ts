@@ -16,7 +16,9 @@
  * so the engineer reads the part it needs rather than all of it every turn.
  */
 
-export const REFERENCE_TOPICS = ['contract', 'views', 'acceptance', 'workspace'] as const;
+import { AUTOAPP_TOKENS, TOKEN_PREFIX, type ThemeToken, type TokenGroup } from '../react/theme.ts';
+
+export const REFERENCE_TOPICS = ['contract', 'views', 'acceptance', 'workspace', 'theme'] as const;
 export type ReferenceTopic = (typeof REFERENCE_TOPICS)[number];
 
 const CONTRACT = `# contract — src/shared/contract.ts
@@ -44,6 +46,8 @@ code, so what is not expressible here cannot be drawn.
 \`id\` (\`[a-z][a-z0-9-]*\`, unique), \`title\` (the page's heading and its name in
 navigation, both), \`params\` (names taken from the URL hash, in order),
 \`sources\` (operations loaded when the page opens, in order), \`children\`.
+How a page looks — colour, spacing, type, corners — is not in this file: it is
+the \`--autoapp-*\` tokens in \`src/ui/styles.css\`, listed in the \`theme\` topic.
 
 ## Source
 \`id\` (unique on the page), \`operation\` (a route with effect \`read\`), \`input\`
@@ -116,13 +120,56 @@ grants them per release), \`acceptance\`.
 \`src/shared/contract.ts\`, \`src/shared/views.ts\`, \`src/host/app.ts\` (exports
 \`start\` and \`migrate\`), \`src/ui/\`. Nothing outside \`src/\` and \`autoapp.json\` is
 written. Dependencies come from \`package.json\` as installed at import; a new one
-cannot be added by editing the file.`;
+cannot be added by editing the file.
+Prefer what the renderer already draws. A dependency the renderer would need is a
+decision for the framework, made in \`packages/broapp-autoapp\`, never in an
+application's \`package.json\`.`;
+
+/** One line of the theme topic. */
+function tokenLine(token: ThemeToken): string {
+  const defaults = token.dark === token.light ? token.light : `${token.light} / ${token.dark}`;
+  return `- \`${TOKEN_PREFIX}${token.name}\` — ${token.purpose} — ${defaults} — read by ${token.consumers.join(', ')}`;
+}
+
+const TOKEN_GROUPS: readonly TokenGroup[] = ['colour', 'space', 'type', 'radius', 'density'];
+
+/**
+ * The theme topic, built from the table rather than written beside it.
+ *
+ * Written by hand it would be one more list to keep in step with the
+ * stylesheet, and the one that fell behind would be the one the engineer reads.
+ */
+function themeReference(tokens: readonly ThemeToken[]): string {
+  const groups = TOKEN_GROUPS.map((group) => {
+    const members = tokens.filter((token) => token.group === group);
+    return members.length === 0 ? '' : `## ${group}\n${members.map(tokenLine).join('\n')}`;
+  }).filter((text) => text !== '');
+  return `# theme — src/ui/styles.css
+
+The renderer draws every component itself and takes every colour, gap, size and
+corner from an \`${TOKEN_PREFIX}*\` custom property. Setting those is how an application
+looks like itself; a rule for an \`.autoapp-\` class is not supported.
+The renderer's defaults sit on \`:where(:root)\`, which has no specificity. An
+application sets tokens on \`:root\` in \`src/ui/styles.css\`, and that wins whatever
+order the stylesheets were bundled in. The renderer never sets a token anywhere
+else, so a token set on \`:root\` reaches every component. An application that sets
+a colour for the light scheme sets it for the dark one too, under
+\`@media (prefers-color-scheme: dark)\`; one that sets neither gets the defaults in both.
+A preset is those two blocks and nothing else: \`broapp-autoapp/presets/quiet.css\`
+(low contrast, roomier, rounder) and \`dense.css\` (compact, square, high contrast).
+To use one, copy it to the end of \`src/ui/styles.css\`; it is bundled and hashed with
+the page, and nothing changes the theme while the page runs.
+Each line: the token — what it sets — its default (light / dark where they differ) — what reads it.
+
+${groups.join('\n\n')}`;
+}
 
 const SECTIONS: Readonly<Record<ReferenceTopic, string>> = {
   contract: CONTRACT,
   views: VIEWS,
   acceptance: ACCEPTANCE,
   workspace: WORKSPACE,
+  theme: themeReference(AUTOAPP_TOKENS),
 };
 
 /** One topic's text, or every topic in order. */

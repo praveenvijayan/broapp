@@ -1,10 +1,15 @@
 /*
  * The page around the renderer, and the palette the renderer draws with.
  *
- * The renderer draws every form, table and button itself, coloured by the
- * `--autoapp-*` custom properties on `:root`. Setting those is how an
- * application looks like itself; writing rules for `.input` or `.table` is not,
- * because those elements are not drawn here.
+ * The renderer draws every form, table and button itself, coloured, spaced and
+ * sized by the `--autoapp-*` custom properties on `:root`. Setting those is how
+ * an application looks like itself; writing rules for `.input` or `.table` is
+ * not, because those elements are not drawn here.
+ *
+ * Every token, with its default, is listed in the engineer's `spec.reference`
+ * topic `theme`; anything not set here keeps that default. Two complete sets,
+ * `quiet.css` and `dense.css`, ship in `broapp-autoapp/presets/`: copy one to
+ * the end of this file to use it.
  *
  * Both colour schemes are defined. A page that leaves this to the browser gets
  * light text on a white field the first time somebody's machine is in dark

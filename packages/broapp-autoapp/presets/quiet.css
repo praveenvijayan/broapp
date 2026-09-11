@@ -1,0 +1,86 @@
+/*
+ * Quiet: low contrast, more room, rounder corners.
+ *
+ * A preset is tokens on `:root` for both colour schemes and nothing else. To
+ * use it, copy this file to the end of the application's `src/ui/styles.css`;
+ * it is bundled and hashed with the page like any other stylesheet. Every name
+ * is listed, with its default, in `spec.reference` topic `theme`.
+ */
+
+:root {
+  --autoapp-heading: #2b2e33;
+  --autoapp-text: #464a51;
+  --autoapp-text-muted: #6e6b65;
+  --autoapp-muted: #6f737b;
+  --autoapp-border: #e6e7ea;
+  --autoapp-surface: #fcfcfb;
+  --autoapp-input: #ffffff;
+  --autoapp-button: #f3f3f1;
+  --autoapp-button-hover: #e9e9e6;
+  --autoapp-accent: #46659f;
+  --autoapp-code-surface: #f3f3f1;
+  --autoapp-notice-surface: #faf6ec;
+  --autoapp-notice-border: #e9ddc0;
+  --autoapp-notice-text: #6a5a31;
+  --autoapp-warning: #97682f;
+  --autoapp-warning-bg: #f8f0e2;
+  --autoapp-error-surface: #f8eeec;
+  --autoapp-error-text: #943a31;
+  --autoapp-focus-ring: #46659f;
+
+  --autoapp-space-1: 0.35rem;
+  --autoapp-space-2: 0.4rem;
+  --autoapp-space-3: 0.55rem;
+  --autoapp-space-4: 0.7rem;
+  --autoapp-space-5: 0.8rem;
+  --autoapp-space-6: 1rem;
+  --autoapp-space-7: 1.3rem;
+  --autoapp-space-8: 1.75rem;
+  --autoapp-card-padding-y: 1.4rem;
+  --autoapp-card-padding-x: 1.6rem;
+  --autoapp-inset-y: 0.65rem;
+  --autoapp-inset-x: 0.8rem;
+  --autoapp-message-padding-y: 0.65rem;
+  --autoapp-message-padding-x: 0.9rem;
+  --autoapp-notice-padding-y: 0.8rem;
+  --autoapp-notice-padding-x: 1.1rem;
+  --autoapp-list-indent: 1.8rem;
+
+  --autoapp-font-size-title: 1.5rem;
+  --autoapp-line-height: 1.7;
+
+  --autoapp-radius-sm: 12px;
+  --autoapp-radius-md: 14px;
+  --autoapp-radius-lg: 18px;
+
+  --autoapp-control-height: 2.5rem;
+  --autoapp-control-padding-y: 0.6rem;
+  --autoapp-control-padding-x: 1.15rem;
+  --autoapp-control-small-padding-y: 0.35rem;
+  --autoapp-control-small-padding-x: 0.75rem;
+  --autoapp-focus-ring-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --autoapp-heading: #dde0e5;
+    --autoapp-text: #c6cad1;
+    --autoapp-text-muted: #9a9fa7;
+    --autoapp-muted: #9a9fa7;
+    --autoapp-border: #34373d;
+    --autoapp-surface: #212327;
+    --autoapp-input: #1b1d20;
+    --autoapp-button: #2a2d32;
+    --autoapp-button-hover: #32353b;
+    --autoapp-accent: #8ea7d8;
+    --autoapp-code-surface: #1a1c1f;
+    --autoapp-notice-surface: #29261f;
+    --autoapp-notice-border: #4a4331;
+    --autoapp-notice-text: #d8cca7;
+    --autoapp-warning: #d1ac6b;
+    --autoapp-warning-bg: #332c1c;
+    --autoapp-error-surface: #34211e;
+    --autoapp-error-text: #e39b8d;
+    --autoapp-focus-ring: #8ea7d8;
+  }
+}

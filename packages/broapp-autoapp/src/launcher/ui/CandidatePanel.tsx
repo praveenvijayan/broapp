@@ -18,6 +18,27 @@ export interface CandidatePanelProps {
   onChanged(): void;
 }
 
+/** "1.1 MB", "276 KB". */
+function formatBytes(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${String(Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * The page's size and how it changed, or `null` when the change is too small
+ * to be worth a person's attention.
+ *
+ * Every byte of the page is sent to the browser whenever the application
+ * opens. A change of a couple of percent is noise from a rebuild; more than
+ * that, in either direction, is something the change did.
+ */
+export function pageCost(bytes: number | null, before: number | null): string | null {
+  if (bytes === null || before === null || before === 0) return null;
+  const change = (bytes - before) / before;
+  if (Math.abs(change) <= 0.02) return null;
+  const percent = Math.round(change * 100);
+  return `page ${formatBytes(bytes)} (${percent > 0 ? '+' : ''}${String(percent)}%)`;
+}
+
 export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): ReactElement | null {
   const status = useOperation<LauncherContract, 'launcher.candidateStatus'>(
     'launcher.candidateStatus',
@@ -53,6 +74,7 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
   if (nothingYet) return null;
 
   const added = current.addedCapabilities;
+  const cost = pageCost(current.pageBytes, current.pageBytesBefore);
 
   return (
     <section className="launcher__card" aria-labelledby="candidate-heading">
@@ -83,6 +105,7 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
         <p className="launcher__lede">
           Built <code>{current.releaseId.slice(0, 8)}</code>
           {current.editsSinceBuild ? '; edited since this build.' : '.'}
+          {cost === null ? '' : ` ${cost[0]?.toUpperCase() ?? ''}${cost.slice(1)}.`}
         </p>
       )}
       {current.previewLost && (

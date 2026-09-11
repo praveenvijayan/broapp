@@ -3,8 +3,11 @@
  *
  * The whole point of this entry point is that it is *pinned*: an application's
  * interface changes by changing the view specification a release carries, never
- * by shipping different browser code. Import `broapp-autoapp/react/view.css`
- * alongside it, the way `broapp/ai/react/ai.css` is imported.
+ * by shipping different browser code. Import `broapp-autoapp/react/tokens.css`
+ * and then `broapp-autoapp/react/view.css` alongside it, the way
+ * `broapp/ai/react/ai.css` is imported: the first is every token's default,
+ * generated from `theme.ts`, and the second is the renderer's rules, which read
+ * nothing but those tokens.
  */
 export { AutoappView, useViews } from './AutoappView.tsx';
 export type { AutoappViewProps, ViewsState } from './AutoappView.tsx';
@@ -21,6 +24,9 @@ export type { PageContextValue, SourceState } from './context.tsx';
 
 export { announcePending, browserSurface, titleWithPending } from './pending.ts';
 export type { PendingSurface } from './pending.ts';
+
+export { AUTOAPP_TOKENS, fallbackFor, TOKEN_PREFIX, tokensCss } from './theme.ts';
+export type { ThemeToken, TokenConsumer, TokenGroup } from './theme.ts';
 
 export { readPath, resolveInput, resolveValue } from './bind.ts';
 export type { Scope } from './bind.ts';

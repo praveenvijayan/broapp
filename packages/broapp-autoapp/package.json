@@ -1,6 +1,6 @@
 {
   "name": "broapp-autoapp",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "description": "A Broapp application its owner can reshape while using it: launcher, renderer, specification, engineer, activation",
   "license": "MIT",
@@ -33,6 +33,7 @@
     "src",
     "dist/launcher-page.html",
     "dist/starter-template.json",
+    "presets",
     "README.md",
     "LICENSE"
   ],
@@ -48,6 +49,7 @@
     "./spec": "./src/spec/index.ts",
     "./workflows": "./src/workflows/index.ts",
     "./react": "./src/react/index.tsx",
+    "./react/tokens.css": "./src/react/tokens.css",
     "./react/view.css": "./src/react/view.css",
     "./package.json": "./package.json"
   },
@@ -79,10 +81,12 @@
     "broapp-autoapp": "src/launcher/main.ts"
   },
   "scripts": {
+    "build:tokens": "bun run scripts/build-tokens.ts",
     "build:page": "bun run scripts/build-page.ts",
     "build:template": "bun run scripts/build-template.ts",
-    "build:assets": "bun run build:page && bun run build:template",
+    "build:assets": "bun run build:tokens && bun run build:page && bun run build:template",
     "build:launcher": "bun run scripts/build-launcher.ts",
-    "build:all": "bun run scripts/build-launcher.ts --all-targets"
+    "build:all": "bun run scripts/build-launcher.ts --all-targets",
+    "theme-gallery": "bun run scripts/theme-gallery.ts"
   }
 }

@@ -19,6 +19,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -228,6 +229,22 @@ export function readRelease(root: Layout, appId: string, releaseId: string): App
   const spec = readSpecFile(root, appId, releaseId);
   if (isStaleRelease(root, appId, spec)) throw publicError.conflict(STALE_RELEASE_MESSAGE);
   return spec;
+}
+
+/**
+ * The size of a release's page in bytes, or `null` when there is no page.
+ *
+ * The page is the part of a release a browser receives whole every time the
+ * application opens, so what a change adds to it is a cost the person approving
+ * the change should be able to see.
+ */
+export function releasePageBytes(root: Layout, appId: string, releaseId: string): number | null {
+  const app = root.app(appId);
+  try {
+    return statSync(join(within(app, app.release(releaseId)), PAGE_FILE)).size;
+  } catch {
+    return null;
+  }
 }
 
 /** Every complete release of one application, newest first. */

@@ -2,82 +2,30 @@
  * The renderer's own styles.
  *
  * Every selector is prefixed `.autoapp-` so a host application's stylesheet and
- * this one cannot collide. Colours come from custom properties with fallbacks,
- * so an application that defines them gets its own palette and one that does
- * not still looks deliberate.
+ * this one cannot collide. Every colour and every length comes from an
+ * `--autoapp-*` custom property declared in `theme.ts`; their defaults are in
+ * `tokens.css`, which an application imports before this file. The literal in
+ * each `var()` is that token's default, kept so a page that somehow lost
+ * `tokens.css` still draws exactly what it drew before; a test holds every one
+ * of them to the table, and fails on any length or colour written outside one.
  */
-
-
-/*
- * Defaults for every `--autoapp-*` property, in both colour schemes.
- *
- * `:where(:root)` has no specificity, so an application that sets any of
- * these on its own `:root` wins whatever order the stylesheets were bundled
- * in. The point of having defaults at all is the application that sets none:
- * before this block, a field's background fell back to `#ffffff` while its
- * text inherited the page's — light on white under a dark scheme, which is
- * unreadable, and which a stylesheet rule for `.input` cannot reach because
- * the field is drawn here, not there.
- */
-:where(:root) {
-  --autoapp-heading: #16181d;
-  --autoapp-text: #33383f;
-  --autoapp-text-muted: #6b6862;
-  --autoapp-muted: #6b7280;
-  --autoapp-border: #dfe3ea;
-  --autoapp-surface: #ffffff;
-  --autoapp-input: #ffffff;
-  --autoapp-button: #f4f5f8;
-  --autoapp-button-hover: #e9ebf1;
-  --autoapp-accent: #2a5bd7;
-  --autoapp-code-surface: #f4f5f8;
-  --autoapp-notice-surface: #fdf6e7;
-  --autoapp-notice-border: #f0d9a8;
-  --autoapp-notice-text: #6b5312;
-  --autoapp-warning: #b4690e;
-  --autoapp-warning-bg: #fdf3e3;
-  --autoapp-error-surface: #fdecec;
-  --autoapp-error-text: #a12222;
-}
-
-@media (prefers-color-scheme: dark) {
-  :where(:root) {
-    --autoapp-heading: #f2f3f5;
-    --autoapp-text: #e6e8ec;
-    --autoapp-text-muted: #a2a7b0;
-    --autoapp-muted: #a2a7b0;
-    --autoapp-border: #3a3e46;
-    --autoapp-surface: #1e2024;
-    --autoapp-input: #16171a;
-    --autoapp-button: #262a30;
-    --autoapp-button-hover: #30353c;
-    --autoapp-accent: #7aa2ff;
-    --autoapp-code-surface: #14151a;
-    --autoapp-notice-surface: #2a2618;
-    --autoapp-notice-border: #5a4a1e;
-    --autoapp-notice-text: #e8d59a;
-    --autoapp-warning: #e0b95a;
-    --autoapp-warning-bg: #3a3012;
-    --autoapp-error-surface: #3a1c16;
-    --autoapp-error-text: #f08a76;
-  }
-}
 
 .autoapp {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: var(--autoapp-space-8, 1.25rem);
+  font-size: var(--autoapp-font-size-base, 1em);
 }
 
 .autoapp-page {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: var(--autoapp-space-8, 1.25rem);
 }
 
 .autoapp-page__title {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: var(--autoapp-font-size-title, 1.35rem);
   font-weight: 650;
   color: var(--autoapp-heading, #16181d);
 }
@@ -87,10 +35,10 @@
 .autoapp-form {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem 1.1rem;
-  border: 1px solid var(--autoapp-border, #dfe3ea);
-  border-radius: 10px;
+  gap: var(--autoapp-space-6, 0.75rem);
+  padding: var(--autoapp-card-padding-y, 1rem) var(--autoapp-card-padding-x, 1.1rem);
+  border: var(--autoapp-border-width, 1px) solid var(--autoapp-border, #dfe3ea);
+  border-radius: var(--autoapp-radius-lg, 10px);
   background: var(--autoapp-surface, #ffffff);
 }
 
@@ -98,14 +46,14 @@
 .autoapp-table__title,
 .autoapp-form__title {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--autoapp-font-size-heading, 1rem);
   font-weight: 600;
   color: var(--autoapp-heading, #16181d);
 }
 
 .autoapp-text {
   margin: 0;
-  line-height: 1.55;
+  line-height: var(--autoapp-line-height, 1.55);
   color: var(--autoapp-text, #33383f);
 }
 
@@ -133,14 +81,14 @@
 
 .autoapp-table__grid th,
 .autoapp-table__grid td {
-  padding: 0.5rem 0.6rem;
+  padding: var(--autoapp-inset-y, 0.5rem) var(--autoapp-inset-x, 0.6rem);
   text-align: left;
-  border-bottom: 1px solid var(--autoapp-border, #dfe3ea);
+  border-bottom: var(--autoapp-border-width, 1px) solid var(--autoapp-border, #dfe3ea);
   vertical-align: top;
 }
 
 .autoapp-table__grid th {
-  font-size: 0.8rem;
+  font-size: var(--autoapp-font-size-caption, 0.8rem);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--autoapp-muted, #6b7280);
@@ -157,45 +105,47 @@
 
 .autoapp-row-actions {
   display: flex;
-  gap: 0.4rem;
+  gap: var(--autoapp-space-3, 0.4rem);
 }
 
 .autoapp-field {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--autoapp-space-2, 0.3rem);
 }
 
 .autoapp-field__label {
-  font-size: 0.85rem;
+  font-size: var(--autoapp-font-size-small, 0.85rem);
   font-weight: 600;
   color: var(--autoapp-text, #33383f);
 }
 
 .autoapp-field__input {
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--autoapp-border, #dfe3ea);
-  border-radius: 7px;
+  min-height: var(--autoapp-control-height, auto);
+  padding: var(--autoapp-inset-y, 0.5rem) var(--autoapp-inset-x, 0.6rem);
+  border: var(--autoapp-border-width, 1px) solid var(--autoapp-border, #dfe3ea);
+  border-radius: var(--autoapp-radius-sm, 7px);
   font: inherit;
   color: inherit;
   background: var(--autoapp-input, #ffffff);
 }
 
 .autoapp-field__input:focus-visible {
-  outline: 2px solid var(--autoapp-accent, #2a5bd7);
-  outline-offset: 1px;
+  outline: var(--autoapp-focus-ring-width, 2px) solid var(--autoapp-focus-ring, var(--autoapp-accent, #2a5bd7));
+  outline-offset: var(--autoapp-focus-ring-offset, 1px);
 }
 
 .autoapp-field__check {
-  width: 1.05rem;
-  height: 1.05rem;
+  width: var(--autoapp-check-size, 1.05rem);
+  height: var(--autoapp-check-size, 1.05rem);
 }
 
 .autoapp-button {
   align-self: flex-start;
-  padding: 0.45rem 0.9rem;
-  border: 1px solid var(--autoapp-border, #dfe3ea);
-  border-radius: 7px;
+  min-height: var(--autoapp-control-height, auto);
+  padding: var(--autoapp-control-padding-y, 0.45rem) var(--autoapp-control-padding-x, 0.9rem);
+  border: var(--autoapp-border-width, 1px) solid var(--autoapp-border, #dfe3ea);
+  border-radius: var(--autoapp-radius-sm, 7px);
   background: var(--autoapp-button, #f4f5f8);
   font: inherit;
   font-weight: 600;
@@ -213,22 +163,22 @@
 }
 
 .autoapp-button--small {
-  padding: 0.25rem 0.55rem;
-  font-size: 0.85rem;
+  padding: var(--autoapp-control-small-padding-y, 0.25rem) var(--autoapp-control-small-padding-x, 0.55rem);
+  font-size: var(--autoapp-font-size-small, 0.85rem);
 }
 
 .autoapp-button-row {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--autoapp-space-4, 0.5rem);
 }
 
 .autoapp-status {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.4rem 0;
-  border-bottom: 1px solid var(--autoapp-border, #dfe3ea);
+  gap: var(--autoapp-space-7, 1rem);
+  padding: var(--autoapp-space-3, 0.4rem) 0;
+  border-bottom: var(--autoapp-border-width, 1px) solid var(--autoapp-border, #dfe3ea);
 }
 
 .autoapp-status__label {
@@ -243,9 +193,9 @@
 
 .autoapp-message {
   margin: 0;
-  padding: 0.5rem 0.7rem;
-  border-radius: 7px;
-  font-size: 0.9rem;
+  padding: var(--autoapp-message-padding-y, 0.5rem) var(--autoapp-message-padding-x, 0.7rem);
+  border-radius: var(--autoapp-radius-sm, 7px);
+  font-size: var(--autoapp-font-size-note, 0.9rem);
 }
 
 .autoapp-message--error {
@@ -255,16 +205,17 @@
 
 .autoapp-conflicts {
   margin: 0;
-  padding: 0.6rem 0.9rem 0.6rem 1.6rem;
-  border: 1px solid var(--autoapp-notice-border, #f0d9a8);
-  border-radius: 8px;
+  padding: var(--autoapp-notice-padding-y, 0.6rem) var(--autoapp-notice-padding-x, 0.9rem)
+    var(--autoapp-notice-padding-y, 0.6rem) var(--autoapp-list-indent, 1.6rem);
+  border: var(--autoapp-border-width, 1px) solid var(--autoapp-notice-border, #f0d9a8);
+  border-radius: var(--autoapp-radius-md, 8px);
   background: var(--autoapp-notice-surface, #fdf6e7);
   color: var(--autoapp-notice-text, #6b5312);
-  font-size: 0.9rem;
+  font-size: var(--autoapp-font-size-note, 0.9rem);
 }
 
 .autoapp-conflicts__item + .autoapp-conflicts__item {
-  margin-top: 0.25rem;
+  margin-top: var(--autoapp-space-1, 0.25rem);
 }
 
 /* Approvals, runs and workflows: the parts of the interface that are the same
@@ -273,47 +224,47 @@
 .autoapp-approvals {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem 1.1rem;
-  border: 1px solid var(--autoapp-notice-border, #f0d9a8);
-  border-radius: 10px;
+  gap: var(--autoapp-space-6, 0.75rem);
+  padding: var(--autoapp-card-padding-y, 1rem) var(--autoapp-card-padding-x, 1.1rem);
+  border: var(--autoapp-border-width, 1px) solid var(--autoapp-notice-border, #f0d9a8);
+  border-radius: var(--autoapp-radius-lg, 10px);
   background: var(--autoapp-notice-surface, #fdf6e7);
 }
 
 .autoapp-approvals__title {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--autoapp-font-size-heading, 1rem);
   font-weight: 650;
   color: var(--autoapp-notice-text, #6b5312);
 }
 
 .autoapp-approvals__what {
-  margin: 0 0 0.4rem;
+  margin: 0 0 var(--autoapp-space-3, 0.4rem);
   color: var(--autoapp-text, #33383f);
 }
 
 .autoapp-approvals__input {
-  margin: 0 0 0.5rem;
-  padding: 0.5rem 0.6rem;
-  border-radius: 7px;
+  margin: 0 0 var(--autoapp-space-4, 0.5rem);
+  padding: var(--autoapp-inset-y, 0.5rem) var(--autoapp-inset-x, 0.6rem);
+  border-radius: var(--autoapp-radius-sm, 7px);
   background: var(--autoapp-code-surface, #f4f5f8);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
+  font-size: var(--autoapp-font-size-small, 0.85rem);
   overflow-x: auto;
 }
 
 .autoapp-approvals__actions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--autoapp-space-4, 0.5rem);
 }
 
 .autoapp-approvals__item + .autoapp-approvals__item {
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--autoapp-notice-border, #f0d9a8);
+  padding-top: var(--autoapp-space-6, 0.75rem);
+  border-top: var(--autoapp-border-width, 1px) solid var(--autoapp-notice-border, #f0d9a8);
 }
 
 .autoapp-approvals__expires {
-  margin-left: 0.5rem;
+  margin-left: var(--autoapp-space-4, 0.5rem);
   color: var(--autoapp-text-muted, #6b6862);
   font-variant-numeric: tabular-nums;
 }
@@ -321,8 +272,8 @@
 /* Under a minute left. The whole card changes rather than only the number, so
    it is visible to somebody who is not reading it closely. */
 .autoapp-approvals__item--urgent {
-  border-left: 3px solid var(--autoapp-warning, #b4690e);
-  padding-left: 0.5rem;
+  border-left: var(--autoapp-accent-border-width, 3px) solid var(--autoapp-warning, #b4690e);
+  padding-left: var(--autoapp-space-4, 0.5rem);
   background: var(--autoapp-warning-bg, #fdf3e3);
 }
 
@@ -333,23 +284,23 @@
 
 .autoapp-run-step,
 .autoapp-draft__step {
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--autoapp-border, #dfe3ea);
-  font-size: 0.9rem;
+  padding: var(--autoapp-space-4, 0.5rem) 0;
+  border-bottom: var(--autoapp-border-width, 1px) solid var(--autoapp-border, #dfe3ea);
+  font-size: var(--autoapp-font-size-note, 0.9rem);
 }
 
 .autoapp-draft__leaf {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.25rem 0;
+  gap: var(--autoapp-space-5, 0.6rem);
+  padding: var(--autoapp-space-1, 0.25rem) 0;
 }
 
 .autoapp-draft__path {
-  min-width: 8rem;
+  min-width: var(--autoapp-label-width, 8rem);
   color: var(--autoapp-muted, #6b7280);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
+  font-size: var(--autoapp-font-size-small, 0.85rem);
 }
 
 .autoapp-draft__value {
@@ -358,7 +309,7 @@
 }
 
 .autoapp-run-result {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--autoapp-border, #dfe3ea);
+  margin-top: var(--autoapp-space-4, 0.5rem);
+  padding-top: var(--autoapp-space-4, 0.5rem);
+  border-top: var(--autoapp-border-width, 1px) solid var(--autoapp-border, #dfe3ea);
 }

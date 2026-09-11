@@ -129,6 +129,35 @@ describe('buildPage', () => {
     await expect(build('cdn.ts', 'dist/cdn.html')).rejects.toThrow(/off-origin/);
   });
 
+  test("the renderer's tokens and rules land in the page's one pinned stylesheet, off-origin free", async () => {
+    // What the starter bundles: the renderer's defaults, then its rules, then
+    // the application's own palette. All three become the one `<style>` the
+    // CSP pins by hash, and the off-origin scan runs over it like any other.
+    const starter = await readFile(
+      join(import.meta.dir, '..', 'templates', 'autoapp-starter', 'src', 'ui', 'styles.css'),
+      'utf8',
+    );
+    await write('starter-styles.css', starter);
+    await write(
+      'themed.ts',
+      `import 'broapp-autoapp/react/tokens.css';\nimport 'broapp-autoapp/react/view.css';\nimport './starter-styles.css';\ndocument.title = 'themed';`,
+    );
+    const html = await build('themed.ts', 'dist/themed.html');
+
+    const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((match) => match[1] ?? '');
+    expect(styles.length).toBe(1);
+    const css = styles[0] ?? '';
+    expect(css).toContain('--autoapp-control-height');
+    expect(css).toContain('.autoapp-field__input');
+    // Defaults before the rules that read them, as the imports order them.
+    expect(css.indexOf('--autoapp-space-8')).toBeLessThan(css.indexOf('.autoapp-page'));
+
+    const policy = /content="(default-src[^"]*)"/.exec(html)?.[1] ?? '';
+    const hash = new Bun.CryptoHasher('sha256').update(css, 'utf8').digest('base64');
+    expect(policy).toContain(`'sha256-${hash}'`);
+    expect(policy).not.toContain('unsafe-inline');
+  });
+
   test('allows a URL that is only a string, because a string fetches nothing', async () => {
     // React's production build embeds https://react.dev/errors/… in its error
     // messages. Rejecting that would mean rejecting React.

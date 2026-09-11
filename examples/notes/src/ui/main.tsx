@@ -19,6 +19,7 @@ import './styles.css';
 // only the chat panel moved to AI Elements.
 import 'broapp/ai/react/ai.css';
 import 'broapp-ai-elements/styles.css';
+import 'broapp-autoapp/react/tokens.css';
 import 'broapp-autoapp/react/view.css';
 
 const container = document.getElementById('root');

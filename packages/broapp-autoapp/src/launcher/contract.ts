@@ -192,6 +192,10 @@ export const launcherContract = defineContract({
         /** The checks ran on this release, in the preview that is running now. */
         checksVerified: s.boolean(),
         stagesRun: s.array(s.enum([...STAGE_NAMES]), { max: 5 }),
+        /** The candidate's `page.html`, in bytes: what the browser receives on every open. */
+        pageBytes: s.nullable(s.number({ int: true, min: 0 })),
+        /** The same for the release that is serving, when there is one. */
+        pageBytesBefore: s.nullable(s.number({ int: true, min: 0 })),
       }),
       summary: 'What the engineer has built and previewed for one application.',
     },

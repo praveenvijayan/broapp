@@ -10,6 +10,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BroappProvider } from 'broapp/react';
 import { AutoappView, autoappContract } from 'broapp-autoapp/react';
+import 'broapp-autoapp/react/tokens.css';
 import 'broapp-autoapp/react/view.css';
 import './styles.css';
 

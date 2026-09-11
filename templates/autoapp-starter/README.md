@@ -27,6 +27,13 @@ data; a route group is code.
 | `src/host/db.ts` | The SQLite table and its migrations. |
 | `src/ui/` | The browser entry, the document and the palette. |
 
+How it looks is set in `src/ui/styles.css`, as `--autoapp-*` tokens on
+`:root` for both colour schemes: colours, spacing, type, corners and control
+sizes. Every token, with its default, is in the engineer's `spec.reference`
+topic `theme`. Two complete sets ship with the renderer in
+`broapp-autoapp/presets/` — `quiet.css` and `dense.css` — and using one means
+copying it to the end of `styles.css`.
+
 Your data is not here. It lives in the launcher's own directory, under
 `apps/__APP_ID__/data/`, and this workspace is only the source it is built
 from. A preview runs against a copy of that data, never against the original.

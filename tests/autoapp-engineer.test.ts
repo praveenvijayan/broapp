@@ -58,6 +58,7 @@ import {
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
 import { STARTER, STARTER_VERSIONS } from './autoapp-template.ts';
 import { harness, type Harness } from './harness.ts';
+import { pageCost } from '../packages/broapp-autoapp/src/launcher/ui/CandidatePanel.tsx';
 
 /** The compiled binary every child in this file is started from. */
 const launcher = LAUNCHER;
@@ -872,11 +873,28 @@ describe.skipIf(!available)('the tools', () => {
     const facts = (await callTool(where, 'candidate.explain', {
       appId: 'items',
       releaseId: second.releaseId,
-    })) as { routesAdded: string[]; routesRemoved: string[]; schemaVersionTo: number };
+    })) as {
+      routesAdded: string[];
+      routesRemoved: string[];
+      schemaVersionTo: number;
+      pageBytes: number | null;
+      pageBytesBefore: number | null;
+    };
     expect(facts.routesAdded).toEqual(['items.count']);
     expect(facts.routesRemoved).toEqual([]);
     expect(facts.schemaVersionTo).toBe(3);
+    // The page's cost, before and after, read from the two releases' own pages.
+    expect(facts.pageBytes).toBe(readFileSync(join(app.release(second.releaseId), 'page.html')).length);
+    expect(facts.pageBytesBefore).toBe(readFileSync(join(app.release(first.releaseId), 'page.html')).length);
   }, 90_000);
+
+  test('the candidate panel shows the page cost only when it moved more than 2%', () => {
+    expect(pageCost(1_000_000, 1_000_000)).toBeNull();
+    expect(pageCost(1_020_000, 1_000_000)).toBeNull();
+    expect(pageCost(1_153_434, 1_120_000)).toBe('page 1.1 MB (+3%)');
+    expect(pageCost(270_000, 300_000)).toBe('page 264 KB (-10%)');
+    expect(pageCost(300_000, null)).toBeNull();
+  });
 
   test('activating is refused in a preview and confirmed in a live launcher', async () => {
     // A launcher whose own gate is in preview mode: an `external` tool is

@@ -23,6 +23,7 @@ import {
   readCurrent,
   readGrants,
   readRelease,
+  releasePageBytes,
   writeGrants,
   type Layout,
 } from '../spec/index.ts';
@@ -253,7 +254,10 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
 
   host.operation('launcher.candidateStatus', ({ appId }) => {
     const status = states.status(appId);
+    const current = readCurrent(root, appId);
     return {
+      pageBytes: status.releaseId === null ? null : releasePageBytes(root, appId, status.releaseId),
+      pageBytesBefore: current === null ? null : releasePageBytes(root, appId, current),
       appId: status.appId,
       releaseId: status.releaseId,
       problems: [...status.problems],

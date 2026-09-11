@@ -44,14 +44,19 @@ export interface PageProps {
   readonly reloadToken?: number;
 }
 
-/** Render one component and, for a section, whatever is inside it. */
-function render(component: Component): React.ReactElement | null {
+/**
+ * Render one component and, for a section, whatever is inside it.
+ *
+ * Exported for the theme gallery, which draws components inside a stub page
+ * context because nothing on a server can load a page's sources.
+ */
+export function renderComponent(component: Component): React.ReactElement | null {
   if (component.hidden === true) return null;
   switch (component.kind) {
     case 'section':
       return (
         <Section component={component} key={component.id}>
-          {(component.children ?? []).map((child) => render(child))}
+          {(component.children ?? []).map((child) => renderComponent(child))}
         </Section>
       );
     case 'text':
@@ -173,7 +178,7 @@ export function Page({
     <PageProvider value={value}>
       <div className="autoapp-page" data-autoapp-page={page.id}>
         <h1 className="autoapp-page__title">{page.title}</h1>
-        {page.children.map((component) => render(component))}
+        {page.children.map((component) => renderComponent(component))}
       </div>
     </PageProvider>
   );

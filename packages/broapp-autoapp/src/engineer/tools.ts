@@ -41,6 +41,7 @@ import {
   readCurrent,
   readGrants,
   readRelease,
+  releasePageBytes,
   type AppSpec,
   type Layout,
 } from '../spec/index.ts';
@@ -542,7 +543,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   tools['spec.reference'] = guardedTool(gate, {
     name: 'spec.reference',
     description:
-      'The rules of an application’s specification, one topic at a time: "contract" (routes, effect, summary), "views" (every page and component property, what is required, what the renderer does with it, when an action needs confirmText), "acceptance" (route steps and view steps, what each proves), "workspace" (what may be changed). Read the topic for the file you are about to change.',
+      'The rules of an application’s specification, one topic at a time: "contract" (routes, effect, summary), "views" (every page and component property, what is required, what the renderer does with it, when an action needs confirmText), "acceptance" (route steps and view steps, what each proves), "workspace" (what may be changed), "theme" (every --autoapp-* token an application sets in src/ui/styles.css, with its default). Read the topic for the file you are about to change.',
     inputSchema: referenceInput.toJsonSchema(),
     effect: 'read',
     run: (input) => {
@@ -1214,7 +1215,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   tools['candidate.explain'] = guardedTool(gate, {
     name: 'candidate.explain',
     description:
-      'The facts about what a candidate changes, compared with what is running: routes, views, migrations, capabilities, schema version. Turn these into the explanation; do not read them out.',
+      'The facts about what a candidate changes, compared with what is running: routes, views, migrations, capabilities, schema version, and the page\'s size in bytes before and after. Turn these into the explanation; do not read them out.',
     inputSchema: releaseInput.toJsonSchema(),
     effect: 'read',
     run: (input) => {
@@ -1224,7 +1225,13 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       const currentId = readCurrent(root, appId);
       const current = currentId === null ? null : readRelease(root, appId, currentId);
       const granted = readGrants(root, appId)?.capabilities ?? [];
-      return Promise.resolve(compare(current, candidate, granted));
+      return Promise.resolve({
+        ...compare(current, candidate, granted),
+        // What the change costs every time the application opens, beside what
+        // it changes, so a page that grew is seen where the person approves it.
+        pageBytes: releasePageBytes(root, appId, releaseId),
+        pageBytesBefore: currentId === null ? null : releasePageBytes(root, appId, currentId),
+      });
     },
   });
 

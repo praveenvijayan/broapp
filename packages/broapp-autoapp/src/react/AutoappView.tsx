@@ -96,6 +96,25 @@ function routesOf(contract: AnyContract): Readonly<Record<string, RouteInfo>> {
   return out;
 }
 
+/**
+ * What could not be applied of a person's own changes, above the page.
+ *
+ * Its own component so the theme gallery can draw a notice through the same
+ * markup the renderer uses, without a connection to ask for views over.
+ */
+export function ConflictList({ conflicts }: { readonly conflicts: readonly Conflict[] }): React.ReactElement | null {
+  if (conflicts.length === 0) return null;
+  return (
+    <ul className="autoapp-conflicts" data-autoapp-conflicts={String(conflicts.length)}>
+      {conflicts.map((conflict) => (
+        <li className="autoapp-conflicts__item" key={`${conflict.componentId}:${conflict.reason}`}>
+          Your change to “{conflict.componentId}” could not be applied: {conflict.reason}.
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function AutoappView({ confirm, reloadToken }: AutoappViewProps = {}): React.ReactElement {
   const { views, conflicts, error, loading } = useViews();
   const contract = useBroappContract();
@@ -135,15 +154,7 @@ export function AutoappView({ confirm, reloadToken }: AutoappViewProps = {}): Re
   return (
     <div className="autoapp" data-autoapp-state="ready">
       <ApprovalsStrip />
-      {conflicts.length > 0 && (
-        <ul className="autoapp-conflicts" data-autoapp-conflicts={String(conflicts.length)}>
-          {conflicts.map((conflict) => (
-            <li className="autoapp-conflicts__item" key={`${conflict.componentId}:${conflict.reason}`}>
-              Your change to “{conflict.componentId}” could not be applied: {conflict.reason}.
-            </li>
-          ))}
-        </ul>
-      )}
+      <ConflictList conflicts={conflicts} />
       {builtIn === 'runs' ? (
         <RunsPage />
       ) : builtIn === 'workflows' ? (
