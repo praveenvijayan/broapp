@@ -32,6 +32,7 @@ prompt starts by reading the reports so far.
 | 12b | `12b-knowledge-path.md` | Orientation and task-evidence documents on every turn; `source.search`; curated facts as build-failure hints; `verification` on every edit result; servings with delivered-or-not and stage-aware outcomes. No model calls. | Tests green. 08c request rerun: tool calls before the first edit and whether a build was reached. |
 | 12c | `12c-knowledge-distillation.md` | One structured question to the model per resolved case; six diagnoses; provisional lessons with provenance; supersession and review flags; `knowledge list/show/confirm/retire/export`; `Ai.model()`. | Tests green. One real distillation logged. |
 | 12d | `12d-knowledge-replay.md` | Replay a case with and without its lesson from a manifest into fresh checkouts with a frozen corpus; `knowledge confirm` shows the table; `knowledge evaluate` runs four conditions on three tasks. | Tests green. Evaluation table beside the 08c numbers. |
+| 12e | `12e-site-and-docs.md` | The site's header menu built from page groups so Autoapp is a tab; a landing page in `docs/autoapp/README.md` with the architecture diagram; titles without the prefix; the banner version from the manifest; nested relative links to `diagrams/` resolving. | Tests green. `bun run site` builds; the tab and the diagram visible. |
 
 ## How to run one prompt
 
