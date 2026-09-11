@@ -145,6 +145,14 @@ export interface TurnOutcome {
   readonly timedOut: boolean;
   readonly error?: string;
   readonly ms: number;
+  /**
+   * Time from each tool call to its result, summed: the tools' own work and
+   * any wait for an answer. A run answers at once, so `ms - toolMs` is the
+   * model's time.
+   */
+  readonly toolMs: number;
+  /** Questions the gate asked during the turn. */
+  readonly approvals: number;
   readonly calls: readonly ToolCall[];
   readonly tokens: { readonly input: number; readonly output: number };
 }
@@ -243,15 +251,31 @@ export function openRun(options: OpenRunOptions): RunHandle {
     async turn(runId, message, timeoutMs) {
       const started = Date.now();
       const limit = AbortSignal.timeout(timeoutMs);
+      const callStarted = new Map<string, number>();
+      let toolMs = 0;
+      let approvals = 0;
       const result = await tab.ai.turn(
         { runId, message },
-        { answer: ({ tool }) => RUN_APPROVES.has(tool), signal: limit },
+        {
+          answer: ({ tool }) => RUN_APPROVES.has(tool),
+          signal: limit,
+          onEvent: (event) => {
+            if (event.type === 'tool-call') callStarted.set(event.callId ?? '', Date.now());
+            else if (event.type === 'confirm') approvals += 1;
+            else if (event.type === 'tool-result') {
+              const at = callStarted.get(event.callId ?? '');
+              if (at !== undefined) toolMs += Date.now() - at;
+            }
+          },
+        },
       );
       return {
         status: result.status,
         timedOut: limit.aborted,
         ...(result.error === undefined ? {} : { error: result.error }),
         ms: Date.now() - started,
+        toolMs,
+        approvals,
         calls: callsOf(result.events),
         tokens: tokensOf(result.events),
       };

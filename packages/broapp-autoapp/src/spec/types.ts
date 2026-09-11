@@ -103,6 +103,14 @@ export interface AcceptanceStep {
   readonly input: unknown;
   /** A JSON value the output must deep-equal, or absent to require only success. */
   readonly expect?: unknown;
+  /**
+   * A JSON value the output must contain: every key it names must match, an
+   * array must have the same length and match element by element, and anything
+   * else must be equal. For outputs that carry values an example cannot know in
+   * advance, such as timestamps and ids, so a step can still say what must be
+   * there.
+   */
+  readonly match?: unknown;
 }
 
 /** Something the application is supposed to be able to do, written down. */

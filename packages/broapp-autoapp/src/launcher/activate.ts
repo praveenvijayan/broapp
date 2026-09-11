@@ -16,6 +16,8 @@ import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 
 import type { HostLogger } from 'broapp/host';
 
+import { runAcceptance } from '../engineer/check.ts';
+
 import {
   diffCapabilities,
   isGranted,
@@ -85,9 +87,6 @@ class InjectedCrash extends Error {
   }
 }
 
-/** How long one acceptance step may take. */
-const CHECK_STEP_TIMEOUT_MS = 30_000;
-
 /**
  * Run every acceptance example against a running child, over its IPC channel.
  *
@@ -101,27 +100,11 @@ async function runExamples(
   candidate: ChildHandle,
   examples: readonly AcceptanceExample[],
 ): Promise<string | null> {
-  try {
-    for (const example of examples) {
-      for (const step of example.steps) {
-        const output: unknown = await candidate.invoke({
-          route: step.route,
-          input: step.input,
-          client: 'launcher',
-          requestId: crypto.randomUUID(),
-          timeoutMs: CHECK_STEP_TIMEOUT_MS,
-          as: 'check',
-        });
-        if (step.expect === undefined) continue;
-        if (JSON.stringify(output) !== JSON.stringify(step.expect)) {
-          return `${example.id}: ${step.route} returned ${JSON.stringify(output)}, not ${JSON.stringify(step.expect)}`;
-        }
-      }
-    }
-    return null;
-  } catch (cause) {
-    return String(cause instanceof Error ? cause.message : cause);
-  }
+  // The same judge the preview's check uses. With a copy of its own this
+  // compared by `JSON.stringify`, so an example whose keys were stored sorted
+  // passed the preview and failed here.
+  const failed = (await runAcceptance(candidate, examples)).find((result) => !result.passed);
+  return failed === undefined ? null : `${failed.id}: ${failed.detail ?? 'the example failed'}`;
 }
 
 /** Activate one release. */

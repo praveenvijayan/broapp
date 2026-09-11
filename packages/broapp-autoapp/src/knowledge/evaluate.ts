@@ -24,9 +24,9 @@ import { LAUNCHER_MAX_STEPS } from '../launcher/app.ts';
 import { createApplication } from '../launcher/create.ts';
 import type { StarterTemplate } from '../launcher/starter.ts';
 import { adopt, prepareWorkspace, type PrepareOptions } from '../launcher/workspace.ts';
-import { layout as layoutOf, readCurrent, type AcceptanceExample, type Layout } from '../spec/index.ts';
+import { layout as layoutOf, readCurrent, readRelease, type AcceptanceExample, type Layout } from '../spec/index.ts';
 
-import { createEvidence } from './evidence.ts';
+import { createEvidence, exampleHash } from './evidence.ts';
 import { git, identityOf, openRun, prepareRun, providersFor, type ProvidersFor, type ToolCall } from './harness.ts';
 import { createEventLog } from './log.ts';
 import { copyLessons, DEFAULT_TURN_TIMEOUT_MS } from './replay.ts';
@@ -52,9 +52,16 @@ export interface EvaluationTask {
  * The three tasks.
  *
  * Each example states the interface the request implies — a route and an input
- * a person would reasonably expect — in the one form a check can judge: an
- * output with no timestamps in it. The engineer can read it in `autoapp.json`,
- * as it can read any example there.
+ * a person would reasonably expect — and says both what must be there and what
+ * must not, so a route that returns nothing cannot pass. Rows carry ids and
+ * timestamps no example can know, so what must be there is a `match`. The
+ * engineer can read the example in `autoapp.json`, as it can read any there.
+ *
+ * Two things an example cannot say today, and these do not: that a change
+ * survives the application restarting (a check runs against one child), and
+ * that the interface shows it (a step calls a route, not a button). The saved
+ * workflow in the first request is not checked either; it lives in the run
+ * store, not in the workspace.
  */
 export const EVALUATION_TASKS: readonly EvaluationTask[] = [
   {
@@ -65,12 +72,13 @@ export const EVALUATION_TASKS: readonly EvaluationTask[] = [
     request:
       'Add tags to notes and an Archive action. Archived notes disappear from the main list. Then let me save a repeatable workflow for archiving selected notes.',
     example: {
-      id: 'eval-archive-hides',
-      title: 'An archived note leaves the main list',
+      id: 'eval-archive-keeps-others',
+      title: 'An archived note leaves the main list, and the others stay',
       steps: [
+        { route: 'notes.create', input: { title: 'Keep me', body: '' } },
         { route: 'notes.create', input: { title: 'Archive me', body: '' } },
-        { route: 'notes.archive', input: { id: 1 } },
-        { route: 'notes.list', input: {}, expect: { notes: [] } },
+        { route: 'notes.archive', input: { id: 2 } },
+        { route: 'notes.list', input: {}, match: { notes: [{ title: 'Keep me' }] } },
       ],
     },
   },
@@ -81,10 +89,13 @@ export const EVALUATION_TASKS: readonly EvaluationTask[] = [
     request: 'add a `done` filter to the items table',
     example: {
       id: 'eval-done-filter',
-      title: 'Filtering to done items leaves out the open ones',
+      title: 'Filtering by done gives the done items, and the open ones the other way',
       steps: [
-        { route: 'items.add', input: { label: 'Still open' } },
-        { route: 'items.list', input: { done: true }, expect: { items: [], count: 0 } },
+        { route: 'items.add', input: { label: 'Open' } },
+        { route: 'items.add', input: { label: 'Finished' } },
+        { route: 'items.update', input: { id: 2, done: true } },
+        { route: 'items.list', input: { done: true }, match: { items: [{ label: 'Finished', done: true }] } },
+        { route: 'items.list', input: { done: false }, match: { items: [{ label: 'Open', done: false }] } },
       ],
     },
   },
@@ -95,10 +106,12 @@ export const EVALUATION_TASKS: readonly EvaluationTask[] = [
     request: 'add tags to notes and a filter by tag',
     example: {
       id: 'eval-tag-filter',
-      title: 'Filtering by a tag leaves out untagged notes',
+      title: 'Filtering by a tag finds the tagged note and nothing else',
       steps: [
         { route: 'notes.create', input: { title: 'Untagged', body: '' } },
-        { route: 'notes.list', input: { tag: 'work' }, expect: { notes: [] } },
+        { route: 'notes.create', input: { title: 'Work note', body: '', tags: ['work'] } },
+        { route: 'notes.list', input: { tag: 'work' }, match: { notes: [{ title: 'Work note' }] } },
+        { route: 'notes.list', input: { tag: 'home' }, expect: { notes: [] } },
       ],
     },
   },
@@ -109,12 +122,20 @@ export interface EvaluationRow {
   readonly condition: Condition;
   readonly task: string;
   readonly runs: number;
-  readonly verified: number;
+  /** Runs whose workspace, built and previewed by the evaluation afterwards, passed the task's example. */
+  readonly workingCode: number;
+  /** Runs where the engineer itself checked the release it last built, with the task's example intact, and every example passed. */
+  readonly workflowCompleted: number;
   /** Mean over the runs that edited; how many did. */
   readonly callsToFirstEdit: { readonly mean: number | null; readonly of: number };
   readonly callsToFirstBuild: { readonly mean: number | null; readonly of: number };
   readonly reachedBuild: number;
-  readonly meanMs: number;
+  /** Builds the engineer ran that failed: its repair attempts. */
+  readonly failedBuilds: number;
+  /** The turn's time less its tools' time. */
+  readonly meanModelMs: number;
+  readonly meanToolMs: number;
+  readonly approvals: number;
   readonly meanTokens: number;
   /** Failure signatures that had already appeared in an earlier run of the same condition and task. */
   readonly recurringSignatures: number;
@@ -235,11 +256,15 @@ const PATH = /\b(?:src\/[A-Za-z0-9_./-]+\.[A-Za-z]+|autoapp\.json|package\.json)
 
 /** One run's numbers. */
 interface RunMeasure {
-  verified: boolean;
+  workingCode: boolean;
+  workflowCompleted: boolean;
   firstEdit: number | null;
   firstBuild: number | null;
   reachedBuild: boolean;
+  failedBuilds: number;
   ms: number;
+  toolMs: number;
+  approvals: number;
   tokens: number;
   signatures: Set<string>;
   used: number;
@@ -269,6 +294,50 @@ function pathsOf(call: ToolCall): { read: string[]; edited: string[] } {
   if (call.tool === 'source.edit') return { read: [], edited: list(input.hunks).map(normal) };
   if (call.tool === 'source.change') return { read: [], edited: list(input.changes).map(normal) };
   return { read: [], edited: [] };
+}
+
+/** How many of a turn's builds failed. */
+function failedBuildsOf(calls: readonly ToolCall[]): number {
+  return calls.filter((call) => call.tool === 'candidate.build' && (call.output as { ok?: unknown } | undefined)?.ok === false)
+    .length;
+}
+
+/**
+ * Whether the engineer itself reached a verified preview: after its last
+ * passing build, it checked that release; the release still carries the task's
+ * example unchanged, by hash; and every example passed, that one included.
+ *
+ * Separate from the evaluation's own build and check, which says whether the
+ * code works whoever verified it. This says whether the engineer got there.
+ */
+function workflowCompletedBy(calls: readonly ToolCall[], runLayout: Layout, appId: string, task: EvaluationTask): boolean {
+  let releaseId: string | null = null;
+  let builtAt = -1;
+  for (const [index, call] of calls.entries()) {
+    const output = call.output as { ok?: unknown; releaseId?: unknown } | undefined;
+    if (call.tool === 'candidate.build' && output?.ok === true && typeof output.releaseId === 'string') {
+      releaseId = output.releaseId;
+      builtAt = index;
+    }
+  }
+  if (releaseId === null) return false;
+  let exampleId: string | null = null;
+  try {
+    const wanted = exampleHash(task.example);
+    exampleId = readRelease(runLayout, appId, releaseId).acceptance.find((example) => exampleHash(example) === wanted)?.id ?? null;
+  } catch {
+    return false;
+  }
+  if (exampleId === null) return false;
+  return calls.slice(builtAt + 1).some((call) => {
+    if (call.tool !== 'candidate.check' || (call.input as { releaseId?: unknown } | undefined)?.releaseId !== releaseId) return false;
+    const results = (call.output as { results?: unknown } | undefined)?.results;
+    return (
+      Array.isArray(results) &&
+      results.every((result) => (result as { passed?: unknown }).passed === true) &&
+      results.some((result) => (result as { id?: unknown }).id === exampleId)
+    );
+  });
 }
 
 /** Failure signatures from the builds a turn ran. */
@@ -360,12 +429,15 @@ export async function evaluate(
         try {
           const turn = await handle.turn(runId, task.request, timeout);
           const signatures = new Set(buildSignatures(turn.calls));
-          let verified = false;
+          // Before the evaluation's own build, which would add a release the
+          // engineer never built.
+          const workflowCompleted = workflowCompletedBy(turn.calls, runLayout, task.appId, task);
+          let workingCode = false;
           try {
             const built = await handle.build();
             if (built.ok) {
               const checked = await handle.check(built.releaseId, [task.example]);
-              verified = !checked.childDied && checked.results[0]?.passed === true;
+              workingCode = !checked.childDied && checked.results[0]?.passed === true;
             } else {
               for (const problem of built.problems) signatures.add(problemSignature(problem.stage, problem.message));
             }
@@ -384,11 +456,15 @@ export async function evaluate(
             for (const path of paths.edited) touched.add(path);
           }
           const measure: RunMeasure = {
-            verified,
+            workingCode,
+            workflowCompleted,
             firstEdit: firstCall(turn.calls, ['source.edit', 'source.change']),
             firstBuild: firstCall(turn.calls, ['candidate.build']),
             reachedBuild: turn.calls.some((call) => call.tool === 'candidate.build'),
+            failedBuilds: failedBuildsOf(turn.calls),
             ms: turn.ms,
+            toolMs: turn.toolMs,
+            approvals: turn.approvals,
             tokens: turn.tokens.input + turn.tokens.output,
             signatures,
             used: [...offered].filter((path) => touched.has(path)).length,
@@ -400,8 +476,14 @@ export async function evaluate(
           const list = measured.get(key(condition, task.id)) ?? [];
           list.push(measure);
           measured.set(key(condition, task.id), list);
+          // Written as each run ends, so a stopped evaluation still leaves every
+          // run it finished, and the table can be rebuilt from them.
+          appendFileSync(
+            join(base, 'runs.jsonl'),
+            `${JSON.stringify({ condition, task: task.id, n, ...measure, signatures: [...measure.signatures] })}\n`,
+          );
           options.onRun?.(
-            `${condition} ${task.id} ${String(n)}: ${verified ? 'verified' : 'not verified'}, ${String(turn.calls.length)} calls, first edit ${String(measure.firstEdit ?? '–')}, first build ${String(measure.firstBuild ?? '–')}, ${duration(turn.ms)}${turn.timedOut ? ', timed out' : ''}`,
+            `${condition} ${task.id} ${String(n)}: ${workingCode ? 'working code' : 'not working'}, ${workflowCompleted ? 'workflow completed' : 'workflow not completed'}, ${String(turn.calls.length)} calls, first edit ${String(measure.firstEdit ?? '–')}, first build ${String(measure.firstBuild ?? '–')}, ${duration(turn.ms)}${turn.timedOut ? ', timed out' : ''}`,
           );
         } finally {
           await handle.close();
@@ -430,11 +512,15 @@ export async function evaluate(
         condition,
         task: task.id,
         runs: list.length,
-        verified: list.filter((measure) => measure.verified).length,
+        workingCode: list.filter((measure) => measure.workingCode).length,
+        workflowCompleted: list.filter((measure) => measure.workflowCompleted).length,
         callsToFirstEdit: { mean: meanOf(edits), of: edits.length },
         callsToFirstBuild: { mean: meanOf(builds), of: builds.length },
         reachedBuild: list.filter((measure) => measure.reachedBuild).length,
-        meanMs: meanOf(list.map((measure) => measure.ms)) ?? 0,
+        failedBuilds: sum((measure) => measure.failedBuilds),
+        meanModelMs: meanOf(list.map((measure) => measure.ms - measure.toolMs)) ?? 0,
+        meanToolMs: meanOf(list.map((measure) => measure.toolMs)) ?? 0,
+        approvals: sum((measure) => measure.approvals),
         meanTokens: meanOf(list.map((measure) => measure.tokens)) ?? 0,
         recurringSignatures: recurring,
         includedUsed: sum((measure) => measure.used),
@@ -457,9 +543,10 @@ export function evaluationTable(
     value.mean === null ? '–' : `${value.mean.toFixed(1)}${value.of < runs ? ` (${String(value.of)}/${String(runs)})` : ''}`;
   const lines = [
     `Model ${about.model.provider}/${about.model.id}; ${String(about.runs)} run(s) per cell; ${String(LAUNCHER_MAX_STEPS)} steps a turn; ${duration(about.timeout)} a turn.`,
+    'Working code: the evaluation built and previewed what the turn left, and the task example passed. Workflow completed: the engineer itself checked the release it last built and every example passed. The harness answers every question at once, so tool time holds no person’s wait; activation is never part of a run.',
     '',
-    '| condition | task | runs | verified | calls to first edit | calls to first build | reached a build | timed out | mean time | mean tokens | recurring signatures | included refs used | included refs ignored | reads not offered | unrelated hint credit |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| condition | task | runs | working code | workflow completed | calls to first edit | calls to first build | reached a build | failed builds | timed out | mean model time | mean tool time | approvals | mean tokens | recurring signatures | included refs used | included refs ignored | reads not offered | unrelated hint credit |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ];
   for (const row of rows) {
     lines.push(
@@ -467,12 +554,16 @@ export function evaluationTable(
         row.condition,
         row.task,
         String(row.runs),
-        String(row.verified),
+        String(row.workingCode),
+        String(row.workflowCompleted),
         mean(row.callsToFirstEdit, row.runs),
         mean(row.callsToFirstBuild, row.runs),
         String(row.reachedBuild),
+        String(row.failedBuilds),
         String(row.timedOut),
-        duration(row.meanMs),
+        duration(row.meanModelMs),
+        duration(row.meanToolMs),
+        String(row.approvals),
         Math.round(row.meanTokens).toLocaleString('en'),
         String(row.recurringSignatures),
         String(row.includedUsed),

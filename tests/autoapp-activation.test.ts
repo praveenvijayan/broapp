@@ -555,6 +555,32 @@ describe.skipIf(!available)('activation', () => {
     expect(existsSync(app.dataNext)).toBe(false);
   }, 60_000);
 
+  test('an example whose keys are in another order than the output passes activation, as it passes a preview', async () => {
+    const where = makeWorld();
+    // `items.list` answers `{ items, count }`; the example names them the other
+    // way round, which is also how a stored example comes back, keys sorted.
+    // Activation compared by `JSON.stringify` until 12d's follow-up and refused this.
+    const path = join(where.root.app('items').source, 'autoapp.json');
+    const manifest = JSON.parse(await Bun.file(path).text()) as { acceptance: unknown[] };
+    manifest.acceptance = [
+      { id: 'empty', title: 'Nothing is there yet', steps: [{ route: 'items.list', input: null, expect: { count: 0, items: [] } }] },
+    ];
+    writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+    const releaseId = await build(where);
+    grantAll(where, releaseId);
+
+    const result = await activate({
+      layout: where.root,
+      supervisor: where.supervisor,
+      journal: where.journal,
+      appId: 'items',
+      releaseId,
+      logger: { warn: () => undefined, error: () => undefined },
+    });
+    expect(result.ok ? 'activated' : `${result.phase}: ${result.reason}`).toBe('activated');
+    if (result.ok) await result.child.shutdown(5_000);
+  }, 60_000);
+
   test('a drain that times out leaves the previous release serving', async () => {
     const where = makeWorld();
     const { a, b } = await twoReleases(where);

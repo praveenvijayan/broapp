@@ -598,6 +598,13 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       if (preview === null) {
         throw publicError.unavailable('There is no preview running for this application.');
       }
+      // The examples are this release's, so the child must be too. Run against
+      // another release's preview, a pass would be written down as this one's.
+      if (preview.releaseId !== releaseId) {
+        throw publicError.conflict(
+          `The preview is running release ${preview.releaseId}, not ${releaseId}. Start a preview of ${releaseId} with candidate.preview first.`,
+        );
+      }
       const spec = readRelease(root, appId, releaseId);
       const results: CheckResult[] = await runAcceptance(preview, spec.acceptance);
       // Written down with the example and the child they are about, so a

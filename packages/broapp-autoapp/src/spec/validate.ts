@@ -200,6 +200,7 @@ const acceptance = s.object({
       route: s.string({ pattern: ROUTE_PATTERN }),
       input: s.unknown(),
       expect: s.optional(s.unknown()),
+      match: s.optional(s.unknown()),
     }),
     { min: 1, max: 100 },
   ),

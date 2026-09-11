@@ -121,6 +121,13 @@ function resealed(spec: AppSpec): AppSpec {
 }
 
 describe('parseSpec', () => {
+  test('keeps a step’s match beside its expect', () => {
+    const step = { route: 'notes.list', input: {}, expect: { notes: [] }, match: { notes: [] } };
+    const spec = minimalSpec({ acceptance: [{ id: 'lists', title: 'Lists the notes.', steps: [step] }] });
+    const parsed = parseSpec(JSON.parse(JSON.stringify(spec)));
+    expect(parsed.acceptance[0]?.steps[0]).toEqual(step);
+  });
+
   test('a minimal specification round-trips', () => {
     const spec = minimalSpec();
     const parsed = parseSpec(JSON.parse(JSON.stringify(spec)));

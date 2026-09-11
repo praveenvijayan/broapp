@@ -38,6 +38,8 @@ import { createRunStore, type RunStore } from 'broapp-autoapp/host';
 import {
   ENGINEER_INSTRUCTIONS,
   INSTRUCTION_SECTIONS,
+  contains,
+  stepFailure,
   createCandidateStates,
   engineerTools,
   searchWorkspace,
@@ -676,6 +678,26 @@ describe.skipIf(!available)('with children', () => {
     };
     return { releaseId: built.releaseId, passed: checked.results[0]?.passed === true };
   }
+
+  test('a check refuses a preview of another release', async () => {
+    const where = makeWorld();
+    const first = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true })) as { ok: boolean; releaseId: string };
+    expect(first.ok).toBe(true);
+    await callTool(where, 'candidate.preview', { appId: 'items', releaseId: first.releaseId }, { approve: true });
+    rewrite(join(where.source, 'src', 'shared', 'views.ts'), /header: 'Label'/, "header: 'What it is'");
+    const second = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true })) as { ok: boolean; releaseId: string };
+    expect(second.ok).toBe(true);
+    expect(second.releaseId).not.toBe(first.releaseId);
+    // The preview is still the first release's: the second's examples must not be run against it.
+    await expect(callTool(where, 'candidate.check', { appId: 'items', releaseId: second.releaseId })).rejects.toMatchObject({
+      code: 'conflict',
+    });
+    const checked = (await callTool(where, 'candidate.check', { appId: 'items', releaseId: first.releaseId })) as {
+      results: unknown[];
+    };
+    expect(checked.results.length).toBeGreaterThan(0);
+    await callTool(where, 'preview.stop', { appId: 'items' }, { approve: true });
+  }, 240_000);
 
   test('a check case is the example’s content, and only a pass of that content resolves it', async () => {
     const where = makeWorld();
@@ -2131,6 +2153,23 @@ function editing(input: unknown): Parameters<typeof createFakeAdapter>[0] {
   return { script: [{ kind: 'tool', name: 'source.edit', input, then: [{ kind: 'text', chunks: ['done'] }] }] };
 }
 
+describe('12d follow-up: one judge for every check', () => {
+  test('expect is exact and blind to key order; match needs every named key and the same array length', () => {
+    expect(stepFailure({ route: 'r.x', input: null, expect: { a: 1, b: [2] } }, { b: [2], a: 1 })).toBeNull();
+    expect(stepFailure({ route: 'r.x', input: null, expect: { a: 1 } }, { a: 1, b: 2 })).toContain('not {"a":1}');
+    const kept = { notes: [{ title: 'Keep me' }] };
+    const step = { route: 'notes.list', input: {}, match: kept };
+    expect(stepFailure(step, { notes: [{ id: 1, title: 'Keep me', updatedAt: 5 }] })).toBeNull();
+    // A stubbed route that returns nothing fails, and so does one that archived nothing.
+    expect(stepFailure(step, { notes: [] })).toContain('does not contain');
+    expect(stepFailure(step, { notes: [{ title: 'Keep me' }, { title: 'Archive me' }] })).not.toBeNull();
+    expect(contains({ a: { b: 1, c: 2 } }, { a: { b: 1 } })).toBe(true);
+    expect(contains({ a: [1] }, { a: 1 })).toBe(false);
+    expect(contains([{ a: 1 }], { 0: { a: 1 } })).toBe(false);
+    expect(contains(null, {})).toBe(false);
+  });
+});
+
 describe('12d: a carry-over the real distillation found', () => {
   test('a lesson detail within its own limit is kept; only a field over its own limit drops the lesson', async () => {
     const where = makeWorld();
@@ -2550,10 +2589,13 @@ describe.skipIf(!available)('12d: replay with children, and the evaluation', () 
         const row = rows.find((entry) => entry.condition === condition && entry.task === task.id);
         expect(row).toMatchObject({
           runs: 1,
-          verified: 0,
+          workingCode: 0,
+          workflowCompleted: 0,
           callsToFirstEdit: { mean: 1, of: 1 },
           callsToFirstBuild: { mean: null, of: 0 },
           reachedBuild: 0,
+          failedBuilds: 0,
+          approvals: 1,
           recurringSignatures: 0,
           timedOut: 0,
         });
@@ -2569,9 +2611,9 @@ describe.skipIf(!available)('12d: replay with children, and the evaluation', () 
 
     const header = markdown.split('\n').find((line) => line.startsWith('| condition'));
     for (const column of [
-      'condition', 'task', 'runs', 'verified', 'calls to first edit', 'calls to first build', 'reached a build',
-      'timed out', 'mean time', 'mean tokens', 'recurring signatures', 'included refs used', 'included refs ignored',
-      'reads not offered', 'unrelated hint credit',
+      'condition', 'task', 'runs', 'working code', 'workflow completed', 'calls to first edit', 'calls to first build',
+      'reached a build', 'failed builds', 'timed out', 'mean model time', 'mean tool time', 'approvals', 'mean tokens',
+      'recurring signatures', 'included refs used', 'included refs ignored', 'reads not offered', 'unrelated hint credit',
     ]) {
       expect(header).toContain(` ${column} |`);
     }
@@ -2579,6 +2621,10 @@ describe.skipIf(!available)('12d: replay with children, and the evaluation', () 
 
     // Only the learned condition carried the distilled lesson.
     const stamp = readdirSync(join(directory, 'evaluate'))[0] ?? '';
+    // And every run was written down as it ended, not only at the end.
+    const saved = readFileSync(join(directory, 'evaluate', stamp, 'runs.jsonl'), 'utf8').trim().split('\n');
+    expect(saved).toHaveLength(CONDITIONS.length * EVALUATION_TASKS.length);
+    expect(JSON.parse(saved[0] ?? '{}')).toMatchObject({ condition: 'baseline', task: 'notes-archive', n: 1, workingCode: false });
     const lessonsIn = (condition: string): number[] => {
       const store = new Database(join(directory, 'evaluate', stamp, condition, 'starter-done-filter', '1', KNOWLEDGE_FILE), { readonly: true });
       try {

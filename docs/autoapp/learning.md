@@ -322,9 +322,16 @@ tags to notes and a filter by tag" on Notes), each under four conditions —
 `learned` (that, plus every provisional and confirmed distilled lesson in the
 launcher's store) — `n` runs each on the configured model. Each task's
 acceptance example is added to the workspace before any run and judged from
-the evaluation's own copy, by hash. The table gives verified completions,
-calls to the first edit and to the first build, runs that reached a build,
-time, tokens, failure signatures that recurred from earlier runs, the files the
+the evaluation's own copy, by hash. Each example says what must be there
+(with `match`, which ignores ids and timestamps a step cannot know) and what
+must not, so a route that returns nothing cannot pass; none can yet say that
+a change survives a restart or shows in the interface. The table gives two
+scores — **working code** (the evaluation built and previewed what the turn
+left, and the example passed) and **workflow completed** (the engineer itself
+checked the release it last built, with the example intact, and every example
+passed) — then calls to the first edit and to the first build, runs that
+reached a build, failed builds, model time and tool time apart, approvals,
+tokens, failure signatures that recurred from earlier runs, the files the
 turn's documents named that it then read or edited (and ignored), the files it
 read that nothing named, and the unrelated hint credit above. It installs
 nothing, so it is run from a checkout, where the workspaces resolve their
