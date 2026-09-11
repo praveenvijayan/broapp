@@ -14,7 +14,9 @@ import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promi
 import { dirname, join, resolve } from 'node:path';
 import { dirname as posixDirname, join as posixJoin, normalize as posixNormalize } from 'node:path/posix';
 import { fileURLToPath } from 'node:url';
-import manifest from '../packages/broapp/package.json' with { type: 'json' };
+// The banner names the repository's release, which is the root manifest's
+// version; the npm packages can lag it when a release ships only the launcher.
+import manifest from '../package.json' with { type: 'json' };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 

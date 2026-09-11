@@ -2,7 +2,7 @@
 
 ## What was built
 
-- `scripts/build-site.ts`: the Autoapp block of `PAGES` gains the landing page and loses its prefixes; `headerMenu(current)` replaces the four literal links; `rewriteLink` is exported, takes the source directory as an optional second argument, and resolves pages and assets from the writing document first; the banner reads `version` from `packages/broapp/package.json`; `--out <dir>` (default `site/dist`); the build runs only under `import.meta.main`, so the test can import `rewriteLink`.
+- `scripts/build-site.ts`: the Autoapp block of `PAGES` gains the landing page and loses its prefixes; `headerMenu(current)` replaces the four literal links; `rewriteLink` is exported, takes the source directory as an optional second argument, and resolves pages and assets from the writing document first; the banner reads `version` from the root `package.json`; `--out <dir>` (default `site/dist`); the build runs only under `import.meta.main`, so the test can import `rewriteLink`.
 - `docs/autoapp/README.md` (new, 44 lines): what Autoapp is, the diagram, the download and first-run commands copied from `README.md`, "Read next", what it is not.
 - `docs/autoapp/design.md`: one sentence pointing back to the overview. `README.md`: the launcher bullet links to `docs/autoapp/README.md`.
 - `tests/site.test.ts` (new): the prompt's seven, plus the reading order of "Read next", the 60-line limit, and resolution order.
@@ -32,7 +32,7 @@ Before: Architecture · Security · Guides · Reference (literals). After: **Gui
 
 ## Deviations and decisions
 
-1. **The banner says 0.3.0, not 0.3.1.** The prompt says the packages are at 0.3.1; `packages/broapp/package.json` is `0.3.0` and only the root manifest is `0.3.1` (README "Status": the npm packages are unchanged at 0.3.0). The prompt names the file, and the banner's claim is "published to npm", which 0.3.0 is; kept.
+1. **The banner reads the root `package.json` (0.3.1), not `packages/broapp/package.json` (0.3.0).** The prompt names the package manifest and says the packages are at 0.3.1; only the root is (README "Status": the npm packages are unchanged at 0.3.0). The first cut followed the named file and showed 0.3.0; on review the owner chose the repository release, 0.3.1.
 2. **README fence fixed.** The notes-starter block closed with "``` The binaries are unsigned; …" on one line. CommonMark does not close a fence with text after it, so GitHub rendered the rest of the README as code, and the site dropped the sentence. Split onto its own line; wording unchanged.
 3. **One CSS rule, not for the diagram:** `.topbar__menu a[aria-current="true"]` shares the hover underline, so the current tab is visible. The diagram needed none: `.figure img { width: 100% }` already scales it (673 px of a 673 px column).
 4. **"Read next" items are one line each.** The renderer has no list-item continuation lines; wrapped items came out as five one-item lists and loose paragraphs (seen in the browser). No renderer feature added; a test asserts one `<ol>` of five.
@@ -67,4 +67,4 @@ Before: Architecture · Security · Guides · Reference (literals). After: **Gui
 
 ## Open questions
 
-- Should the banner track the launcher release (root `0.3.1`) rather than the npm package? It links to `create-broapp` on npm, so the package version is the honest one today.
+- The banner now says "Version 0.3.1 · Published to npm" and links to `create-broapp`, which npm has at 0.3.0. Rewording the banner (for example "Release 0.3.1") would remove the mismatch; not done here.

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import manifest from '../packages/broapp/package.json' with { type: 'json' };
+import manifest from '../package.json' with { type: 'json' };
 import { rewriteLink } from '../scripts/build-site.ts';
 
 const root = resolve(import.meta.dir, '..');
