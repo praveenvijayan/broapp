@@ -84,6 +84,7 @@ export function App(): React.ReactElement {
   const apps = useOperation<LauncherContract, 'launcher.appsList'>('launcher.appsList');
   const open = useOperation<LauncherContract, 'launcher.appOpen'>('launcher.appOpen');
   const stop = useOperation<LauncherContract, 'launcher.appStop'>('launcher.appStop');
+  const selectOperation = useOperation<LauncherContract, 'launcher.appSelect'>('launcher.appSelect');
   const threads = useAiThreads();
 
   const [selected, setSelected] = useState<string | null>(null);
@@ -142,6 +143,17 @@ export function App(): React.ReactElement {
     setAwaitingSelection(appId);
     setChanged((count) => count + 1);
   }, []);
+
+  // A row the person clicked is what the engineer's next turn is about. Only a
+  // click: the first row shown by default is not a choice anybody made.
+  const { run: rememberSelection } = selectOperation;
+  const chooseApp = useCallback(
+    (appId: string): void => {
+      setSelected(appId);
+      void rememberSelection({ appId });
+    },
+    [rememberSelection],
+  );
 
   const chooseThread = useCallback((id: string): void => {
     setActiveId(id);
@@ -407,7 +419,7 @@ export function App(): React.ReactElement {
           <AppsTable
             apps={rows}
             selected={selected}
-            onSelect={setSelected}
+            onSelect={chooseApp}
             onCreated={noteCreated}
             onOpen={(appId) => void openApp(appId)}
             onStop={(appId) => void stop.run({ appId }).then(() => setChanged((count) => count + 1))}

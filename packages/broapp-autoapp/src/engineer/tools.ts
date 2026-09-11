@@ -11,7 +11,7 @@
  * told only whether a preview is running. And no path outside the workspace is
  * ever returned, because a path is a suggestion about where to look next.
  */
-import { rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 
 import { guardedTool } from 'broapp/ai/host';
 import type { GuardedTool } from 'broapp/ai/host';
@@ -22,9 +22,13 @@ import { s } from 'broapp/shared';
 import { exampleHash, type Evidence, type OpenEpisode } from '../knowledge/evidence.ts';
 import { origin as originOf, type FullOrigin } from '../knowledge/ids.ts';
 import type { EventLog } from '../knowledge/log.ts';
+import { scoreBuild, scoreCheck } from '../knowledge/scoring.ts';
+import type { Hint, Serve } from '../knowledge/serve.ts';
+import type { Session } from '../knowledge/session.ts';
+import type { Knowledge } from '../knowledge/store.ts';
 import { activate } from '../launcher/activate.ts';
 import { listApps } from '../launcher/apps.ts';
-import { buildCandidate } from '../launcher/candidate.ts';
+import { buildCandidate, type BuildProblem } from '../launcher/candidate.ts';
 import { createApplication } from '../launcher/create.ts';
 import type { Journal } from '../launcher/journal.ts';
 import type { StarterTemplate } from '../launcher/starter.ts';
@@ -47,6 +51,7 @@ import {
   diffSummary,
   readTree,
   readWorkspaceFile,
+  searchWorkspace,
   snapshot,
 } from './workspace.ts';
 
@@ -67,6 +72,8 @@ export interface EngineerToolsOptions {
   readonly initGit?: PrepareOptions['initGit'];
   /** Where what the engineer does is written down. Absent, nothing is. */
   readonly knowledge?: EngineerKnowledge;
+  /** Where the application the engineer is working on is remembered for the next turn. */
+  readonly session?: Session;
 }
 
 /** What the tab knows about one live turn, for the case a failure in it opens. */
@@ -90,7 +97,17 @@ export interface EngineerKnowledge {
    * person asked for is in the tab, which saw the turn begin.
    */
   readonly turn?: (runId: string) => TurnRecord | undefined;
+  /** The store servings are scored in. Absent, nothing is scored. */
+  readonly store?: Knowledge;
+  /** Where a failed build's hints come from. Absent, a build returns none. */
+  readonly serve?: Pick<Serve, 'hints'>;
 }
+
+/** Small counts in words, as a person would write them in a sentence. */
+const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+
+/** How many unverified edits earn a warning. */
+const UNVERIFIED_WARNING_AT = 3;
 
 /** How long one acceptance step may take. */
 const CHECK_STEP_TIMEOUT_MS = 30_000;
@@ -155,6 +172,54 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       autoappVersion: k.autoappVersion,
     });
   };
+  /**
+   * Remember the application a tool was called for, so the next turn's
+   * orientation is about it. Only one that exists: a tool refusing an unknown
+   * id must not make it the person's selection.
+   */
+  const select = (appId: string): void => {
+    const session = options.session;
+    if (session === undefined) return;
+    try {
+      if (existsSync(root.app(appId).dir)) session.select(appId);
+    } catch {
+      // Not an application id; the tool itself says so.
+    }
+  };
+  /**
+   * What an edit result says about verification: advisory, never a refusal.
+   *
+   * Report 08c watched a model make three correct edits and then plan for
+   * twenty minutes without building. Every edit now names the next step, and
+   * from the third unverified one says so plainly; whether that moves the
+   * stall is measured before anything stronger is designed.
+   */
+  const verification = (
+    appId: string,
+  ): { editsSinceBuild: number; lastBuild: 'ok' | 'failed' | 'none'; next: 'candidate.build'; warning?: string } => {
+    const count = states.noteEdit(appId);
+    const state = states.get(appId);
+    const lastBuild = state.builtAt === null ? 'none' : state.problems.length === 0 && state.releaseId !== null ? 'ok' : 'failed';
+    return {
+      editsSinceBuild: count,
+      lastBuild,
+      next: 'candidate.build',
+      ...(count >= UNVERIFIED_WARNING_AT
+        ? { warning: `${COUNT_WORDS[count] ?? String(count)} edits are unverified; build before editing more` }
+        : {}),
+    };
+  };
+  /** Hints for a failed build, or `undefined` when nothing serves them. */
+  const hintsFor = (appId: string, problems: readonly BuildProblem[], who: FullOrigin): readonly Hint[] | undefined => {
+    const serve = knowledge?.serve;
+    if (serve === undefined) return undefined;
+    try {
+      return serve.hints(appId, problems, who);
+    } catch (cause) {
+      logger.error(`[autoapp] could not look up hints: ${String(cause instanceof Error ? cause.message : cause)}`);
+      return [];
+    }
+  };
 
   tools['apps.list'] = guardedTool(gate, {
     name: 'apps.list',
@@ -205,6 +270,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         ...(options.install === undefined ? {} : { install: options.install }),
         ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
       });
+      select(appId);
       // The route's output without `opened`: a tool never opens a tab, and a
       // model that was told one had opened would say so to somebody looking at
       // a screen where nothing had.
@@ -228,6 +294,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'read',
     run: (input) => {
       const { appId } = appIdInput.parse(input);
+      select(appId);
       const { releaseId, spec } = currentRelease(root, appId);
       const grants = readGrants(root, appId);
       return Promise.resolve({
@@ -249,6 +316,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'read',
     run: (input) => {
       const { appId } = appIdInput.parse(input);
+      select(appId);
       return Promise.resolve({ files: readTree(root.app(appId).source) });
     },
   });
@@ -264,7 +332,32 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'read',
     run: (input) => {
       const { appId, path } = readInput.parse(input);
+      select(appId);
       return Promise.resolve({ path, content: readWorkspaceFile(root.app(appId).source, path) });
+    },
+  });
+
+  const searchInput = s.object({
+    appId: s.string({ min: 1, max: 40 }),
+    pattern: s.string({ min: 1, max: 200 }),
+    literal: s.optional(s.boolean()),
+    files: s.optional(s.string({ min: 1, max: 200 })),
+  });
+  tools['source.search'] = guardedTool(gate, {
+    name: 'source.search',
+    description:
+      'Search an application’s source workspace for a regular expression, or for plain text with literal: true. Returns at most 50 matching lines as path, line and text. files is a glob over workspace paths, default src/**. Use it where the evidence says unknown.',
+    inputSchema: searchInput.toJsonSchema(),
+    effect: 'read',
+    run: (input) => {
+      const { appId, pattern, literal, files } = searchInput.parse(input);
+      select(appId);
+      return Promise.resolve(
+        searchWorkspace(root.app(appId).source, pattern, {
+          ...(literal === undefined ? {} : { literal }),
+          ...(files === undefined ? {} : { files }),
+        }),
+      );
     },
   });
 
@@ -288,6 +381,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'write',
     run: (input, _signal, envelope) => {
       const { appId, message, changes } = changeInput.parse(input);
+      select(appId);
       const sourceDir = root.app(appId).source;
       const before = snapshot(sourceDir);
 
@@ -332,7 +426,12 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         );
         k.evidence.appendEdit(appId, `${message}\n${summary}`);
       });
-      return Promise.resolve({ changed: applied.changed, undo: applied.undo, diff: summary });
+      return Promise.resolve({
+        changed: applied.changed,
+        undo: applied.undo,
+        diff: summary,
+        verification: verification(appId),
+      });
     },
   });
 
@@ -356,6 +455,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'write',
     run: (input, _signal, envelope) => {
       const { appId, message, hunks } = editInput.parse(input);
+      select(appId);
       const sourceDir = root.app(appId).source;
       const before = snapshot(sourceDir);
       const applied = applyEdits(sourceDir, hunks, message);
@@ -384,6 +484,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         // ignored is a hunk the model should write more carefully next time.
         matchedBy: applied.matchedBy ?? [],
         diff: summary,
+        verification: verification(appId),
       });
     },
   });
@@ -396,6 +497,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'write',
     run: async (input, _signal, envelope) => {
       const { appId } = appIdInput.parse(input);
+      select(appId);
       // Taken before the build, so the revision is the one that was built and
       // the release is the one that was running when it was.
       const who = identity(envelope, appId, null);
@@ -403,6 +505,12 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       const started = Date.now();
       const built = await buildCandidate({ layout: root, appId, logger });
       const ms = Date.now() - started;
+      states.resetEdits(appId);
+      // Scored before this build's own hints are served, so a hint is judged by
+      // the next build and never by the one that produced it.
+      note('a score', (k) => {
+        if (k.store !== undefined) scoreBuild(k.store, appId, built, who, k.log);
+      });
       const stamp = { builtFromRev: who.sourceRev, builtAt: Date.now(), stagesRun: built.stagesRun };
       if (!built.ok) {
         // Returned verbatim rather than summarised: the model is going to fix
@@ -430,7 +538,10 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
           );
           k.evidence.resolveBuild(appId, clean, who, null);
         });
-        return { ok: false, problems: built.problems };
+        // Facts from earlier work that match these problems. Not instructions:
+        // the method stays in the engineer's instructions.
+        const hints = hintsFor(appId, built.problems, who);
+        return { ok: false, problems: built.problems, ...(hints === undefined ? {} : { hints }) };
       }
       const granted = readGrants(root, appId)?.capabilities ?? [];
       states.update(appId, {
@@ -461,6 +572,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'write',
     run: async (input, _signal, envelope) => {
       const { appId, releaseId } = releaseInput.parse(input);
+      select(appId);
       // The same function the person's Start preview reaches after a restart.
       await startPreview(
         { layout: root, supervisor, states, ...(knowledge === undefined ? {} : { log: knowledge.log }) },
@@ -481,6 +593,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'read',
     run: async (input, _signal, envelope) => {
       const { appId, releaseId } = releaseInput.parse(input);
+      select(appId);
       const preview = states.get(appId).preview;
       if (preview === null) {
         throw publicError.unavailable('There is no preview running for this application.');
@@ -559,6 +672,10 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
             });
           }
         });
+        if (k.store !== undefined) {
+          const examples = spec.acceptance.map((example, index) => ({ id: example.id, hash: hashes[index] ?? '' }));
+          scoreCheck(k.store, appId, results, examples, releaseId, who);
+        }
       });
       return { results };
     },
@@ -572,6 +689,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'read',
     run: (input) => {
       const { appId, releaseId } = releaseInput.parse(input);
+      select(appId);
       const candidate = readRelease(root, appId, releaseId);
       const currentId = readCurrent(root, appId);
       const current = currentId === null ? null : readRelease(root, appId, currentId);
@@ -590,6 +708,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'external',
     run: async (input, _signal, envelope) => {
       const { appId, releaseId } = releaseInput.parse(input);
+      select(appId);
       const preview = states.get(appId).preview;
       // The preview holds a copy of the data open; the switch is cleaner
       // without it, and the candidate is about to become the real thing. It was
@@ -620,6 +739,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     effect: 'write',
     run: async (input) => {
       const { appId } = appIdInput.parse(input);
+      select(appId);
       const state = states.get(appId);
       if (state.preview !== null) await state.preview.shutdown(STOP_DEADLINE_MS);
       if (state.releaseId !== null) {

@@ -26,4 +26,19 @@ export type { FullOrigin } from './ids.ts';
 export { createEvidence, exampleHash, recordContext } from './evidence.ts';
 export type { ContextInput, EpisodeRow, Evidence, OpenEpisode } from './evidence.ts';
 
+export { EVIDENCE_MAX_CHARS, ORIENTATION_MAX_CHARS, indexWorkspace, orientation, taskEvidence } from './path.ts';
+export type { EvidenceEntry, IndexedSymbol, Orientation, SymbolIndex, TaskEvidence } from './path.ts';
+
+export { createServe } from './serve.ts';
+export type { CreateServeInput, Hint, Serve, ServedTurn } from './serve.ts';
+
+export { problemSignature, scoreBuild, scoreCheck, scoreRunEnd } from './scoring.ts';
+export type { Outcome } from './scoring.ts';
+
+export { SEED_LESSONS, seedLessons } from './seed.ts';
+export type { LessonApplies, SeedLesson } from './seed.ts';
+
+export { SESSION_FILE, openSession } from './session.ts';
+export type { Session } from './session.ts';
+
 export { AUTOAPP_VERSION } from './version.ts';

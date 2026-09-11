@@ -128,7 +128,10 @@ export function sanitise(text: string): string {
   );
   out = out.replace(/Bearer\s+\S+/gi, 'Bearer <redacted>');
   out = out.replace(/sk-[A-Za-z0-9_-]{8,}/g, '<redacted>');
-  out = out.replace(/[A-Fa-f0-9]{32,}/g, '<redacted>');
+  // Forty, not thirty-two: a release id is exactly 32 hex characters and is an
+  // identifier the log wants to keep. A SHA-256 (64) or a 40-character token
+  // is still taken.
+  out = out.replace(/[A-Fa-f0-9]{40,}/g, '<redacted>');
   out = out.replace(/[A-Za-z0-9+/=]{40,}/g, '<redacted>');
   // A URL keeps its scheme, host and path. Its `user:pass@` and its query go:
   // a launch token is a query parameter.

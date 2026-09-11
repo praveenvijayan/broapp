@@ -10,9 +10,10 @@ export {
   diffSummary,
   readTree,
   readWorkspaceFile,
+  searchWorkspace,
   snapshot,
 } from './workspace.ts';
-export type { EditResult, FileChange, Hunk, MatchedBy, Snapshot, TreeEntry } from './workspace.ts';
+export type { EditResult, FileChange, Hunk, MatchedBy, SearchHit, Snapshot, TreeEntry } from './workspace.ts';
 
 export { ENGINEER_INSTRUCTIONS, INSTRUCTION_SECTIONS } from './instructions.ts';
 

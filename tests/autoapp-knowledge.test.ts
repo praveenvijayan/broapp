@@ -35,6 +35,8 @@ import type { Envelope, Gate, HostLogger } from 'broapp/host';
 import { mergeContracts } from 'broapp/shared';
 import { createRunStore, type RunStore } from 'broapp-autoapp/host';
 import {
+  ENGINEER_INSTRUCTIONS,
+  INSTRUCTION_SECTIONS,
   createCandidateStates,
   engineerTools,
   type CandidateStates,
@@ -43,31 +45,46 @@ import {
 import {
   AUTOAPP_VERSION,
   KNOWLEDGE_FILE,
+  SEED_LESSONS,
   createEventLog,
   createEvidence,
+  createServe,
   ftsQuery,
+  indexWorkspace,
   openKnowledge,
+  openSession,
+  orientation,
+  problemSignature,
   sanitise,
+  scoreCheck,
+  scoreRunEnd,
   signature,
+  taskEvidence,
   tokens,
   type EventLog,
   type Evidence,
   type FullOrigin,
   type Knowledge,
+  type Serve,
+  type Session,
 } from 'broapp-autoapp/knowledge';
 import {
   BUILD_STAGES,
+  SOURCE,
   STAGE_NAMES,
   buildCandidate,
+  createApplication,
   createLauncherApp,
   createLauncherTab,
   createSupervisor,
   launcherContract,
+  listApps,
   openJournal,
   type Journal,
+  type LauncherTab,
   type Supervisor,
 } from 'broapp-autoapp/launcher';
-import { layout, type Layout } from 'broapp-autoapp/spec';
+import { layout, setCurrent, type Layout } from 'broapp-autoapp/spec';
 
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
 import { STARTER, STARTER_VERSIONS } from './autoapp-template.ts';
@@ -167,10 +184,14 @@ interface World {
   readonly log: EventLog;
   readonly evidence: Evidence;
   readonly tools: ReturnType<typeof engineerTools>;
+  readonly session: Session;
+  readonly serve: Serve | null;
 }
 
 /** A launcher root with the fixture as the `items` workspace, and knowledge beside it. */
-function makeWorld(options: { git?: boolean; turn?: (runId: string) => TurnRecord | undefined } = {}): World {
+function makeWorld(
+  options: { git?: boolean; turn?: (runId: string) => TurnRecord | undefined; serve?: boolean } = {},
+): World {
   mkdirSync(runRoot, { recursive: true });
   const directory = mkdtempSync(join(runRoot, 'knowledge-'));
   scratch.push(directory);
@@ -199,6 +220,19 @@ function makeWorld(options: { git?: boolean; turn?: (runId: string) => TurnRecor
   const journal = openJournal(root.journal);
   const supervisor = createSupervisor({ execPath: LAUNCHER, logger: quiet });
   const states = createCandidateStates(root, quiet);
+  const session = openSession(dataDir, quiet);
+  const serve =
+    options.serve === true
+      ? createServe({
+          knowledge,
+          log,
+          layout: root,
+          states,
+          session,
+          instructions: ENGINEER_INSTRUCTIONS,
+          apps: () => listApps(root, supervisor, journal),
+        })
+      : null;
   const tools = engineerTools({
     layout: root,
     supervisor,
@@ -210,10 +244,13 @@ function makeWorld(options: { git?: boolean; turn?: (runId: string) => TurnRecor
     versions: STARTER_VERSIONS,
     install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
     initGit: () => false,
+    session,
     knowledge: {
       log,
       evidence,
       autoappVersion: AUTOAPP_VERSION,
+      store: knowledge,
+      ...(serve === null ? {} : { serve }),
       ...(options.turn === undefined ? {} : { turn: options.turn }),
     },
   });
@@ -224,7 +261,7 @@ function makeWorld(options: { git?: boolean; turn?: (runId: string) => TurnRecor
     () => store.close(),
     () => knowledge.close(),
   );
-  return { root, directory, source: app.source, journal, supervisor, store, gate, states, knowledge, log, evidence, tools };
+  return { root, directory, source: app.source, journal, supervisor, store, gate, states, knowledge, log, evidence, tools, session, serve };
 }
 
 /** Call one tool as the engineer, answering its question if it asks one. */
@@ -400,6 +437,10 @@ describe('the store', () => {
     expect(line?.message).toContain('http://127.0.0.1:4000/');
     expect(sanitise('Bearer abc.def')).toBe('Bearer <redacted>');
     expect(sanitise('sk-ant-0123456789abcdef')).toBe('<redacted>');
+    // A release id is 32 hex characters and survives; a SHA-256 does not.
+    const releaseLike = '9c1d'.repeat(8);
+    expect(sanitise(`built ${releaseLike}`)).toBe(`built ${releaseLike}`);
+    expect(sanitise(`digest ${'f0'.repeat(32)}`)).toBe('digest <redacted>');
 
     // Only the fields the list names; an identifier stays an identifier.
     log.event('build', 'a build', {
@@ -831,8 +872,13 @@ describe('the launcher tab', () => {
     expect(typeof system).toBe('string');
     expect(where.knowledge.getBlob(context.system_blob)).toBe(system as string);
     expect(where.knowledge.getBlob(context.instructions_blob)).toContain('apps.list');
-    expect(JSON.parse(context.included)).toEqual([]);
-    expect(JSON.parse(context.requested)).toEqual([]);
+    // Since 12b the only application's orientation and evidence are served
+    // first; a lesson the words match may follow them.
+    expect((JSON.parse(context.included) as { ref: string }[]).map((entry) => entry.ref).slice(0, 2)).toEqual([
+      'digest:items',
+      'evidence:items',
+    ]);
+    expect((JSON.parse(context.requested) as string[]).slice(0, 2)).toEqual(['digest:items', 'evidence:items']);
 
     // The edit carries the turn's own identity, from the real run loop.
     const [edit] = events(where.knowledge, 'edit');
@@ -849,4 +895,526 @@ describe('the launcher tab', () => {
       outputTokens: usage?.outputTokens,
     });
   }, 90_000);
+});
+
+// ── 12b: the knowledge path ────────────────────────────────────────────────
+
+const signal = new AbortController().signal;
+
+/** A world's serving, which these tests asked for. */
+function served(where: World): Serve {
+  if (where.serve === null) throw new Error('this world was built without serving');
+  return where.serve;
+}
+
+/** The 1-based number of the first line containing `needle`. */
+function lineOf(path: string, needle: string): number {
+  return readFileSync(path, 'utf8').split(/\r?\n/).findIndex((line) => line.includes(needle)) + 1;
+}
+
+/** A launcher root whose `items` application was created from the starter, as `apps.create` makes one. */
+async function makeStarterWorld(): Promise<{ root: Layout; source: string }> {
+  mkdirSync(runRoot, { recursive: true });
+  const directory = mkdtempSync(join(runRoot, 'knowledge-starter-'));
+  scratch.push(directory);
+  const root = layout(directory);
+  const created = await createApplication({
+    layout: root,
+    template: STARTER,
+    versions: STARTER_VERSIONS,
+    appId: 'items',
+    name: 'Items',
+    install: () => Promise.resolve({ ok: true, detail: '' }),
+    initGit: () => false,
+    logger: quiet,
+  });
+  if (!created.ok) throw new Error(JSON.stringify(created.problems));
+  return { root, source: root.app('items').source };
+}
+
+/** The launcher tab over a world, with a fake model and, optionally, a small budget. */
+function makeTab(where: World, adapter: ReturnType<typeof createFakeAdapter>, contextBudgetChars?: number): LauncherTab {
+  return createLauncherTab({
+    layout: where.root,
+    supervisor: where.supervisor,
+    journal: where.journal,
+    gate: where.gate,
+    dataDir: join(where.directory, 'launcher'),
+    store: where.store,
+    template: STARTER,
+    versions: STARTER_VERSIONS,
+    install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
+    initGit: () => false,
+    providers: [adapter],
+    fetch: Object.assign(() => Promise.reject(new Error('no network in tests')), {
+      preconnect: () => undefined,
+    }) as typeof fetch,
+    logger: quiet,
+    openBrowser: () => Promise.resolve(true),
+    knowledge: { store: where.knowledge, log: where.log, evidence: where.evidence },
+    ...(contextBudgetChars === undefined ? {} : { contextBudgetChars }),
+  });
+}
+
+/** One chat turn over the harness, to its end and its `run` event. */
+async function chat(where: World, tab: LauncherTab, runId: string, message: string): Promise<void> {
+  live = await harness((bridge) => tab.mount(bridge));
+  const client = await live.connect(mergeContracts(launcherContract, aiContract));
+  await client.call('ai.settingsUpdate', { provider: 'fake', modelId: 'fake-1' });
+  let finished = false;
+  await client.subscribe(
+    'ai.chat',
+    { runId, message, refs: [], history: [] },
+    {
+      onEvent: (event) => {
+        if (event.type === 'done' || event.type === 'error') finished = true;
+      },
+      onError: () => {
+        finished = true;
+      },
+    },
+  );
+  while (!finished) await Bun.sleep(10);
+  await until(() => events(where.knowledge, 'run').some((row) => row.run_id === runId), 5_000, 'the run event');
+  await client.close();
+}
+
+/** The system prompt the fake model was sent first. */
+function systemOf(adapter: ReturnType<typeof createFakeAdapter>): string {
+  const prompt = adapter.calls[0] as { role: string; content: unknown }[];
+  const system = prompt.find((message) => message.role === 'system')?.content;
+  if (typeof system !== 'string') throw new Error('no system prompt was sent');
+  return system;
+}
+
+/** The id of the seed with this summary. */
+function seedId(knowledge: Knowledge, index: number): number {
+  const summary = SEED_LESSONS[index]?.summary ?? '';
+  const row = knowledge.db.query<{ id: number }, [string]>('SELECT id FROM lessons WHERE summary = ?').get(summary);
+  if (row === null) throw new Error(`seed ${String(index)} is not stored`);
+  return row.id;
+}
+
+describe('the knowledge path: documents', () => {
+  test('the orientation says where the application stands, line by line', async () => {
+    const where = makeWorld({ git: true });
+    const first = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!first.ok) throw new Error(JSON.stringify(first.problems));
+    setCurrent(where.root, 'items', first.releaseId);
+    rewrite(join(where.source, 'src', 'shared', 'views.ts'), /header: 'Label'/, "header: 'What it is'");
+    git(where.source, 'commit', '--quiet', '--no-gpg-sign', '-am', 'rename a column');
+    const second = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!second.ok) throw new Error(JSON.stringify(second.problems));
+    const rev = git(where.source, 'rev-parse', 'HEAD');
+    // A built candidate, checks from a preview that is gone, and a preview the
+    // launcher was running when it stopped.
+    where.states.update('items', {
+      releaseId: second.releaseId,
+      builtFromRev: rev,
+      builtAt: Date.now() - 180_000,
+      problems: [],
+      stagesRun: [...BUILD_STAGES],
+      checks: {
+        releaseId: second.releaseId,
+        previewId: `${second.releaseId}:1`,
+        examples: [{ id: 'list-works', hash: 'a'.repeat(32) }],
+        results: [{ id: 'list-works', title: 'The list can be read', passed: true }],
+        at: Date.now() - 60_000,
+      },
+      previewWasRunning: true,
+    });
+    const apps = listApps(where.root, where.supervisor, where.journal);
+    const told = orientation({ layout: where.root, appId: 'items', states: where.states, apps });
+    expect(told.text.split('\n')).toEqual([
+      '## Items (items)',
+      `Current release ${first.releaseId.slice(0, 8)} · schema v3 · serving: no`,
+      `Candidate: ${second.releaseId.slice(0, 8)} built 3 minutes ago from ${rev.slice(0, 7)}`,
+      'Edits since build: none',
+      'Last build: ok',
+      'Checks: passed 1/1 for an earlier preview — run again',
+      'Preview: stopped when the launcher restarted — launcher.previewStart',
+      'Next: launcher.previewStart (the person’s Start preview), or candidate.preview',
+    ]);
+    expect(told.hash).toMatch(/^[0-9a-f]{32}$/);
+
+    // The workspace moves on: a fresh reading names the file and says build.
+    writeFileSync(join(where.source, 'src', 'note.ts'), '// later\n');
+    git(where.source, 'add', '-A');
+    git(where.source, 'commit', '--quiet', '--no-gpg-sign', '-m', 'a later change');
+    const later = orientation({ layout: where.root, appId: 'items', states: createCandidateStates(where.root, quiet), apps });
+    expect(later.text).toContain('Edits since build: 1 file (src/note.ts)');
+    expect(later.text).toContain('Next: candidate.build');
+  }, 120_000);
+
+  test('the index finds the starter’s functions, operations and ids, and not an alias', async () => {
+    const { root, source } = await makeStarterWorld();
+    const host = join(source, 'src', 'host', 'app.ts');
+    const index = indexWorkspace(source, 'no-git');
+    const find = (kind: string, name: string) =>
+      index.symbols.find((symbol) => symbol.kind === kind && symbol.name === name);
+    expect(find('function', 'start')).toEqual({
+      file: 'src/host/app.ts',
+      line: lineOf(host, 'export function start('),
+      kind: 'function',
+      name: 'start',
+    });
+    expect(find('function', 'migrate')?.line).toBe(lineOf(host, 'export function migrate('));
+    for (const route of ['items.list', 'items.add', 'items.update', 'items.remove', 'items.status']) {
+      expect(find('operation', route)).toEqual({
+        file: 'src/host/app.ts',
+        line: lineOf(host, `app.operation('${route}'`),
+        kind: 'operation',
+        name: route,
+      });
+    }
+    for (const id of ['items', 'add-item', 'items-table', 'counts']) {
+      expect(find('component', id)?.file).toBe('src/shared/views.ts');
+    }
+    expect(find('migration', '001-create-items')?.file).toBe('autoapp.json');
+
+    // Registered through an alias: the patterns do not follow it, and the
+    // evidence says so rather than guessing.
+    rewrite(host, /app\.operation\('items\.remove',/, "const register = app.operation.bind(app);\n  register('items.remove',");
+    const aliased = indexWorkspace(source, 'no-git');
+    expect(aliased.symbols.some((symbol) => symbol.kind === 'operation' && symbol.name === 'items.remove')).toBe(false);
+    const evidence = taskEvidence({ layout: root, appId: 'items', tokens: ['remove'], index: aliased });
+    expect(evidence.text).toContain('items.remove (write) — Remove one item. · handler: unknown — use source.search');
+    expect(evidence.entries).toContainEqual({
+      kind: 'symbol',
+      name: 'items.remove',
+      confidence: 'unknown',
+      note: 'handler: use source.search',
+    });
+  }, 120_000);
+
+  test('task evidence names the route, its handler and its example, or says nothing matched', async () => {
+    const { root, source } = await makeStarterWorld();
+    const index = indexWorkspace(source, 'no-git');
+    const found = taskEvidence({ layout: root, appId: 'items', tokens: ['items', 'add'], index });
+    const line = lineOf(join(source, 'src', 'host', 'app.ts'), "app.operation('items.add'");
+    const lines = found.text.split('\n');
+    expect(lines[0]).toBe('## Evidence for "items add" in items');
+    expect(lines[1]).toBe(
+      `Routes: items.add (write) — Add one item. · handler src/host/app.ts:${String(line)} [pattern] · shown by add-item [declared]`,
+    );
+    expect(found.text).toContain('list-works (touches items.list) [declared]');
+    expect(found.text).toContain('Migrations: 1, last 001-create-items; next id 002-<slug>; append only [constraint]');
+    // Every pattern entry is a file and a line; nothing is claimed without one.
+    for (const entry of found.entries.filter((item) => item.confidence === 'pattern')) {
+      expect(entry.file).toBeDefined();
+      expect(entry.line).toBeGreaterThan(0);
+    }
+
+    const nothing = taskEvidence({ layout: root, appId: 'items', tokens: ['zebra'], index });
+    expect(nothing.entries).toEqual([]);
+    expect(nothing.text).toContain('Nothing in items matched these words.');
+    for (const path of Object.values(SOURCE)) expect(nothing.text).toMatch(new RegExp(`${path.replace('.', '\\.')} \\d+ bytes`));
+  }, 120_000);
+
+  test('the application is the one named, else the one selected, else the only one', async () => {
+    const where = makeWorld({ serve: true });
+    const serve = served(where);
+    mkdirSync(where.root.app('other').dir, { recursive: true });
+
+    const named = await serve.search({ text: 'give other a tag column', limit: 8, runId: 'r-named' }, signal);
+    expect(named.map((ref) => ref.ref).slice(0, 2)).toEqual(['digest:other', 'evidence:other']);
+
+    where.session.select('items');
+    const selected = await serve.search({ text: 'rename the label column', limit: 8, runId: 'r-selected' }, signal);
+    expect(selected.map((ref) => ref.ref).slice(0, 2)).toEqual(['digest:items', 'evidence:items']);
+
+    // Two applications, nothing selected, nothing named: nothing is served.
+    const unselected = createServe({
+      knowledge: where.knowledge,
+      log: where.log,
+      layout: where.root,
+      states: where.states,
+      session: openSession(tempDir(), quiet),
+      instructions: ENGINEER_INSTRUCTIONS,
+      apps: () => listApps(where.root, where.supervisor, where.journal),
+    });
+    expect(await unselected.search({ text: 'rename the label column', limit: 8, runId: 'r-none' }, signal)).toEqual([]);
+    unselected.delivered('r-none', {
+      system: '',
+      documents: [],
+      message: 'rename the label column',
+      model: { provider: 'fake', id: 'fake-1' },
+    });
+    const last = events(where.knowledge, 'search').at(-1);
+    expect(last?.run_id).toBe('r-none');
+    expect(JSON.parse(last?.data ?? '{}')).toMatchObject({ hits: 0, requested: [], included: [] });
+  }, 60_000);
+
+  test('a turn is given its orientation, its evidence and a lesson its words match', async () => {
+    const where = makeWorld();
+    const adapter = createFakeAdapter({ script: [{ kind: 'text', chunks: ['ok'] }] });
+    const runId = 'run-served1';
+    await chat(where, makeTab(where, adapter), runId, 'add a button that goes back to the list page');
+
+    const system = systemOf(adapter);
+    expect(system).toContain('<document ref="digest:items"');
+    expect(system).toContain('<document ref="evidence:items"');
+    expect(system).toContain('<document ref="lessons:items"');
+    // Nothing is built in this world, so the name is the id and the next step is a build.
+    expect(system).toContain('## items (items)');
+    expect(system).toContain('Next: candidate.build');
+
+    const context = where.knowledge.db
+      .query<{ included: string; app_id: string | null }, [string]>('SELECT included, app_id FROM contexts WHERE run_id = ?')
+      .get(runId);
+    expect(context?.app_id).toBe('items');
+    expect((JSON.parse(context?.included ?? '[]') as { ref: string }[]).map((entry) => entry.ref)).toEqual([
+      'digest:items',
+      'evidence:items',
+      'lessons:items',
+    ]);
+    const serving = where.knowledge.db
+      .query<{ included: number; how: string; outcome: string | null }, [string, number]>(
+        'SELECT included, how, outcome FROM servings WHERE run_id = ? AND lesson_id = ?',
+      )
+      .get(runId, seedId(where.knowledge, 0));
+    // Delivered, and closed as `none` because the turn built nothing.
+    expect(serving).toEqual({ included: 1, how: 'turn', outcome: 'none' });
+  }, 90_000);
+
+  test('a lesson the budget cut is recorded as not delivered, and never scored', async () => {
+    const where = makeWorld();
+    // A current release, so the evidence has routes and views to name and the
+    // two documents before the lessons take most of a 1,000-character budget.
+    const built = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!built.ok) throw new Error(JSON.stringify(built.problems));
+    setCurrent(where.root, 'items', built.releaseId);
+    const adapter = createFakeAdapter({ script: [{ kind: 'text', chunks: ['ok'] }] });
+    const runId = 'run-cut1';
+    await chat(where, makeTab(where, adapter, 1_000), runId, 'add a button that goes back to the list page');
+    // The lessons document is cut: the first lesson's line arrived whole, the
+    // second's did not.
+    const system = systemOf(adapter);
+    expect(system).toContain(`- ${SEED_LESSONS[0]?.summary ?? ''}\n`);
+    expect(system).toContain('\n[truncated]');
+    expect(system).not.toContain(SEED_LESSONS[3]?.summary ?? '');
+    const servingOf = (index: number) =>
+      where.knowledge.db
+        .query<{ included: number; outcome: string | null }, [string, number]>(
+          'SELECT included, outcome FROM servings WHERE run_id = ? AND lesson_id = ?',
+        )
+        .get(runId, seedId(where.knowledge, index));
+    expect(servingOf(0)).toEqual({ included: 1, outcome: 'none' });
+    // Resolved and then cut: recorded, never delivered, and never scored.
+    expect(servingOf(3)).toEqual({ included: 0, outcome: null });
+  }, 90_000);
+});
+
+describe('the knowledge path: hints, scoring and guidance', () => {
+  test('a build failure returns the matching fact as a hint, recorded as a serving', async () => {
+    const where = makeWorld({ serve: true });
+    rewrite(join(where.source, 'src', 'shared', 'contract.ts'), / {6}effect: 'external',\r?\n/, '');
+    const failed = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true, id: 'r-hint:b1' })) as {
+      ok: boolean;
+      hints?: { lessonId: number; status: string; text: string }[];
+    };
+    expect(failed.ok).toBe(false);
+    const effect = failed.hints?.find((hint) => hint.lessonId === seedId(where.knowledge, 1));
+    expect(effect).toEqual({ lessonId: seedId(where.knowledge, 1), status: 'confirmed', text: SEED_LESSONS[1]?.summary ?? '' });
+    const row = where.knowledge.db
+      .query<{ how: string; for_stage: string; for_signature: string; included: number; outcome: string | null }, [number]>(
+        "SELECT how, for_stage, for_signature, included, outcome FROM servings WHERE lesson_id = ? AND run_id = 'r-hint'",
+      )
+      .get(effect?.lessonId ?? 0);
+    expect(row).toMatchObject({ how: 'hint', for_stage: 'contract', included: 1, outcome: null });
+    expect(row?.for_signature).toMatch(/^[0-9a-f]{32}$/);
+
+    expect(served(where).hints('items', [{ stage: 'host', message: "Expected ';' but found '}'" }], handOrigin('r-host'))).toEqual([]);
+  }, 120_000);
+
+  test('servings are scored stage by stage, once, and a build never closes a check serving', async () => {
+    const where = makeWorld({ serve: true });
+    const { db } = where.knowledge;
+    const contract = join(where.source, 'src', 'shared', 'contract.ts');
+    const manifest = join(where.source, 'autoapp.json');
+    const goodContract = readFileSync(contract, 'utf8');
+    const goodManifest = readFileSync(manifest, 'utf8');
+    const breakContract = (): void => rewrite(contract, / {6}effect: 'external',\r?\n/, '');
+    interface Scored { outcome: string | null; attempt_call_id: string | null; attempt_kind: string | null; attempt_release: string | null }
+    const of = (runId: string): Scored[] =>
+      db
+        .query<Scored, [string]>(
+          'SELECT outcome, attempt_call_id, attempt_kind, attempt_release FROM servings WHERE run_id = ? ORDER BY id',
+        )
+        .all(runId);
+
+    breakContract();
+    await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true, id: 'rA:b1' });
+    expect(of('rA').length).toBeGreaterThan(0);
+    expect(of('rA').every((row) => row.outcome === null)).toBe(true);
+
+    // Stops at the manifest: the contract never ran, so nothing is known.
+    writeFileSync(manifest, '{ not json');
+    await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true, id: 'rA:b2' });
+    expect(of('rA').every((row) => row.outcome === null)).toBe(true);
+    expect(
+      events(where.knowledge, 'log').some(
+        (row) => row.call_id === 'b2' && row.message.includes('waits: the build did not run contract'),
+      ),
+    ).toBe(true);
+
+    writeFileSync(manifest, goodManifest);
+    writeFileSync(contract, goodContract);
+    const passed = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true, id: 'rA:b3' })) as {
+      ok: boolean;
+      releaseId: string;
+    };
+    expect(passed.ok).toBe(true);
+    expect(of('rA').every((row) => row.outcome === 'resolved')).toBe(true);
+    expect(of('rA')[0]).toEqual({ outcome: 'resolved', attempt_call_id: 'b3', attempt_kind: 'build', attempt_release: passed.releaseId });
+
+    // The same failure, twice in a new run.
+    breakContract();
+    await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true, id: 'rB:b4' });
+    await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true, id: 'rB:b5' });
+    expect(of('rB').length).toBeGreaterThan(0);
+    expect(of('rB').every((row) => row.outcome === 'recurred' && row.attempt_call_id === 'b5')).toBe(true);
+    writeFileSync(contract, goodContract);
+
+    // A check serving: no build closes it; only a check of its own example does.
+    const hash = 'e'.repeat(32);
+    db.query<null, [number, string, string, number]>(
+      `INSERT INTO servings (lesson_id, run_id, app_id, how, for_signature, for_stage, for_example_hash, included, served_at)
+       VALUES (?, 'rC', 'items', 'hint', ?, 'check', ?, 1, ?)`,
+    ).run(seedId(where.knowledge, 0), problemSignature('check', 'items.list returned 1, not 0'), hash, Date.now());
+    await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true, id: 'rC:b6' });
+    expect(of('rC')[0]?.outcome).toBeNull();
+    const results = [{ id: 'count', title: 'The count', passed: true }];
+    scoreCheck(where.knowledge, 'items', results, [{ id: 'count', hash: 'f'.repeat(32) }], passed.releaseId, handOrigin('rC'));
+    expect(of('rC')[0]?.outcome).toBeNull();
+    scoreCheck(where.knowledge, 'items', results, [{ id: 'count', hash }], passed.releaseId, { ...handOrigin('rC'), callId: 'k1' });
+    expect(of('rC')[0]).toEqual({ outcome: 'resolved', attempt_call_id: 'k1', attempt_kind: 'check', attempt_release: passed.releaseId });
+
+    // A turn that ends with a serving nobody tested.
+    served(where).hints(
+      'items',
+      [{ stage: 'contract', message: 'route "items.ping" must declare an effect before it can be part of an Autoapp release' }],
+      handOrigin('rD'),
+    );
+    expect(of('rD').length).toBeGreaterThan(0);
+    scoreRunEnd(where.knowledge, 'rD');
+    expect(of('rD').every((row) => row.outcome === 'none')).toBe(true);
+    // `blocked` is an event, never a stored outcome.
+    expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM servings WHERE outcome = 'blocked'").get()?.n).toBe(0);
+  }, 240_000);
+
+  test('the third unverified edit warns, and a build resets the count', async () => {
+    const where = makeWorld();
+    const edit = async (from: string, to: string): Promise<{ verification: unknown }> =>
+      (await callTool(
+        where,
+        'source.edit',
+        {
+          appId: 'items',
+          message: `${from} to ${to}`,
+          hunks: [{ path: 'src/shared/views.ts', find: `header: '${from}'`, replace: `header: '${to}'` }],
+        },
+        { approve: true },
+      )) as { verification: unknown };
+    expect((await edit('Label', 'L1')).verification).toEqual({ editsSinceBuild: 1, lastBuild: 'none', next: 'candidate.build' });
+    await edit('L1', 'L2');
+    expect((await edit('L2', 'L3')).verification).toEqual({
+      editsSinceBuild: 3,
+      lastBuild: 'none',
+      next: 'candidate.build',
+      warning: 'three edits are unverified; build before editing more',
+    });
+    const built = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true })) as { ok: boolean };
+    expect(built.ok).toBe(true);
+    expect((await edit('L3', 'L4')).verification).toEqual({ editsSinceBuild: 1, lastBuild: 'ok', next: 'candidate.build' });
+  }, 120_000);
+
+  test('source.search finds text and patterns in the workspace, and nothing outside it', async () => {
+    const where = makeWorld();
+    type Found = { hits: { path: string; line: number; text: string }[]; truncated: boolean };
+    const literal = (await callTool(where, 'source.search', { appId: 'items', pattern: "header: 'Label'", literal: true })) as Found;
+    expect(literal.truncated).toBe(false);
+    expect(literal.hits.map((hit) => [hit.path, hit.line])).toEqual([
+      ['src/shared/views.ts', lineOf(join(where.source, 'src', 'shared', 'views.ts'), "header: 'Label'")],
+    ]);
+    expect(literal.hits[0]?.text).toContain("header: 'Label'");
+
+    const pattern = (await callTool(where, 'source.search', { appId: 'items', pattern: "app\\.operation\\('items\\.\\w+'" })) as Found;
+    expect(pattern.hits).toHaveLength(3);
+    expect(pattern.hits.every((hit) => hit.path === 'src/host/app.ts')).toBe(true);
+
+    const many = (await callTool(where, 'source.search', { appId: 'items', pattern: '.' })) as Found;
+    expect(many.hits).toHaveLength(50);
+    expect(many.truncated).toBe(true);
+    expect(many.hits.every((hit) => hit.path.startsWith('src/') && !hit.path.includes('..'))).toBe(true);
+    expect(many.hits.every((hit) => hit.text.length <= 200)).toBe(true);
+
+    await expect(callTool(where, 'source.search', { appId: 'items', pattern: '(' })).rejects.toMatchObject({
+      code: 'invalid_input',
+    });
+    const outside = (await callTool(where, 'source.search', { appId: 'items', pattern: '.', files: '../**' })) as Found;
+    expect(outside.hits).toEqual([]);
+  }, 60_000);
+});
+
+describe('the knowledge path: seeds and instructions', () => {
+  test('the seeds are written once, a corpus version each, and repeat nothing the instructions say', () => {
+    const directory = tempDir();
+    const knowledge = openKnowledge(directory);
+    closers.push(() => knowledge.close());
+    const log = createEventLog(knowledge, { source: 'test', tee: quiet });
+    const make = (): Serve =>
+      createServe({
+        knowledge,
+        log,
+        layout: layout(directory),
+        states: createCandidateStates(undefined, quiet),
+        session: openSession(directory, quiet),
+        instructions: ENGINEER_INSTRUCTIONS,
+        apps: () => [],
+      });
+    make();
+    make();
+    const count = (sql: string): number => knowledge.db.query<{ n: number }, []>(sql).get()?.n ?? -1;
+    expect(SEED_LESSONS.length).toBeGreaterThanOrEqual(6);
+    expect(SEED_LESSONS.length).toBeLessThanOrEqual(8);
+    expect(count('SELECT COUNT(*) AS n FROM lessons')).toBe(SEED_LESSONS.length);
+    expect(count('SELECT COUNT(*) AS n FROM lessons_fts')).toBe(SEED_LESSONS.length);
+    expect(count('SELECT COUNT(DISTINCT lesson_id) AS n FROM corpus_versions')).toBe(SEED_LESSONS.length);
+    expect(count('SELECT MAX(version) AS n FROM corpus_versions')).toBe(SEED_LESSONS.length);
+    expect(
+      count("SELECT COUNT(*) AS n FROM lessons WHERE origin = 'curated' AND status = 'confirmed' AND scope = 'global'"),
+    ).toBe(SEED_LESSONS.length);
+
+    const sentences = (text: string): string[] =>
+      text
+        .replace(/\s+/g, ' ')
+        .split(/(?<=[.;:!?])\s+/)
+        .map((sentence) => sentence.toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, '').trim())
+        .filter((sentence) => sentence !== '');
+    const taught = new Set(sentences(ENGINEER_INSTRUCTIONS));
+    for (const seed of SEED_LESSONS) {
+      expect(seed.summary.length).toBeLessThan(300);
+      for (const sentence of sentences(seed.summary)) expect(taught.has(sentence)).toBe(false);
+    }
+  });
+
+  test('the instructions keep their sections and length, and say to read the documents first', () => {
+    expect([...INSTRUCTION_SECTIONS]).toEqual([
+      '# What you are',
+      '# The workspace',
+      '# How to work',
+      '# What you may not do',
+      '# How to describe a change',
+    ]);
+    expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(70);
+    const flat = ENGINEER_INSTRUCTIONS.replace(/\s+/g, ' ');
+    const first =
+      'Each message comes with an orientation for the application and evidence for the request: read them before calling any tool. They say what is built, what is verified and what to do next.';
+    expect(flat).toContain(first);
+    expect(flat.indexOf(first)).toBeLessThan(flat.indexOf('1. Find the application'));
+    expect(flat).toContain(
+      'When a build fails, its `hints` are facts from earlier work; a hint marked provisional has not been confirmed.',
+    );
+  });
 });

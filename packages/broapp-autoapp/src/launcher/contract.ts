@@ -123,6 +123,15 @@ export const launcherContract = defineContract({
       output: s.object({ opened: s.boolean() }),
       summary: 'Start an application if it is not running, and open it in a browser tab.',
     },
+    'launcher.appSelect': {
+      // A write: it changes what the engineer's next turn is about. The
+      // person's row click; the engineer's own tools make the same choice from
+      // the other side whenever they are called for an application.
+      effect: 'write',
+      input: appIdInput,
+      output: s.object({ ok: s.boolean() }),
+      summary: 'Remember which application the person is looking at, so the engineer’s next turn is about it.',
+    },
     'launcher.appStop': {
       effect: 'write',
       input: appIdInput,

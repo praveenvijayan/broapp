@@ -153,6 +153,61 @@ export function readWorkspaceFile(sourceDir: string, path: string): string {
   return readFileSync(target, 'utf8');
 }
 
+/** One line `searchWorkspace` found. */
+export interface SearchHit {
+  readonly path: string;
+  readonly line: number;
+  readonly text: string;
+}
+
+/** The most lines one search returns, and the longest line it quotes. */
+const MAX_SEARCH_HITS = 50;
+const MAX_HIT_CHARS = 200;
+
+/**
+ * Find a pattern in the workspace's readable files.
+ *
+ * Over the same list `readTree` gives, so nothing outside the workspace, nothing
+ * excluded and nothing unreadable is ever searched, and every path returned is
+ * workspace-relative. `files` is a glob over those paths, not a path of its
+ * own: a glob that tries to climb out matches nothing, because nothing listed
+ * starts with `..`.
+ */
+export function searchWorkspace(
+  sourceDir: string,
+  pattern: string,
+  options: { readonly literal?: boolean; readonly files?: string } = {},
+): { hits: SearchHit[]; truncated: boolean } {
+  let matcher: RegExp;
+  try {
+    matcher = new RegExp(options.literal === true ? pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : pattern);
+  } catch (cause) {
+    throw publicError.invalidInput(
+      `the pattern is not a regular expression: ${String(cause instanceof Error ? cause.message : cause)}`,
+    );
+  }
+  const glob = new Bun.Glob(options.files ?? 'src/**');
+  const hits: SearchHit[] = [];
+  for (const entry of readTree(sourceDir)) {
+    if (!glob.match(entry.path) || entry.bytes > MAX_FILE_BYTES) continue;
+    let text: string;
+    try {
+      text = readFileSync(within(sourceDir, entry.path), 'utf8');
+    } catch {
+      continue;
+    }
+    const lines = text.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? '';
+      if (!matcher.test(line)) continue;
+      // One past the limit is how "there were more" is known without counting them all.
+      if (hits.length === MAX_SEARCH_HITS) return { hits, truncated: true };
+      hits.push({ path: entry.path, line: index + 1, text: line.slice(0, MAX_HIT_CHARS) });
+    }
+  }
+  return { hits, truncated: false };
+}
+
 /** Everything readable, as it is now. For a diff after a change. */
 export function snapshot(sourceDir: string): Snapshot {
   const out = new Map<string, string>();

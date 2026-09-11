@@ -21,11 +21,15 @@ import { engineerTools, type TurnRecord } from '../engineer/tools.ts';
 import type { RunStore } from '../host/run-store.ts';
 import { recordContext, type Evidence } from '../knowledge/evidence.ts';
 import type { EventLog } from '../knowledge/log.ts';
+import { scoreRunEnd } from '../knowledge/scoring.ts';
+import { createServe, type Serve, type ServedTurn } from '../knowledge/serve.ts';
+import { openSession, type Session } from '../knowledge/session.ts';
 import type { Knowledge } from '../knowledge/store.ts';
 import { AUTOAPP_VERSION } from '../knowledge/version.ts';
 import type { Layout } from '../spec/index.ts';
 
 import { createLauncherApp, LAUNCHER_CONFIRM_TIMEOUT_MS, type LauncherApp } from './app.ts';
+import { listApps } from './apps.ts';
 import type { Journal } from './journal.ts';
 import type { StarterTemplate } from './starter.ts';
 import type { Supervisor } from './supervisor.ts';
@@ -67,6 +71,10 @@ export interface CreateLauncherTabOptions {
     readonly log: EventLog;
     readonly evidence: Evidence;
   };
+  /** The AI layer's document budget. Tests shrink it to watch a document being cut. */
+  readonly contextBudgetChars?: number;
+  /** Which application is selected. Defaults to `session.json` in `dataDir`. */
+  readonly session?: Session;
 }
 
 /** Everything that mounts on the launcher's bridge. */
@@ -77,6 +85,8 @@ export interface LauncherTab {
   readonly states: CandidateStates;
   /** The store this tab writes to, for a test to read; `null` when it writes nowhere. */
   readonly knowledge: Knowledge | null;
+  /** Which application the next turn is about, when its message does not say. */
+  readonly session: Session;
 }
 
 /** What the engineer is, in the words the model is given first. */
@@ -99,6 +109,26 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
    */
   const turns = new Map<string, TurnRecord>();
 
+  const session = options.session ?? openSession(options.dataDir, logger);
+  /**
+   * The engineer's context: an orientation, the task evidence and matching
+   * lessons, every turn, through the AI layer's own provider door. Only where
+   * something is written down, because a serving that cannot be recorded is
+   * one nothing can later say anything about.
+   */
+  const serve: Serve | null =
+    knowledge === undefined
+      ? null
+      : createServe({
+          knowledge: knowledge.store,
+          log: knowledge.log,
+          layout: options.layout,
+          states,
+          session,
+          instructions: ENGINEER_INSTRUCTIONS,
+          apps: () => listApps(options.layout, options.supervisor, options.journal),
+        });
+
   const app = createLauncherApp({
     layout: options.layout,
     supervisor: options.supervisor,
@@ -106,6 +136,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     states,
     gate: options.gate,
     logger,
+    session,
     ...(knowledge === undefined ? {} : { log: knowledge.log }),
     template: options.template,
     versions: options.versions,
@@ -129,6 +160,8 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       instructions: ENGINEER_INSTRUCTIONS,
     },
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    ...(serve === null ? {} : { context: serve }),
+    ...(options.contextBudgetChars === undefined ? {} : { contextBudgetChars: options.contextBudgetChars }),
     tools: engineerTools({
       layout: options.layout,
       supervisor: options.supervisor,
@@ -141,6 +174,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       versions: options.versions,
       ...(options.install === undefined ? {} : { install: options.install }),
       ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
+      session,
       ...(knowledge === undefined
         ? {}
         : {
@@ -149,6 +183,8 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
               evidence: knowledge.evidence,
               autoappVersion: AUTOAPP_VERSION,
               turn: (runId: string) => turns.get(runId),
+              store: knowledge.store,
+              ...(serve === null ? {} : { serve }),
             },
           }),
     }),
@@ -156,18 +192,27 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       ? {}
       : {
           onContext: (runId: string, delivered: DeliveredContext) => {
+            // Servings first, from the same delivered documents the context row
+            // is written from, so the two agree about what reached the model.
+            let served: ServedTurn = { appId: null, requested: [], resolved: [] };
+            try {
+              if (serve !== null) served = serve.delivered(runId, delivered);
+            } catch (cause) {
+              logger.error(
+                `[autoapp] could not record what a turn was served: ${String(cause instanceof Error ? cause.message : cause)}`,
+              );
+            }
             // The turn is remembered even when its context cannot be written,
             // so a case opened during it still carries what was asked.
             let contextId: number | null = null;
             try {
               contextId = recordContext(knowledge.store, {
                 runId,
-                appId: null,
+                appId: served.appId,
                 instructions: ENGINEER_INSTRUCTIONS,
                 delivered,
-                // Nothing serves knowledge yet, so nothing was asked for or found.
-                requested: [],
-                resolved: [],
+                requested: served.requested,
+                resolved: served.resolved,
               });
             } catch (cause) {
               logger.error(
@@ -189,6 +234,14 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
         if (detail?.usage !== undefined) {
           knowledge.log.event('usage', 'tokens a turn used', { ...detail.usage }, { runId });
         }
+        // Whatever the turn was served and never tested by a build or a check.
+        try {
+          scoreRunEnd(knowledge.store, runId);
+        } catch (cause) {
+          logger.error(
+            `[autoapp] could not close a turn's servings: ${String(cause instanceof Error ? cause.message : cause)}`,
+          );
+        }
       }
       options.store.finishRun(runId, status, summary);
     },
@@ -204,5 +257,6 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ai,
     states,
     knowledge: knowledge?.store ?? null,
+    session,
   };
 }

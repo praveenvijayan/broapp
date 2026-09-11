@@ -102,6 +102,16 @@ export interface CandidateStates {
   get(appId: string): CandidateState;
   update(appId: string, patch: CandidatePatch): CandidateState;
   status(appId: string): CandidateStatus;
+  /**
+   * Count one edit since the last build; returns the new count.
+   *
+   * In memory, for this launcher process only. It is advice for the turn —
+   * "you have changed three things and verified none" — not a fact about the
+   * workspace, which `editsSinceBuild` answers from git.
+   */
+  noteEdit(appId: string): number;
+  /** A build ran: the edits before it are verified, or at least tried. */
+  resetEdits(appId: string): void;
   /** Every application with a preview child alive. */
   readonly previews: readonly CandidateState[];
 }
@@ -148,6 +158,7 @@ interface Entry {
 export function createCandidateStates(layout?: Layout, logger: HostLogger = console): CandidateStates {
   const entries = new Map<string, Entry>();
   const revisions = new Map<string, { at: number; rev: string }>();
+  const unverified = new Map<string, number>();
 
   /** The file for an application, or `null` when there is nowhere to keep it. */
   function fileOf(appId: string): { path: string; dir: string } | null {
@@ -266,6 +277,16 @@ export function createCandidateStates(layout?: Layout, logger: HostLogger = cons
           previewIdOf(state.preview) === checks.previewId,
         stagesRun: state.stagesRun,
       };
+    },
+
+    noteEdit(appId) {
+      const count = (unverified.get(appId) ?? 0) + 1;
+      unverified.set(appId, count);
+      return count;
+    },
+
+    resetEdits(appId) {
+      unverified.delete(appId);
     },
 
     get previews() {

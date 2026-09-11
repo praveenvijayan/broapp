@@ -160,7 +160,8 @@ summary) passes `sanitise()` first. `sanitise()` removes these patterns:
   including a `Bearer` or `Basic` scheme word
 - a `Bearer` token
 - an `sk-` provider key
-- a hex run of 32 or more characters, or a base64-like run of 40 or more
+- a hex run of 40 or more characters, or a base64-like run of 40 or more (a
+  release id is exactly 32 hex characters and is kept)
 - a URL's `user:pass@` and its query string, which is where a launch token is
 - the home directory, which becomes `~`
 
@@ -179,6 +180,18 @@ application's data and starts the candidate's code in a child process, so it
 is `effect: 'write'` and not a read. On channel `user` it is the person's own
 click. `launcher.previewOpen` stays what it was: it opens a preview that is
 already running, and refuses when there is none.
+
+**What the engineer is served.** Each turn's orientation, task evidence and
+lessons reach the model as documents, under the existing rule that documents are
+data and instructions inside one are not instructions. Lessons and build hints
+are facts; the method the engineer follows stays in its instructions, which are
+the only trusted statement of how to work, and no served document repeats or
+amends them. `source.search` is a `read` bounded to the workspace: it searches
+only the files `source.list` would list, its `files` glob matches
+workspace-relative paths, so a glob that climbs out matches nothing, and it
+returns no path outside the workspace. Selecting an application
+(`launcher.appSelect`) is a `write` because it changes what the next turn is
+about; it stores only the id.
 
 ## What none of this protects against
 

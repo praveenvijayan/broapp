@@ -17,6 +17,7 @@ import type { Bridge } from 'brobridge';
 import { startPreview } from '../engineer/preview.ts';
 import type { CandidateStates } from '../engineer/state.ts';
 import type { EventLog } from '../knowledge/log.ts';
+import type { Session } from '../knowledge/session.ts';
 import {
   listReleases,
   readCurrent,
@@ -27,7 +28,7 @@ import {
 } from '../spec/index.ts';
 
 import { activate } from './activate.ts';
-import { listApps, serving as servingChild } from './apps.ts';
+import { appIds, listApps, serving as servingChild } from './apps.ts';
 import { launcherContract, type LauncherContract } from './contract.ts';
 import { createApplication } from './create.ts';
 import type { Journal } from './journal.ts';
@@ -46,6 +47,8 @@ export interface CreateLauncherAppOptions {
   readonly logger?: HostLogger;
   /** Where a person's own preview starts and activations are written down. */
   readonly log?: EventLog;
+  /** Where the application the person selected is remembered. */
+  readonly session?: Session;
   /**
    * Open a URL in the person's browser. Defaults to the operating system's
    * opener; tests pass a stub so a suite does not open tabs.
@@ -175,6 +178,12 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   });
 
   host.operation('launcher.appOpen', async ({ appId }) => await openApplication(appId));
+
+  host.operation('launcher.appSelect', ({ appId }) => {
+    if (!appIds(root).includes(appId)) throw publicError.notFound(`There is no application called ${appId}.`);
+    options.session?.select(appId);
+    return { ok: true };
+  });
 
   host.operation('launcher.appStop', async ({ appId }) => {
     const child = serving(appId);
