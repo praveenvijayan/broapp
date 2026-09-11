@@ -409,7 +409,7 @@ function where(symbol: IndexedSymbol | undefined): string {
 
 /** The fixed rules every change meets, said once. */
 const CONSTRAINTS =
-  'Constraints: every route needs effect and summary · a component keeps its id · autoapp.json and src/ only';
+  'Constraints: every route needs effect and summary · a component keeps its id · autoapp.json and src/ only · spec.reference has the rules of each file';
 
 /**
  * The evidence for one request's words in one application.
@@ -485,7 +485,8 @@ export function taskEvidence(input: {
 
   const examples = (spec?.acceptance ?? [])
     .map((example) => {
-      const touches = example.steps.map((step) => step.route);
+      // Route steps name routes; view steps name pages and components, which the view lines above already cover.
+      const touches = example.steps.flatMap((step) => ('route' in step && step.route !== undefined ? [step.route] : []));
       const hit = score(wanted, example.id, example.title) + touches.filter((route) => matchedRoutes.has(route)).length;
       return { example, touches, hit };
     })

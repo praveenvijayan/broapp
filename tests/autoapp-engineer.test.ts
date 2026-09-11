@@ -810,11 +810,18 @@ describe.skipIf(!available)('the tools', () => {
     const checked = (await callTool(where, 'candidate.check', {
       appId: 'items',
       releaseId: built.releaseId,
-    })) as { results: { id: string; passed: boolean; detail?: string }[] };
+    })) as {
+      results: { id: string; passed: boolean; detail?: string }[];
+      coverage: { host: number; structure: number };
+      unverified: string;
+    };
 
     expect(checked.results).toHaveLength(1);
     expect(checked.results[0]?.passed).toBe(false);
     expect(checked.results[0]?.detail).toContain('count');
+    // What the check covered, and the one thing no check can: the rendered page.
+    expect(checked.coverage).toEqual({ host: 1, structure: 0 });
+    expect(checked.unverified).toMatch(/neither renders a page/);
     // The check ran over IPC, so the preview's one-time launch token is still
     // there for the person's Open preview. This is the first visit.
     const { connectToChild } = await import('broapp-autoapp/launcher');
@@ -1240,5 +1247,71 @@ describe('the engineer’s instructions', () => {
     expect(ENGINEER_INSTRUCTIONS).toContain('source.edit');
     const flat = ENGINEER_INSTRUCTIONS.replace(/\s+/g, ' ');
     expect(flat).toContain('Use `source.change` only to create a new file');
+  });
+});
+
+describe('the specification tools', () => {
+  test('spec.read reads the candidate when one is built, the current release otherwise, and says which', async () => {
+    const where = makeWorld();
+    const built = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!built.ok) throw new Error(JSON.stringify(built.problems));
+    setCurrent(where.root, 'items', built.releaseId);
+
+    // Nothing built through the engineer yet: the current release, and said so.
+    const current = (await callTool(where, 'spec.read', { appId: 'items' })) as {
+      from: string;
+      releaseId: string;
+      candidateReleaseId: string | null;
+      sourceRev: string;
+      editsSinceBuild: boolean;
+    };
+    expect(current.from).toBe('current');
+    expect(current.releaseId).toBe(built.releaseId);
+    expect(current.candidateReleaseId).toBeNull();
+    expect(typeof current.sourceRev).toBe('string');
+    await expect(callTool(where, 'spec.read', { appId: 'items', from: 'candidate' })).rejects.toThrow(
+      /no candidate built yet/,
+    );
+
+    // Built through the engineer: the candidate, by default.
+    const candidate = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true })) as {
+      ok: boolean;
+      releaseId: string;
+    };
+    expect(candidate.ok).toBe(true);
+    const read = (await callTool(where, 'spec.read', { appId: 'items' })) as { from: string; releaseId: string; editsSinceBuild: boolean };
+    expect(read.from).toBe('candidate');
+    expect(read.releaseId).toBe(candidate.releaseId);
+    expect(read.editsSinceBuild).toBe(false);
+    const explicit = (await callTool(where, 'spec.read', { appId: 'items', from: 'current' })) as { from: string };
+    expect(explicit.from).toBe('current');
+  });
+
+  test('source reads carry the revision they came from', async () => {
+    const where = makeWorld();
+    const listed = (await callTool(where, 'source.list', { appId: 'items' })) as { rev: string };
+    const read = (await callTool(where, 'source.read', { appId: 'items', path: 'autoapp.json' })) as { rev: string };
+    expect(read.rev).toBe(listed.rev);
+    expect(read.rev.length).toBeGreaterThan(0);
+  });
+
+  test('spec.reference serves one topic, and the views topic states the confirmText rule', async () => {
+    const where = makeWorld();
+    const views = (await callTool(where, 'spec.reference', { topic: 'views' })) as { topic: string; text: string };
+    expect(views.topic).toBe('views');
+    expect(views.text).toMatch(/confirmText/);
+    expect(views.text).not.toMatch(/# acceptance/);
+    const all = (await callTool(where, 'spec.reference', {})) as { topic: string; text: string };
+    expect(all.topic).toBe('all');
+    expect(all.text).toMatch(/# acceptance/);
+  });
+
+  test('a check with no preview says how to get one', async () => {
+    const where = makeWorld();
+    const built = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!built.ok) throw new Error(JSON.stringify(built.problems));
+    await expect(callTool(where, 'candidate.check', { appId: 'items', releaseId: built.releaseId })).rejects.toThrow(
+      /Start one with candidate.preview/,
+    );
   });
 });

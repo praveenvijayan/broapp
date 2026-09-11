@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import type { HostLogger } from 'broapp/host';
 
 import { runAcceptance } from '../engineer/check.ts';
+import type { ViewsSpec } from '../views/index.ts';
 
 import {
   diffCapabilities,
@@ -99,11 +100,12 @@ class InjectedCrash extends Error {
 async function runExamples(
   candidate: ChildHandle,
   examples: readonly AcceptanceExample[],
+  views: ViewsSpec,
 ): Promise<string | null> {
   // The same judge the preview's check uses. With a copy of its own this
   // compared by `JSON.stringify`, so an example whose keys were stored sorted
   // passed the preview and failed here.
-  const failed = (await runAcceptance(candidate, examples)).find((result) => !result.passed);
+  const failed = (await runAcceptance(candidate, examples, views)).find((result) => !result.passed);
   return failed === undefined ? null : `${failed.id}: ${failed.detail ?? 'the example failed'}`;
 }
 
@@ -254,7 +256,7 @@ export async function activate(params: ActivateParams): Promise<ActivateResult> 
           stopCandidate: candidate,
         });
       }
-      const problem = await runExamples(candidate, spec.acceptance);
+      const problem = await runExamples(candidate, spec.acceptance, spec.views);
       if (problem !== null) {
         return await giveUpBeforeSwitch('checked', `an acceptance example failed: ${problem}`, {
           removeNext: true,

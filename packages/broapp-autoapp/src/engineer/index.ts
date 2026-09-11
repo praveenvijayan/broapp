@@ -28,7 +28,7 @@ export type {
   StoredChecks,
 } from './state.ts';
 
-export { CHECK_STEP_TIMEOUT_MS, contains, runAcceptance, stepFailure } from './check.ts';
+export { CHECK_STEP_TIMEOUT_MS, contains, coverage, findComponent, runAcceptance, stepFailure, UNVERIFIED_BY_CHECKS, viewStepFailure } from './check.ts';
 
 export { CYCLE_STEPS, MAX_REPAIR_ATTEMPTS } from './state.ts';
 export type { CycleProgress } from './state.ts';
@@ -41,3 +41,5 @@ export type { PreviewDeps } from './preview.ts';
 
 export { engineerTools } from './tools.ts';
 export type { EngineerKnowledge, EngineerToolsOptions, TurnRecord } from './tools.ts';
+export { REFERENCE_TOPICS, specReference } from './reference.ts';
+export type { ReferenceTopic } from './reference.ts';

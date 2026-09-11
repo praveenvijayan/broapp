@@ -195,12 +195,23 @@ const migration = s.object({
 const acceptance = s.object({
   id: s.string({ min: 1, max: 100 }),
   title: s.string({ min: 1, max: 200 }),
+  // A step is a route call or a view assertion. The shape admits both sets of
+  // fields; `specIssues` refuses a step that has both or neither, with the
+  // step's path, because a schema helper without unions cannot say it here.
   steps: s.array(
     s.object({
-      route: s.string({ pattern: ROUTE_PATTERN }),
-      input: s.unknown(),
+      route: s.optional(s.string({ pattern: ROUTE_PATTERN })),
+      input: s.optional(s.unknown()),
       expect: s.optional(s.unknown()),
       match: s.optional(s.unknown()),
+      view: s.optional(
+        s.object({
+          page: s.string({ min: 1, max: 100 }),
+          component: s.optional(s.string({ min: 1, max: 100 })),
+          exists: s.optional(s.boolean()),
+          match: s.optional(s.unknown()),
+        }),
+      ),
     }),
     { min: 1, max: 100 },
   ),
@@ -342,11 +353,28 @@ function crossCheck(spec: AppSpec): Issue[] {
 
   for (const [index, example] of spec.acceptance.entries()) {
     for (const [step, call] of example.steps.entries()) {
-      if (!Object.prototype.hasOwnProperty.call(spec.contract.operations, call.route)) {
-        issues.push({
-          path: ['acceptance', index, 'steps', step, 'route'],
-          message: `route ${JSON.stringify(call.route)} is not an operation in this contract`,
-        });
+      const at = ['acceptance', index, 'steps', step];
+      const route = 'route' in call ? call.route : undefined;
+      const view = 'view' in call ? call.view : undefined;
+      if ((route === undefined) === (view === undefined)) {
+        issues.push({ path: at, message: 'a step names a route or a view, not both and not neither' });
+      } else if (route !== undefined) {
+        if (!Object.prototype.hasOwnProperty.call(spec.contract.operations, route)) {
+          issues.push({
+            path: [...at, 'route'],
+            message: `route ${JSON.stringify(route)} is not an operation in this contract`,
+          });
+        }
+      } else if (view !== undefined) {
+        // A page that is asserted absent need not exist; anything else on it must.
+        const declared = spec.views.pages.some((page) => page.id === view.page);
+        const aboutAbsentPage = view.exists === false && view.component === undefined;
+        if (!declared && !aboutAbsentPage) {
+          issues.push({
+            path: [...at, 'view', 'page'],
+            message: `page ${JSON.stringify(view.page)} is not in the view specification`,
+          });
+        }
       }
     }
   }

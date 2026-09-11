@@ -10,6 +10,8 @@ export { APP_ID_PATTERN, SPEC_VERSION } from './types.ts';
 export type {
   AcceptanceExample,
   AcceptanceStep,
+  RouteStep,
+  ViewStep,
   AppManifest,
   AppSpec,
   Capability,
@@ -46,3 +48,4 @@ export {
   readGrants,
   writeGrants,
 } from './capabilities.ts';
+export { isViewStep } from './types.ts';

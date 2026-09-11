@@ -97,8 +97,8 @@ export interface MigrationSpec {
   readonly description: string;
 }
 
-/** One call in an acceptance example. */
-export interface AcceptanceStep {
+/** One call in an acceptance example: a route on the running application. */
+export interface RouteStep {
   readonly route: string;
   readonly input: unknown;
   /** A JSON value the output must deep-equal, or absent to require only success. */
@@ -111,6 +111,33 @@ export interface AcceptanceStep {
    * there.
    */
   readonly match?: unknown;
+}
+
+/**
+ * One assertion about the view specification: that a page or a component is
+ * declared, or is not, and what it declares.
+ *
+ * It proves the specification and nothing else. A route step shows what the
+ * host does; a view step shows what the page is told to draw; neither renders
+ * a page in a browser, and a check that ran both has still not seen one.
+ */
+export interface ViewStep {
+  readonly view: {
+    readonly page: string;
+    /** A component id anywhere on the page. Absent, the assertion is about the page. */
+    readonly component?: string;
+    /** Default true. `false` asserts that the page or the component is not declared. */
+    readonly exists?: boolean;
+    /** What the page or the component must contain, compared the way `match` is. */
+    readonly match?: unknown;
+  };
+}
+
+export type AcceptanceStep = RouteStep | ViewStep;
+
+/** Whether a step is about the view specification rather than a route. */
+export function isViewStep(step: AcceptanceStep): step is ViewStep {
+  return 'view' in step && step.view !== undefined;
 }
 
 /** Something the application is supposed to be able to do, written down. */

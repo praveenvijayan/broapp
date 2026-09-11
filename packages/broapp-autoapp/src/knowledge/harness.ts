@@ -35,7 +35,7 @@ import { snapshotDirectory } from '../launcher/snapshot.ts';
 import { createSupervisor } from '../launcher/supervisor.ts';
 import { createLauncherTab, type CreateLauncherTabOptions } from '../launcher/tab.ts';
 import type { PrepareOptions } from '../launcher/workspace.ts';
-import { layout as layoutOf, setCurrent, type AcceptanceExample, type Layout } from '../spec/index.ts';
+import { layout as layoutOf, readRelease, setCurrent, type AcceptanceExample, type Layout } from '../spec/index.ts';
 
 import type { Evidence } from './evidence.ts';
 import type { EventLog } from './log.ts';
@@ -295,7 +295,7 @@ export function openRun(options: OpenRunOptions): RunHandle {
           childDied: true,
         };
       }
-      const results = await runAcceptance(preview, examples);
+      const results = await runAcceptance(preview, examples, readRelease(layout, appId, releaseId).views);
       const died = await Promise.race([
         preview.exited.then(() => true),
         Bun.sleep(DEATH_WINDOW_MS).then(() => false),

@@ -648,3 +648,30 @@ describe('capabilities', () => {
     expect(() => writeGrants(store, 'other-app', grants)).toThrow(/not other-app/);
   });
 });
+
+describe('view steps', () => {
+  const example = (steps: unknown[]): Partial<AppSpec> => ({
+    acceptance: [{ id: 'v1', title: 'Declares the notes text', steps: steps as never }],
+  });
+
+  test('a view step round-trips and needs no route', () => {
+    const step = { view: { page: 'notes', component: 'all-notes', match: { kind: 'text' } } };
+    const parsed = parseSpec(JSON.parse(JSON.stringify(minimalSpec(example([step])))));
+    expect(parsed.acceptance[0]?.steps[0]).toEqual(step);
+  });
+
+  test('refuses a step that names both a route and a view, or neither', () => {
+    expect(() =>
+      parseSpec(minimalSpec(example([{ route: 'notes.list', input: {}, view: { page: 'notes' } }]))),
+    ).toThrow(/not both and not neither/);
+    expect(() => parseSpec(minimalSpec(example([{ input: {} }])))).toThrow(/not both and not neither/);
+  });
+
+  test('refuses a view step about a page the specification does not have', () => {
+    expect(() => parseSpec(minimalSpec(example([{ view: { page: 'archive' } }])))).toThrow(
+      /page "archive" is not in the view specification/,
+    );
+    // Unless the step says the page must not be there, which is what it is for.
+    expect(() => parseSpec(minimalSpec(example([{ view: { page: 'archive', exists: false } }])))).not.toThrow();
+  });
+});

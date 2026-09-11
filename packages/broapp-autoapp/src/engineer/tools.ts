@@ -44,7 +44,8 @@ import {
   type Layout,
 } from '../spec/index.ts';
 
-import { runAcceptance } from './check.ts';
+import { coverage, runAcceptance, UNVERIFIED_BY_CHECKS } from './check.ts';
+import { REFERENCE_TOPICS, specReference } from './reference.ts';
 import { startPreview } from './preview.ts';
 import { MAX_REPAIR_ATTEMPTS, previewIdOf, type CandidateStates, type CheckResult, type CycleProgress } from './state.ts';
 import {
@@ -473,19 +474,41 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     },
   });
 
+  const specReadInput = s.object({
+    appId: s.string({ min: 1, max: 40 }),
+    /** Which specification: the candidate built from the workspace, or the release that is serving. */
+    from: s.optional(s.enum(['candidate', 'current'])),
+  });
+
   tools['spec.read'] = guardedTool(gate, {
     name: 'spec.read',
     description:
-      'The current release of an application: its manifest, its contract, its views, its migrations and its acceptance examples, plus what the person has granted it.',
-    inputSchema: appIdInput.toJsonSchema(),
+      'An application’s specification — manifest, contract, views, migrations, acceptance examples, and what the person has granted. By default the candidate built from the source workspace when there is one, else the current release; say from: "current" for the release that is serving. Says whether the workspace has been edited since the candidate was built.',
+    inputSchema: specReadInput.toJsonSchema(),
     effect: 'read',
     run: (input, _signal, envelope) => {
-      const { appId } = appIdInput.parse(input);
+      const { appId, from: wanted } = specReadInput.parse(input);
       select(appId);
-      const { releaseId, spec } = currentRelease(root, appId);
+      // The candidate is what the engineer is changing; the current release is
+      // what the person is using. Reading the wrong one and editing against it
+      // is how a change lands on a file that no longer says what was read.
+      const state = states.get(appId);
+      const from = wanted ?? (state.releaseId === null ? 'current' : 'candidate');
+      if (from === 'candidate' && state.releaseId === null) {
+        throw publicError.notFound(`${appId} has no candidate built yet. Read from: "current", or build one with candidate.cycle.`);
+      }
+      const { releaseId, spec } =
+        from === 'candidate' && state.releaseId !== null
+          ? { releaseId: state.releaseId, spec: readRelease(root, appId, state.releaseId) }
+          : currentRelease(root, appId);
       const grants = readGrants(root, appId);
       return Promise.resolve({
+        from,
         releaseId,
+        currentReleaseId: readCurrent(root, appId),
+        candidateReleaseId: state.releaseId,
+        sourceRev: sourceRevision(root.app(appId).source),
+        editsSinceBuild: state.editsSinceBuild,
         manifest: spec.manifest,
         contract: spec.contract,
         views: spec.views,
@@ -497,6 +520,23 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     },
   });
 
+  const referenceInput = s.object({
+    /** One section, or every section when omitted. */
+    topic: s.optional(s.enum([...REFERENCE_TOPICS])),
+  });
+
+  tools['spec.reference'] = guardedTool(gate, {
+    name: 'spec.reference',
+    description:
+      'The rules of an application’s specification, one topic at a time: "contract" (routes, effect, summary), "views" (every page and component property, what is required, what the renderer does with it, when an action needs confirmText), "acceptance" (route steps and view steps, what each proves), "workspace" (what may be changed). Read the topic for the file you are about to change.',
+    inputSchema: referenceInput.toJsonSchema(),
+    effect: 'read',
+    run: (input) => {
+      const { topic } = referenceInput.parse(input);
+      return Promise.resolve({ topic: topic ?? 'all', text: specReference(topic) });
+    },
+  });
+
   tools['source.list'] = guardedTool(gate, {
     name: 'source.list',
     description: "Every file in an application's source workspace, with its size in bytes.",
@@ -505,7 +545,11 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     run: (input, _signal, envelope) => {
       const { appId } = appIdInput.parse(input);
       select(appId);
-      return Promise.resolve({ files: readTree(root.app(appId).source), ...noteRead(envelope, 'source.list', { appId }) });
+      return Promise.resolve({
+        rev: sourceRevision(root.app(appId).source),
+        files: readTree(root.app(appId).source),
+        ...noteRead(envelope, 'source.list', { appId }),
+      });
     },
   });
 
@@ -523,6 +567,9 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       select(appId);
       return Promise.resolve({
         path,
+        // The revision the text came from, so a later result can be compared
+        // with what was read rather than remembered.
+        rev: sourceRevision(root.app(appId).source),
         content: readWorkspaceFile(root.app(appId).source, path),
         ...noteRead(envelope, 'source.read', { appId, path }),
       });
@@ -760,7 +807,10 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       select(appId);
       const preview = states.get(appId).preview;
       if (preview === null) {
-        throw publicError.unavailable('There is no preview running for this application.');
+        const lost = states.get(appId).previewLost ? ' It stopped when the launcher restarted.' : '';
+        throw publicError.unavailable(
+          `There is no preview running for this application.${lost} Start one with candidate.preview and this releaseId, or the person can press Start preview; then check again.`,
+        );
       }
       // The examples are this release's, so the child must be too. Run against
       // another release's preview, a pass would be written down as this one's.
@@ -770,7 +820,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         );
       }
       const spec = readRelease(root, appId, releaseId);
-      const results: CheckResult[] = await runAcceptance(preview, spec.acceptance);
+      const results: CheckResult[] = await runAcceptance(preview, spec.acceptance, spec.views);
       // Written down with the example and the child they are about, so a
       // restart, a rebuild or an edited example is not taken as verified.
       const previewId = previewIdOf(preview);
@@ -814,7 +864,14 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
           scoreCheck(k.store, appId, results, examples, releaseId, who);
         }
       });
-      return { results };
+      return {
+        results,
+        // What these results cover and what they cannot: a check that ran
+        // every step has still not seen a page, and a report that does not say
+        // so invites "the checks pass" to stand in for "it looks right".
+        coverage: coverage(spec.acceptance),
+        unverified: UNVERIFIED_BY_CHECKS,
+      };
     },
   });
 

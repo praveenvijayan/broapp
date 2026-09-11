@@ -143,6 +143,19 @@ candidate itself is kept in `<root>/apps/<appId>/candidate.json`, so after a
 restart the person sees the same candidate, is told which checks no longer hold,
 and is offered to start the preview again. See [learning.md](learning.md).
 
+## What a check proves
+
+An acceptance example in `autoapp.json` is a list of steps. A **route step**
+calls a route on a preview of the candidate and compares the output, whole
+(`expect`) or in part (`match`). A **view step** asserts that a page, or a
+component on it, is declared in the candidate's view specification, or is not,
+and what it declares. The first proves the host; the second proves what the
+page is told to draw. Neither renders a page, and every check report says so
+in the same words, because "the checks pass" is not "it looks right" and only
+a person at the preview can say the second. The engineer reads the rules of
+each file with `spec.reference` before changing it, a topic at a time, rather
+than being handed the whole schema every turn.
+
 ## The rollback boundary
 
 Before the new release has accepted a write, rolling back is a pair switch: the

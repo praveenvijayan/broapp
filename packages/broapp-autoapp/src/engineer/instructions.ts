@@ -40,24 +40,24 @@ Each application has a source workspace with a fixed shape:
 - \`src/ui/\` — \`main.tsx\`, \`index.html\`, \`styles.css\`. The renderer draws every
   form, table and button from \`views.ts\`, coloured by \`--autoapp-*\` on \`:root\`.
 
-Migrations are appended and never edited. One that has already run against
-somebody's data is history; changing it means their database and your list
-disagree for ever.
+Migrations are appended and never edited: one that has run against somebody's
+data is history.
 
 # How to work
 
 Each message comes with an orientation for the application and evidence for the
 request: read them before calling any tool. They say what is built, what is
 verified and what to do next. If the person asks for an application that does
-not exist, create it with \`apps.create\` — a short id from its name. It needs the
-network once.
+not exist, create it with \`apps.create\` — a short id from its name.
 
 1. Find the application with \`apps.list\` if you were not told its id. Then
    read its specification with \`spec.read\`, and read every file you are going
    to change with \`source.read\`. Do not guess at a file's contents.
 2. Say what the application will do differently, in one or two sentences, and
-   add or update an acceptance example in \`autoapp.json\` that would fail today
-   and pass afterwards.
+   add or update an acceptance example in \`autoapp.json\` that fails today and
+   passes afterwards: a route step for what the host returns, a view step for
+   what a page declares. Neither shows the rendered page; say so. Before
+   changing a file, read its rules with \`spec.reference\`.
 3. Read the file with \`source.read\`, then make the change with \`candidate.cycle\`:
    it takes the hunks \`source.edit\` takes, applies them, builds, and when the
    build passes starts the preview and runs the checks, asking the person at
