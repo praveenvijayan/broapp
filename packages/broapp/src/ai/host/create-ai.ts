@@ -29,7 +29,32 @@ import { runChat, type RunDeps } from './run.ts';
 import { createFileSecretStore, createMemorySecretStore } from './secrets.ts';
 import { createSettingsStore } from './settings.ts';
 import { openThreads, type ThreadStore } from './threads.ts';
-import { GUARDED, type AiContextProviders, type AiTool } from './tool.ts';
+import { GUARDED, type AiContextProviders, type AiTool, type ContextDocument } from './tool.ts';
+
+/** How a turn went, beyond whether it ended well. */
+export interface RunEndDetail {
+  readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
+  /** Tool round trips the turn made. */
+  readonly steps: number;
+  readonly ms: number;
+}
+
+/**
+ * What one turn was given, after the budget. Documents are exactly what the
+ * model saw.
+ *
+ * Reported before the model is called, so a listener can write down the turn's
+ * inputs with the identity they had then rather than reconstruct them later
+ * from settings that may since have changed.
+ */
+export interface DeliveredContext {
+  readonly system: string;
+  readonly documents: readonly ContextDocument[];
+  /** The person's message for this turn, which the system prompt does not carry. */
+  readonly message: string;
+  /** The provider and model the turn was sent to. */
+  readonly model: { readonly provider: string; readonly id: string };
+}
 
 /** What the application is, in the words a model is given. */
 export interface AiAppDescription {
@@ -75,7 +100,16 @@ export interface CreateAiOptions {
     runId: string,
     status: 'succeeded' | 'failed' | 'cancelled',
     summary: string,
+    detail?: RunEndDetail,
   ) => void;
+  /**
+   * Called once per turn, after the context budget and before the model, with
+   * what the model is about to be given.
+   *
+   * A hook that throws is logged and ignored: recording a turn is never a
+   * reason to fail it.
+   */
+  readonly onContext?: (runId: string, delivered: DeliveredContext) => void;
 }
 
 /**
@@ -215,6 +249,7 @@ export function createAi(options: CreateAiOptions): Ai {
     confirmTimeoutMs: options.confirmTimeoutMs ?? DEFAULT_CONFIRM_TIMEOUT_MS,
     approvals,
     ...(options.onRunEnd === undefined ? {} : { onRunEnd: options.onRunEnd }),
+    ...(options.onContext === undefined ? {} : { onContext: options.onContext }),
     logger: options.logger ?? console,
   };
 

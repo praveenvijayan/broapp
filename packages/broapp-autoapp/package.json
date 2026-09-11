@@ -42,6 +42,7 @@
     "./child": "./src/child/index.ts",
     "./host": "./src/host/index.ts",
     "./engineer": "./src/engineer/index.ts",
+    "./knowledge": "./src/knowledge/index.ts",
     "./launcher": "./src/launcher/index.ts",
     "./mcp": "./src/mcp/index.ts",
     "./spec": "./src/spec/index.ts",

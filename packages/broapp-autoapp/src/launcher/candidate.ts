@@ -63,10 +63,30 @@ export interface BuildProblem {
   readonly message: string;
 }
 
+/**
+ * The stages of a build, in the order a result lists them.
+ *
+ * A result says which of them ran as well as what they found, because "the
+ * error is gone" and "the stage never ran" look the same in a list of problems
+ * — both are an absence. A build that stopped at the contract says nothing
+ * about the views, and whatever was wrong with them last time may still be.
+ */
+export const BUILD_STAGES = ['spec', 'contract', 'views', 'page', 'host'] as const;
+
 /** What a build produced, or why it produced nothing. */
 export type BuildCandidateResult =
-  | { readonly ok: true; readonly releaseId: string; readonly spec: AppSpec; readonly rebuilt: boolean }
-  | { readonly ok: false; readonly problems: readonly BuildProblem[] };
+  | {
+      readonly ok: true;
+      readonly releaseId: string;
+      readonly spec: AppSpec;
+      readonly rebuilt: boolean;
+      readonly stagesRun: readonly BuildProblem['stage'][];
+    }
+  | {
+      readonly ok: false;
+      readonly problems: readonly BuildProblem[];
+      readonly stagesRun: readonly BuildProblem['stage'][];
+    };
 
 /**
  * The fixed shape of a source workspace.
@@ -169,23 +189,34 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
   const problems: BuildProblem[] = [];
   const work = mkdtempSync(join(tmpdir(), 'autoapp-build-'));
 
+  // Which stages ran to completion or to a problem of their own. `spec` is two
+  // halves — reading `autoapp.json` first and assembling the specification
+  // last — and it counts as run only when the half that could fail did: the
+  // manifest read when it produced the problem, or the assembly. A build that
+  // read the manifest and then stopped at the contract never checked what the
+  // assembly checks, so it must not be taken as saying that part is fine.
+  const ran = new Set<BuildProblem['stage']>();
+  const stagesRun = (): readonly BuildProblem['stage'][] =>
+    BUILD_STAGES.filter((stage) => ran.has(stage));
+  const failed = (found: readonly BuildProblem[]): BuildCandidateResult => {
+    for (const problem of found) ran.add(problem.stage);
+    return { ok: false, problems: found, stagesRun: stagesRun() };
+  };
+
   try {
     let manifest: SourceManifest;
     try {
       manifest = JSON.parse(readFileSync(join(sourceDir, SOURCE.manifest), 'utf8')) as SourceManifest;
     } catch (cause) {
-      return { ok: false, problems: [{ stage: 'spec', message: `${SOURCE.manifest}: ${reason(cause)}` }] };
+      return failed([{ stage: 'spec', message: `${SOURCE.manifest}: ${reason(cause)}` }]);
     }
     if (manifest.appId !== params.appId) {
-      return {
-        ok: false,
-        problems: [
-          {
-            stage: 'spec',
-            message: `${SOURCE.manifest} says this is ${JSON.stringify(manifest.appId)}, not ${JSON.stringify(params.appId)}`,
-          },
-        ],
-      };
+      return failed([
+        {
+          stage: 'spec',
+          message: `${SOURCE.manifest} says this is ${JSON.stringify(manifest.appId)}, not ${JSON.stringify(params.appId)}`,
+        },
+      ]);
     }
 
     // 1. The contract and the views, read out of a bundle rather than out of
@@ -203,11 +234,14 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
       throw: false,
     }).catch((cause: unknown) => ({ success: false as const, logs: [reason(cause)] }));
     if (!shared.success) {
-      return {
-        ok: false,
-        problems: [{ stage: 'contract', message: `the shared layer would not bundle: ${describeLogs(shared.logs)}` }],
-      };
+      // The views are in the same bundle, but nothing read them: only the
+      // contract stage ran, to this problem.
+      return failed([
+        { stage: 'contract', message: `the shared layer would not bundle: ${describeLogs(shared.logs)}` },
+      ]);
     }
+    ran.add('contract');
+    ran.add('views');
     try {
       const module = (await import(join(work, 'shared', 'contract.js'))) as { contract?: unknown };
       contract = module.contract;
@@ -241,6 +275,7 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
     }
 
     // 2. The page. One document, CSP pinned to the hashes of what is in it.
+    ran.add('page');
     try {
       await buildPage({
         root: sourceDir,
@@ -265,6 +300,7 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
     //    imports it. Report 02 established that a compiled launcher can also
     //    run the bundler through `BUN_BE_BUN=1`, which is the route to take if
     //    this ever needs to be isolated further.
+    ran.add('host');
     problems.push(...checkDependencies(sourceDir));
 
     const host = await Bun.build({
@@ -281,16 +317,17 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
       problems.push({ stage: 'host', message: `the host bundle failed: ${describeLogs(host.logs)}` });
     }
 
-    if (problems.length > 0 || exported === null || views === null) return { ok: false, problems };
+    if (problems.length > 0 || exported === null || views === null) return failed(problems);
 
-    // 4. The manifest and the identity.
+    // 4. The manifest and the identity: the second half of the `spec` stage.
+    ran.add('spec');
     let page: Uint8Array;
     let hostBytes: Uint8Array;
     try {
       page = readFileSync(join(work, RELEASE_PAGE));
       hostBytes = readFileSync(join(work, RELEASE_HOST));
     } catch (cause) {
-      return { ok: false, problems: [{ stage: 'spec', message: reason(cause) }] };
+      return failed([{ stage: 'spec', message: reason(cause) }]);
     }
 
     // The identity covers the whole specification, so the specification has to
@@ -323,7 +360,7 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
         acceptance: manifest.acceptance ?? [],
       });
     } catch (cause) {
-      return { ok: false, problems: [{ stage: 'spec', message: reason(cause) }] };
+      return failed([{ stage: 'spec', message: reason(cause) }]);
     }
 
     const releaseId = computeReleaseId({ page, host: hostBytes, spec: draft });
@@ -334,10 +371,10 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
     //    that did nothing rather than a conflict.
     try {
       writeRelease(params.layout, spec, { page, host: hostBytes });
-      return { ok: true, releaseId, spec, rebuilt: true };
+      return { ok: true, releaseId, spec, rebuilt: true, stagesRun: stagesRun() };
     } catch (cause) {
       if ((cause as { code?: string }).code !== 'conflict') {
-        return { ok: false, problems: [{ stage: 'spec', message: reason(cause) }] };
+        return failed([{ stage: 'spec', message: reason(cause) }]);
       }
       // The identity already exists, and the identity now covers everything a
       // release contains — so this is a rebuild of the same sources and
@@ -351,7 +388,7 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
         );
       }
       params.logger?.warn(`[autoapp] release ${releaseId} was already built`);
-      return { ok: true, releaseId, spec, rebuilt: false };
+      return { ok: true, releaseId, spec, rebuilt: false, stagesRun: stagesRun() };
     }
   } finally {
     rmSync(work, { recursive: true, force: true });

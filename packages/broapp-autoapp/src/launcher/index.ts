@@ -11,7 +11,7 @@ export type { CreateLauncherAppOptions, LauncherApp } from './app.ts';
 export { appIds, listApps, serving } from './apps.ts';
 export type { AppRow } from './apps.ts';
 
-export { launcherContract } from './contract.ts';
+export { launcherContract, STAGE_NAMES } from './contract.ts';
 export type { LauncherContract } from './contract.ts';
 
 export { createLauncherTab } from './tab.ts';
@@ -43,7 +43,7 @@ export type { StarterTemplate, StarterValues } from './starter.ts';
 export { adopt, prepareWorkspace } from './workspace.ts';
 export type { PrepareOptions, PrepareResult } from './workspace.ts';
 
-export { buildCandidate, SOURCE } from './candidate.ts';
+export { BUILD_STAGES, buildCandidate, SOURCE } from './candidate.ts';
 export type {
   BuildCandidateParams,
   BuildCandidateResult,

@@ -28,6 +28,7 @@ import { AdapterError } from './adapter.ts';
 import type { AdapterConfig, ProviderAdapter } from './adapter.ts';
 import type { Registry } from './registry.ts';
 import type { AiContextProviders, AiTool, ContextDocument } from './tool.ts';
+import type { DeliveredContext, RunEndDetail } from './create-ai.ts';
 
 /** What the run loop needs from the `Ai` that owns it. */
 export interface RunDeps {
@@ -53,7 +54,37 @@ export interface RunDeps {
    * outside the AI layer — Autoapp's run store — close the record the gate has
    * been writing steps into.
    */
-  readonly onRunEnd?: (runId: string, status: 'succeeded' | 'failed' | 'cancelled', summary: string) => void;
+  readonly onRunEnd?: (
+    runId: string,
+    status: 'succeeded' | 'failed' | 'cancelled',
+    summary: string,
+    detail?: RunEndDetail,
+  ) => void;
+  /** Called once per turn with what the model is about to be given. */
+  readonly onContext?: (runId: string, delivered: DeliveredContext) => void;
+}
+
+/** What a turn counts as it goes, for {@link RunEndDetail}. */
+interface TurnTally {
+  steps: number;
+  usage?: { inputTokens: number; outputTokens: number };
+}
+
+/**
+ * Call a listener's hook without letting it touch the turn.
+ *
+ * Both hooks exist so something outside the AI layer can write down what
+ * happened. A recorder that fails has failed at recording, not at the turn, so
+ * the failure is logged and the turn carries on exactly as it would have.
+ */
+function safely(logger: HostLogger, hook: string, call: () => void): void {
+  try {
+    call();
+  } catch (cause) {
+    logger.error(
+      `[broapp] ai ${hook} hook failed: ${String(cause instanceof Error ? cause.message : cause)}`,
+    );
+  }
 }
 
 /**
@@ -177,7 +208,10 @@ async function assembleContext(
 
   await load(params.refs);
   if (searcher !== undefined) {
-    const found = await searcher({ text: params.message, limit: SEARCH_LIMIT }, signal);
+    const found = await searcher(
+      { text: params.message, limit: SEARCH_LIMIT, runId: params.runId },
+      signal,
+    );
     await load(found.map((entry) => entry.ref));
   }
   return fitToBudget(documents, deps.contextBudgetChars);
@@ -421,13 +455,24 @@ export async function runChat(
   // browser cancelled and a turn that finished all have to close their record,
   // or a run store is left with something that looks like it is still running.
   let ended = false;
+  const started = Date.now();
+  const tally: TurnTally = { steps: 0 };
   const end = (status: 'succeeded' | 'failed' | 'cancelled'): void => {
     if (ended) return;
     ended = true;
-    deps.onRunEnd?.(params.runId, status, params.message.slice(0, SUMMARY_CHARS));
+    const onRunEnd = deps.onRunEnd;
+    if (onRunEnd === undefined) return;
+    const detail: RunEndDetail = {
+      steps: tally.steps,
+      ms: Date.now() - started,
+      ...(tally.usage === undefined ? {} : { usage: tally.usage }),
+    };
+    safely(deps.logger, 'onRunEnd', () =>
+      onRunEnd(params.runId, status, params.message.slice(0, SUMMARY_CHARS), detail),
+    );
   };
   try {
-    await runTurn(params, sink, deps, end);
+    await runTurn(params, sink, deps, end, tally);
     end(sink.signal.aborted ? 'cancelled' : 'succeeded');
   } catch (cause) {
     end(sink.signal.aborted ? 'cancelled' : 'failed');
@@ -441,6 +486,7 @@ async function runTurn(
   sink: StreamSink<ChatEvent>,
   deps: RunDeps,
   end: (status: 'succeeded' | 'failed' | 'cancelled') => void,
+  tally: TurnTally,
 ): Promise<void> {
   // Throws a PublicError when nothing is configured. `runStream` in host/app.ts
   // turns that into the right thing on the wire, so it is not caught here.
@@ -473,12 +519,28 @@ async function runTurn(
     requestId.startsWith(`${params.runId}:`) ? requestId.slice(params.runId.length + 1) : requestId,
   );
 
+  // Built once and handed to both the listener and the model, so what is
+  // written down is the string that was sent rather than a second rendering of
+  // it that might differ.
+  const system = buildSystemPrompt(deps, documents);
+  const onContext = deps.onContext;
+  if (onContext !== undefined) {
+    safely(deps.logger, 'onContext', () =>
+      onContext(params.runId, {
+        system,
+        documents,
+        message: params.message,
+        model: { provider: resolved.adapter.id, id: resolved.modelId },
+      }),
+    );
+  }
+
   const result = streamText({
     // Always a model *instance*. A string here would be resolved by the AI
     // SDK's gateway, over the global fetch, to a Vercel host — see
     // reports/01-spike.md. Nothing in this layer may pass one.
     model: resolved.adapter.model(resolved.config, resolved.modelId),
-    system: buildSystemPrompt(deps, documents),
+    system,
     messages: toModelMessages(params),
     tools: buildTools(params, deps, sink, approver),
     stopWhen: stepCountIs(deps.maxSteps),
@@ -494,16 +556,23 @@ async function runTurn(
       case 'text-delta':
         await sink.emit({ type: 'text', text: part.text });
         break;
-      case 'finish':
-        await sink.emit({
-          type: 'usage',
-          // `ai` flattens the provider's nested usage object into plain
-          // numbers, either of which a provider may omit.
+      case 'tool-call':
+        // Counted here rather than in `execute`: a call the SDK rejected before
+        // it ran was still a round trip the model spent.
+        tally.steps += 1;
+        break;
+      case 'finish': {
+        // `ai` flattens the provider's nested usage object into plain
+        // numbers, either of which a provider may omit.
+        const usage = {
           inputTokens: part.totalUsage.inputTokens ?? 0,
           outputTokens: part.totalUsage.outputTokens ?? 0,
-        });
+        };
+        tally.usage = usage;
+        await sink.emit({ type: 'usage', ...usage });
         await sink.emit({ type: 'done' });
         break;
+      }
       case 'error':
         await sink.emit({
           type: 'error',
@@ -531,8 +600,8 @@ async function runTurn(
         end('cancelled');
         return;
       default:
-        // tool-call, tool-result, text-start, finish-step, reasoning, source,
-        // raw: either already emitted from `execute`, or not something the
+        // tool-result, text-start, finish-step, reasoning, source, raw:
+        // either already emitted from `execute`, or not something the
         // browser has a use for.
         break;
     }

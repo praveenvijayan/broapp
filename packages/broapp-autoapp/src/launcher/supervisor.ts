@@ -35,6 +35,14 @@ export interface ChildHandle {
   readonly releaseId: string;
   readonly mode: 'live' | 'preview';
   readonly pid: number;
+  /**
+   * When this child was spawned, in milliseconds.
+   *
+   * With the release it names one spawn and no other. A pid can be reused after
+   * a restart, so a check result written down against "the preview with pid
+   * 4012" could be taken as belonging to a different preview later.
+   */
+  readonly spawnedAt: number;
   /** From `ready`. Never written to disk. */
   readonly url: string;
   readonly schemaVersion: number;
@@ -71,7 +79,12 @@ export interface SupervisorOptions {
   readonly execPath?: string;
   readonly helloTimeoutMs?: number;
   readonly readyTimeoutMs?: number;
-  readonly logger?: HostLogger;
+  /**
+   * Where diagnostics go. A logger that can make a logger per child — the
+   * launcher's event log can — gets each child's stderr through that one, so
+   * a line is recorded as the child's rather than the launcher's.
+   */
+  readonly logger?: HostLogger & { child?(appId: string, pid?: number): HostLogger };
 }
 
 /** What a child is started with. */
@@ -211,7 +224,7 @@ interface Channel {
 
 /** Build the supervisor. */
 export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
-  const logger: HostLogger = options.logger ?? console;
+  const logger: NonNullable<SupervisorOptions['logger']> = options.logger ?? console;
   const command = options.execPath === undefined ? selfCommand() : [options.execPath];
   const helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
   const readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
@@ -227,12 +240,14 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
   function launch(
     args: readonly string[],
     dataDir: string,
-  ): { process: Subprocess; channel: Channel } {
+    appId: string,
+  ): { process: Subprocess; channel: Channel; spawnedAt: number } {
     const inbox: Message[] = [];
     let arrived: () => void = () => undefined;
     let protocolFault: Error | null = null;
     let gone: Error | null = null;
 
+    const spawnedAt = Date.now();
     const child = spawn({
       cmd: [...command, ...args],
       env: childEnv(dataDir),
@@ -279,6 +294,15 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
     // not fill, and — the reason this is not `new Response(...).text()` — a
     // child's diagnostics are wanted *while it is running*, which is exactly
     // when a whole-stream read has not resolved yet.
+    //
+    // A logger that can make one per child is a shape check, not `instanceof`:
+    // the launcher's event log has `child`, the console does not, and the line
+    // goes where it would have gone before when there is no such thing.
+    const own = typeof logger.child === 'function' ? logger.child(appId, child.pid) : null;
+    const emit = (line: string): void => {
+      if (own === null) logger.warn(`[child] ${line}`);
+      else own.warn(line);
+    };
     void (async () => {
       const reader = (child.stderr as ReadableStream<Uint8Array>).getReader();
       const decoder = new TextDecoder();
@@ -290,9 +314,9 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
           pending += decoder.decode(value, { stream: true });
           const lines = pending.split('\n');
           pending = lines.pop() ?? '';
-          for (const line of lines) if (line.trim() !== '') logger.warn(`[child] ${line}`);
+          for (const line of lines) if (line.trim() !== '') emit(line);
         }
-        if (pending.trim() !== '') logger.warn(`[child] ${pending}`);
+        if (pending.trim() !== '') emit(pending);
       } catch {
         // The child is gone and took its pipe with it; its exit code is the
         // thing that matters now.
@@ -340,7 +364,7 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
         ),
     };
 
-    return { process: child, channel };
+    return { process: child, channel, spawnedAt };
   }
 
   /** Whatever the child said before it died, or a sentence about the exit code. */
@@ -359,7 +383,7 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
 
   const supervisor: Supervisor = {
     async start(params: StartParams): Promise<ChildHandle> {
-      const { process: child, channel } = launch(
+      const { process: child, channel, spawnedAt } = launch(
         [
           '--child',
           params.releaseDir,
@@ -369,6 +393,7 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
           ...(params.paused === true ? ['paused'] : []),
         ],
         params.dataDir,
+        params.appId,
       );
 
       let ready: Message;
@@ -394,6 +419,7 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
         releaseId: params.releaseId,
         mode: params.mode,
         pid: child.pid,
+        spawnedAt,
         url: ready.url,
         schemaVersion: ready.schemaVersion,
         exited: child.exited.then((code) => code, () => null),
@@ -486,6 +512,7 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
       const { process: child, channel } = launch(
         ['--migrate', params.releaseDir, params.appId, params.releaseId],
         params.dataDir,
+        params.appId,
       );
       try {
         const reply = await channel.waitFor(

@@ -62,6 +62,15 @@ const activationRow = s.object({
   error: s.nullable(s.string({ max: 1_000 })),
 });
 
+/**
+ * A build's stages, in `BUILD_STAGES` order.
+ *
+ * Written out rather than imported from `candidate.ts`: this contract is
+ * bundled into the launcher's page, and that module reaches `node:fs` and the
+ * bundler. A test holds the two lists equal.
+ */
+export const STAGE_NAMES = ['spec', 'contract', 'views', 'page', 'host'] as const;
+
 const buildProblem = s.object({
   stage: s.enum(['contract', 'views', 'page', 'host', 'spec']),
   message: s.string({ max: 4_000 }),
@@ -167,8 +176,24 @@ export const launcherContract = defineContract({
         checks: s.array(checkResult, { max: 200 }),
         addedCapabilities: s.array(capability, { max: 100 }),
         removedCapabilities: s.array(capability, { max: 100 }),
+        /** The workspace has moved on since the release was built. */
+        editsSinceBuild: s.boolean(),
+        /** A preview was running and the launcher restarted since. */
+        previewLost: s.boolean(),
+        /** The checks ran on this release, in the preview that is running now. */
+        checksVerified: s.boolean(),
+        stagesRun: s.array(s.enum([...STAGE_NAMES]), { max: 5 }),
       }),
       summary: 'What the engineer has built and previewed for one application.',
+    },
+    'launcher.previewStart': {
+      // A write, not a read: it copies the application's data and starts the
+      // candidate's code in a child process. Opening a preview that is already
+      // running stays `previewOpen`, which refuses when there is none.
+      effect: 'write',
+      input: appIdInput,
+      output: s.object({ previewRunning: s.boolean() }),
+      summary: 'Start the preview again for the candidate that was built.',
     },
     'launcher.previewOpen': {
       effect: 'write',

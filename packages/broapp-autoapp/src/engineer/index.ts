@@ -16,8 +16,19 @@ export type { EditResult, FileChange, Hunk, MatchedBy, Snapshot, TreeEntry } fro
 
 export { ENGINEER_INSTRUCTIONS, INSTRUCTION_SECTIONS } from './instructions.ts';
 
-export { createCandidateStates } from './state.ts';
-export type { CandidateState, CandidateStates, CandidateStatus, CheckResult } from './state.ts';
+export { createCandidateStates, previewIdOf } from './state.ts';
+export type {
+  CandidatePatch,
+  CandidateState,
+  CandidateStates,
+  CandidateStatus,
+  CheckResult,
+  StoredCandidate,
+  StoredChecks,
+} from './state.ts';
+
+export { startPreview } from './preview.ts';
+export type { PreviewDeps } from './preview.ts';
 
 export { engineerTools } from './tools.ts';
-export type { EngineerToolsOptions } from './tools.ts';
+export type { EngineerKnowledge, EngineerToolsOptions, TurnRecord } from './tools.ts';

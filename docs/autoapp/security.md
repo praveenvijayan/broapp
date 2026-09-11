@@ -149,6 +149,37 @@ Secrets are never in a run record, a journal row, a log line or a
 `PublicError` message. The launcher's control secret lives in the launcher
 process and in `<root>/launcher.json` at mode `0600`, and never crosses IPC.
 
+**The knowledge database.** `<root>/launcher/knowledge.sqlite` records what the
+engineer did (see [learning.md](learning.md)). Its events hold sanitised text
+and allow-listed fields only. Each event kind has a list of the fields it may
+carry, and any field not on the list is dropped, not stored. Free text (a
+message, a build problem, a check's detail, a person's request, an edit
+summary) passes `sanitise()` first. `sanitise()` removes these patterns:
+
+- a value after `api_key`, `secret`, `token`, `password` or `authorization`,
+  including a `Bearer` or `Basic` scheme word
+- a `Bearer` token
+- an `sk-` provider key
+- a hex run of 32 or more characters, or a base64-like run of 40 or more
+- a URL's `user:pass@` and its query string, which is where a launch token is
+- the home directory, which becomes `~`
+
+It cannot catch a secret that looks like an ordinary word, or one split across
+two fields. A launch URL is never recorded: no tool returns one, and a URL that
+reaches a message loses its query. The control secret is never recorded.
+
+`contexts` is the exception, on purpose. It keeps the instructions, the system
+prompt and each delivered document **verbatim**, because it is the record of
+exactly what a model was sent, and a record that differs from it by one
+substitution records something that did not happen. Everything in it was
+already sent to the configured provider.
+
+**Starting a preview again is a write.** `launcher.previewStart` copies the
+application's data and starts the candidate's code in a child process, so it
+is `effect: 'write'` and not a read. On channel `user` it is the person's own
+click. `launcher.previewOpen` stays what it was: it opens a preview that is
+already running, and refuses when there is none.
+
 ## What none of this protects against
 
 A candidate release's host code is **trusted local code**: crash-isolated in

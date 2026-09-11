@@ -134,6 +134,14 @@ release. An approval names a release, so an approval cannot survive a rebuild.
    release. The switch is recorded in `<root>/journal.sqlite`.
 8. The old child is drained and shut down; the new one is started.
 
+The launcher writes down every build, check and edit in this loop with the run
+and call that made it and the source revision it happened at, in
+`<root>/launcher/knowledge.sqlite`. A failure and the repair that followed it
+become one case, and the store refuses to change a case once it is resolved. The
+candidate itself is kept in `<root>/apps/<appId>/candidate.json`, so after a
+restart the person sees the same candidate, is told which checks no longer hold,
+and is offered to start the preview again. See [learning.md](learning.md).
+
 ## The rollback boundary
 
 Before the new release has accepted a write, rolling back is a pair switch: the

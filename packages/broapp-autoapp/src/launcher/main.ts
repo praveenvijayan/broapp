@@ -24,6 +24,13 @@ import { customServer, ollama, openai } from 'broapp-ai-compatible';
 import { ensureDataDir, openBrowser, startApp } from 'broapp/host';
 
 import { createRunStore } from '../host/run-store.ts';
+import {
+  createEventLog,
+  createEvidence,
+  openKnowledge,
+  type EventLog,
+  type Knowledge,
+} from '../knowledge/index.ts';
 
 import { runChild, runMigrate } from '../child/run-child.ts';
 import {
@@ -137,6 +144,17 @@ async function readLine(): Promise<string> {
   }
 }
 
+/** The knowledge store and its log, for the commands that keep one. */
+interface Recording {
+  readonly knowledge: Knowledge;
+  readonly log: EventLog;
+}
+
+/** The logger to hand everything: the event log when there is one. */
+function loggerOf(recording: Recording | null): { logger?: EventLog } {
+  return recording === null ? {} : { logger: recording.log };
+}
+
 /** `serve <appId>` — recover whatever was interrupted, then run it. */
 async function serve(
   root: Layout,
@@ -144,8 +162,15 @@ async function serve(
   supervisor: Supervisor,
   appId: string,
   open: boolean,
+  recording: Recording | null,
 ): Promise<number> {
-  for (const recovered of await recover({ layout: root, journal, supervisor, start: false })) {
+  for (const recovered of await recover({
+    layout: root,
+    journal,
+    supervisor,
+    start: false,
+    ...loggerOf(recording),
+  })) {
     console.log(`recovered: ${recovered.finding}`);
   }
   const current = readCurrent(root, appId);
@@ -155,7 +180,7 @@ async function serve(
   }
   // Opened here too, so `serve <appId>` — one application without the launcher
   // tab — is still reachable over MCP.
-  let control: Control | null = startControl({ layout: root, supervisor });
+  let control: Control | null = startControl({ layout: root, supervisor, ...loggerOf(recording) });
   process.on('exit', () => control?.stop());
 
   console.log(`${appId} ${current}`);
@@ -163,6 +188,7 @@ async function serve(
     layout: root,
     supervisor,
     appId,
+    ...loggerOf(recording),
     onStart: (child, restart) => {
       if (restart > 0) console.log(`${appId} stopped and was started again; its address has changed.`);
       // The launch URL carries a one-time token and is a credential until it is
@@ -192,15 +218,24 @@ async function openLauncher(
   journal: Journal,
   supervisor: Supervisor,
   open: boolean,
+  recording: Recording | null,
 ): Promise<number> {
-  for (const recovered of await recover({ layout: root, journal, supervisor, start: false })) {
+  for (const recovered of await recover({
+    layout: root,
+    journal,
+    supervisor,
+    start: false,
+    ...loggerOf(recording),
+  })) {
     console.log(`recovered: ${recovered.finding}`);
   }
 
   // The door an MCP server comes in by. Only the launcher's own long-running
   // commands open it, and it is removed when they stop.
-  const control = startControl({ layout: root, supervisor });
+  const control = startControl({ layout: root, supervisor, ...loggerOf(recording) });
 
+  // Knowledge was opened before this, in `main`, beside where the run store is
+  // opened now: both live in the launcher's own data directory.
   const dataDir = join(root.root, 'launcher');
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const store = createRunStore(dataDir);
@@ -215,9 +250,20 @@ async function openLauncher(
     gate: createLauncherGate({
       releaseId: 'launcher',
       recorder: store.recorder(),
+      ...loggerOf(recording),
     }),
     dataDir,
     store,
+    ...loggerOf(recording),
+    ...(recording === null
+      ? {}
+      : {
+          knowledge: {
+            store: recording.knowledge,
+            log: recording.log,
+            evidence: createEvidence(recording.knowledge, recording.log),
+          },
+        }),
     template: starter,
     versions: VERSIONS,
     providers: [anthropic(), ollama(), openai(), customServer()],
@@ -246,7 +292,10 @@ async function openLauncher(
       control.stop();
       // Applications the launcher started do not outlive it.
       await supervisor.stopAll(STOP_DEADLINE_MS);
+      // The run store, then knowledge: the last things a stopping child says
+      // are written to the log before it closes.
       store.close();
+      recording?.knowledge.close();
     },
   });
 
@@ -378,23 +427,32 @@ async function main(): Promise<number> {
   const root = layout(defaultRoot());
   mkdirSync(root.root, { recursive: true, mode: 0o700 });
   const journal = openJournal(root.journal);
-  const supervisor = createSupervisor();
+  // The long-running commands write down what happens. Opened before the
+  // supervisor, so a child's stderr is recorded from its first line; one-shot
+  // commands keep printing to the terminal and write nothing.
+  const longRunning = command === undefined || command === 'open' || command === 'serve';
+  const knowledge = longRunning ? openKnowledge(join(root.root, 'launcher')) : null;
+  const recording: Recording | null =
+    knowledge === null
+      ? null
+      : { knowledge, log: createEventLog(knowledge, { source: 'launcher', tee: console }) };
+  const supervisor = createSupervisor(loggerOf(recording));
   stopChildrenOnExit(supervisor);
 
   try {
     switch (command) {
       case undefined:
       case 'open':
-        return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'));
+        return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'), recording);
 
       case 'serve': {
         const appId = positional(argv, 1);
         // `serve` with no application is the launcher's own tab, which is the
         // ordinary way in: from there a person opens whichever they want.
         if (appId === undefined) {
-          return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'));
+          return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'), recording);
         }
-        return await serve(root, journal, supervisor, appId, !argv.includes('--no-open'));
+        return await serve(root, journal, supervisor, appId, !argv.includes('--no-open'), recording);
       }
 
       case 'create': {
@@ -484,6 +542,9 @@ async function main(): Promise<number> {
     }
   } finally {
     journal.close();
+    // Already closed by the launcher tab's shutdown when that is what ran;
+    // closing twice is harmless, and `serve <appId>` has no shutdown of its own.
+    knowledge?.close();
     // Every command but `serve` is one-shot, and a live child's IPC channel is
     // a handle that keeps this process's event loop open. Leaving one behind
     // would make the command appear to hang after it had finished.

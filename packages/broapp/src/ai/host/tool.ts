@@ -47,7 +47,8 @@ export interface GuardedToolDefinition {
   readonly description: string;
   readonly inputSchema: JsonSchema;
   readonly effect: Effect;
-  run(input: unknown, signal: AbortSignal): Promise<unknown>;
+  /** The envelope is the run loop's, never the model's; a tool may record it and must not act on its channel. */
+  run(input: unknown, signal: AbortSignal, envelope?: Envelope): Promise<unknown>;
 }
 
 /**
@@ -67,7 +68,7 @@ export function guardedTool(gate: Gate, tool: GuardedToolDefinition): GuardedToo
     effect: tool.effect,
     execute: (input, envelope) =>
       gate.guard({ ...envelope, route: tool.name, effect: tool.effect, input }, (signal) =>
-        tool.run(input, signal),
+        tool.run(input, signal, envelope),
       ),
   };
 }
@@ -88,8 +89,13 @@ export interface ContextDocument {
 
 /** Where the model's knowledge of the application's data comes from. */
 export interface AiContextProviders {
-  /** Records relevant to a query. Return refs and short snippets, not full content. */
-  search?(query: { text: string; limit: number }, signal: AbortSignal): Promise<ContextRef[]>;
+  /**
+   * Records relevant to a query. Return refs and short snippets, not full content.
+   *
+   * `runId` is the turn asking, so a provider can write down what it offered
+   * to which run. It identifies; it grants nothing.
+   */
+  search?(query: { text: string; limit: number; runId?: string }, signal: AbortSignal): Promise<ContextRef[]>;
   /** Full content for named refs. Unknown refs are skipped, not errors. */
   resolve?(refs: readonly string[], signal: AbortSignal): Promise<ContextDocument[]>;
 }

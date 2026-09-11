@@ -14,7 +14,9 @@ import { createGate, createHostApp, openBrowser as openSystemBrowser, publicErro
 import type { Gate, HostApp, HostLogger } from 'broapp/host';
 import type { Bridge } from 'brobridge';
 
+import { startPreview } from '../engineer/preview.ts';
 import type { CandidateStates } from '../engineer/state.ts';
+import type { EventLog } from '../knowledge/log.ts';
 import {
   listReleases,
   readCurrent,
@@ -42,6 +44,8 @@ export interface CreateLauncherAppOptions {
   /** The launcher's own gate. `user` for the tab's clicks; the engineer shares it. */
   readonly gate: Gate;
   readonly logger?: HostLogger;
+  /** Where a person's own preview starts and activations are written down. */
+  readonly log?: EventLog;
   /**
    * Open a URL in the person's browser. Defaults to the operating system's
    * opener; tests pass a stub so a suite does not open tabs.
@@ -249,7 +253,27 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       checks: status.checks.map((check) => ({ ...check })),
       addedCapabilities: [...status.addedCapabilities],
       removedCapabilities: [...status.removedCapabilities],
+      editsSinceBuild: status.editsSinceBuild,
+      previewLost: status.previewLost,
+      checksVerified: status.checksVerified,
+      stagesRun: [...status.stagesRun],
     };
+  });
+
+  host.operation('launcher.previewStart', async ({ appId }, context) => {
+    const releaseId = states.get(appId).releaseId;
+    if (releaseId === null) {
+      throw publicError.unavailable('Nothing has been built for this application, so there is no preview to start.');
+    }
+    // Exactly what the engineer's `candidate.preview` runs. A click is its own
+    // run, so its request identifier is both the run and the call.
+    await startPreview(
+      { layout: root, supervisor, states, ...(options.log === undefined ? {} : { log: options.log }) },
+      appId,
+      releaseId,
+      { runId: context.requestId, callId: context.requestId },
+    );
+    return { previewRunning: states.get(appId).preview !== null };
   });
 
   host.operation('launcher.previewOpen', async ({ appId }) => {
@@ -260,15 +284,21 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
     return await openTab(preview);
   });
 
-  host.operation('launcher.activate', async ({ appId, releaseId }) => {
+  host.operation('launcher.activate', async ({ appId, releaseId }, context) => {
     // The same function the engineer's tool reaches. What differs is the channel
     // the request arrived on, which the journal's run record already carries.
     const preview = states.get(appId).preview;
-    if (preview !== null) {
-      await preview.shutdown(STOP_DEADLINE_MS);
-      states.update(appId, { preview: null });
-    }
+    if (preview !== null) await preview.shutdown(STOP_DEADLINE_MS);
+    states.update(appId, { preview: null, previewWasRunning: false });
     const result = await activate({ layout: root, supervisor, journal, appId, releaseId, logger });
+    options.log?.event(
+      'activate',
+      result.ok ? 'the release was activated' : 'the activation did not complete',
+      result.ok
+        ? { ok: true, releaseId }
+        : { ok: false, phase: result.phase, reason: result.reason, recovered: result.recovered, releaseId },
+      { runId: context.requestId, callId: context.requestId, appId, releaseId },
+    );
     if (!result.ok) return { ok: false, phase: result.phase, reason: result.reason };
     // The new release is a new child on a new port with a new credential, so
     // the tab that showed the old one cannot be reloaded into it. Open the new

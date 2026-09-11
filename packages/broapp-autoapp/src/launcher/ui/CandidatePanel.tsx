@@ -25,6 +25,7 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
   const grants = useOperation<LauncherContract, 'launcher.grantsGet'>('launcher.grantsGet');
   const setGrants = useOperation<LauncherContract, 'launcher.grantsSet'>('launcher.grantsSet');
   const preview = useOperation<LauncherContract, 'launcher.previewOpen'>('launcher.previewOpen');
+  const startPreview = useOperation<LauncherContract, 'launcher.previewStart'>('launcher.previewStart');
   const activate = useOperation<LauncherContract, 'launcher.activate'>('launcher.activate');
 
   const { run: refresh } = status;
@@ -80,10 +81,20 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
 
       {current.releaseId !== null && (
         <p className="launcher__lede">
-          Built <code>{current.releaseId.slice(0, 8)}</code>.
+          Built <code>{current.releaseId.slice(0, 8)}</code>
+          {current.editsSinceBuild ? '; edited since this build.' : '.'}
         </p>
       )}
+      {current.previewLost && (
+        <p className="launcher__lede">The preview stopped when the launcher restarted.</p>
+      )}
 
+      {current.checks.length > 0 && !current.checksVerified && (
+        <p className="launcher__lede">
+          Passed {current.checks.filter((check) => check.passed).length} of {current.checks.length} for an
+          earlier preview; run the checks again.
+        </p>
+      )}
       {current.checks.length > 0 && (
         <ul className="launcher__checks">
           {current.checks.map((check) => (
@@ -134,14 +145,38 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
       )}
 
       <div className="launcher__row-actions">
-        <button
-          className="launcher__button"
-          type="button"
-          disabled={!current.previewRunning}
-          onClick={() => void preview.run({ appId })}
-        >
-          Open preview
-        </button>
+        {current.previewLost && !current.previewRunning ? (
+          // The child went with the launcher. Starting it again copies the data
+          // and runs the candidate, which is a write — so it is its own route,
+          // and only then is it opened.
+          <button
+            className="launcher__button"
+            type="button"
+            disabled={current.releaseId === null || startPreview.pending}
+            onClick={() => {
+              void startPreview
+                .run({ appId })
+                .then(() => preview.run({ appId }))
+                .then(reload);
+            }}
+          >
+            Start preview
+          </button>
+        ) : (
+          <button
+            className="launcher__button"
+            type="button"
+            disabled={!current.previewRunning}
+            onClick={() => void preview.run({ appId })}
+          >
+            Open preview
+          </button>
+        )}
+        {startPreview.error !== null && (
+          <p className="launcher__message launcher__message--error" role="alert">
+            {startPreview.error.message}
+          </p>
+        )}
         {previewNotOpened && (
           <p className="launcher__message launcher__message--error" role="alert">
             The preview is running, but no browser could be opened. Its address is printed in

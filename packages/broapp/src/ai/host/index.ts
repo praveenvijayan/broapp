@@ -7,7 +7,13 @@
  * follows this import fails loudly instead.
  */
 export { createAi } from './create-ai.ts';
-export type { Ai, AiAppDescription, CreateAiOptions } from './create-ai.ts';
+export type {
+  Ai,
+  AiAppDescription,
+  CreateAiOptions,
+  DeliveredContext,
+  RunEndDetail,
+} from './create-ai.ts';
 
 export { AdapterError, isLoopbackUrl, toPublicError } from './adapter.ts';
 export type { AdapterConfig, AdapterErrorCode, ProviderAdapter } from './adapter.ts';

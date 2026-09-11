@@ -30,6 +30,8 @@ export interface AppLayout {
   /** The pointer file naming the active release. */
   readonly current: string;
   readonly grants: string;
+  /** What the engineer last built and previewed, kept so a restart resumes there. */
+  readonly candidate: string;
 }
 
 /** The launcher's own directory, and every application under it. */
@@ -87,6 +89,7 @@ export function layout(root: string): Layout {
         sourceHistory: join(dir, 'source-history'),
         current: join(dir, 'current'),
         grants: join(dir, 'grants.json'),
+        candidate: join(dir, 'candidate.json'),
       };
     },
   };

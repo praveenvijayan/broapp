@@ -11,20 +11,22 @@
  * told only whether a preview is running. And no path outside the workspace is
  * ever returned, because a path is a suggestion about where to look next.
  */
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 
 import { guardedTool } from 'broapp/ai/host';
 import type { GuardedTool } from 'broapp/ai/host';
 import { publicError } from 'broapp/host';
-import type { Gate, HostLogger } from 'broapp/host';
+import type { Envelope, Gate, HostLogger } from 'broapp/host';
 import { s } from 'broapp/shared';
 
+import { exampleHash, type Evidence, type OpenEpisode } from '../knowledge/evidence.ts';
+import { origin as originOf, type FullOrigin } from '../knowledge/ids.ts';
+import type { EventLog } from '../knowledge/log.ts';
 import { activate } from '../launcher/activate.ts';
 import { listApps } from '../launcher/apps.ts';
 import { buildCandidate } from '../launcher/candidate.ts';
 import { createApplication } from '../launcher/create.ts';
 import type { Journal } from '../launcher/journal.ts';
-import { snapshotDirectory } from '../launcher/snapshot.ts';
 import type { StarterTemplate } from '../launcher/starter.ts';
 import type { Supervisor } from '../launcher/supervisor.ts';
 import type { PrepareOptions } from '../launcher/workspace.ts';
@@ -37,7 +39,8 @@ import {
   type Layout,
 } from '../spec/index.ts';
 
-import type { CandidateStates, CheckResult } from './state.ts';
+import { startPreview } from './preview.ts';
+import { previewIdOf, type CandidateStates, type CheckResult } from './state.ts';
 import {
   applyChange,
   applyEdits,
@@ -62,9 +65,33 @@ export interface EngineerToolsOptions {
   /** Creation's two spawns, injectable so a test reaches no registry and no git. */
   readonly install?: PrepareOptions['install'];
   readonly initGit?: PrepareOptions['initGit'];
+  /** Where what the engineer does is written down. Absent, nothing is. */
+  readonly knowledge?: EngineerKnowledge;
 }
 
-/** How long a preview child gets to stop. */
+/** What the tab knows about one live turn, for the case a failure in it opens. */
+export interface TurnRecord {
+  /** The person's message. */
+  readonly message: string;
+  /** The `contexts` row for the turn. */
+  readonly contextId: number | null;
+  readonly model: { readonly provider: string; readonly id: string } | null;
+}
+
+/** The launcher's knowledge store, as the tools write to it. */
+export interface EngineerKnowledge {
+  readonly log: EventLog;
+  readonly evidence: Evidence;
+  readonly autoappVersion: string;
+  /**
+   * The turn a run id belongs to, while it is live.
+   *
+   * The tools see an envelope, which names the run and nothing else; what the
+   * person asked for is in the tab, which saw the turn begin.
+   */
+  readonly turn?: (runId: string) => TurnRecord | undefined;
+}
+
 /** How long one acceptance step may take. */
 const CHECK_STEP_TIMEOUT_MS = 30_000;
 const STOP_DEADLINE_MS = 10_000;
@@ -90,6 +117,44 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   const logger: HostLogger = options.logger ?? console;
 
   const tools: Record<string, GuardedTool> = {};
+
+  const knowledge = options.knowledge;
+  /**
+   * Write something down, and never let that fail the tool.
+   *
+   * The tool's result is what the person approved. A record of it is worth
+   * having and not worth losing the result over, so a store that refuses — a
+   * full disk, a resolved case something tried to change — is logged and the
+   * tool carries on.
+   */
+  const note = (what: string, write: (k: EngineerKnowledge) => void): void => {
+    if (knowledge === undefined) return;
+    try {
+      write(knowledge);
+    } catch (cause) {
+      logger.error(
+        `[autoapp] could not record ${what}: ${String(cause instanceof Error ? cause.message : cause)}`,
+      );
+    }
+  };
+  /** Who a call was, when anything is going to write it down. */
+  const identity = (envelope: Envelope | undefined, appId: string, releaseId: string | null): FullOrigin =>
+    originOf(envelope, appId, root, releaseId);
+  /** Open a case, with what the tab knows about the turn it happened in. */
+  const openCase = (
+    k: EngineerKnowledge,
+    fields: Pick<OpenEpisode, 'appId' | 'stage' | 'problem' | 'example' | 'origin' | 'releaseBefore'>,
+  ): void => {
+    const turn = k.turn?.(fields.origin.runId);
+    k.evidence.open({
+      ...fields,
+      request: turn?.message ?? '',
+      contextId: turn?.contextId ?? null,
+      dataSnapshot: null,
+      model: turn?.model ?? null,
+      autoappVersion: k.autoappVersion,
+    });
+  };
 
   tools['apps.list'] = guardedTool(gate, {
     name: 'apps.list',
@@ -221,7 +286,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       'Create a file, or replace one that is under 60 lines, in an application’s source workspace. For anything else use source.edit. Only src/ and autoapp.json may be changed. Returns a summary of what changed.',
     inputSchema: changeInput.toJsonSchema(),
     effect: 'write',
-    run: (input) => {
+    run: (input, _signal, envelope) => {
       const { appId, message, changes } = changeInput.parse(input);
       const sourceDir = root.app(appId).source;
       const before = snapshot(sourceDir);
@@ -253,6 +318,20 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       );
       const summary = diffSummary(before, snapshot(sourceDir));
       states.update(appId, { changed: applied.changed });
+      note('a change', (k) => {
+        // After the commit, so the revision is the one this change produced.
+        k.log.event(
+          'edit',
+          `changed ${String(applied.changed.length)} file(s)`,
+          {
+            paths: applied.changed,
+            hunks: changes.length,
+            bytes: Buffer.byteLength(JSON.stringify(changes), 'utf8'),
+          },
+          identity(envelope, appId, null),
+        );
+        k.evidence.appendEdit(appId, `${message}\n${summary}`);
+      });
       return Promise.resolve({ changed: applied.changed, undo: applied.undo, diff: summary });
     },
   });
@@ -275,13 +354,29 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       'Change files in an application’s source workspace by find-and-replace. Each hunk’s "find" must match exactly one place in its file, so make it the smallest unique block — three to eight lines. Leading whitespace need not match: the file keeps its own indentation. Every hunk is checked before any file is written. Only src/ and autoapp.json may be changed.',
     inputSchema: editInput.toJsonSchema(),
     effect: 'write',
-    run: (input) => {
+    run: (input, _signal, envelope) => {
       const { appId, message, hunks } = editInput.parse(input);
       const sourceDir = root.app(appId).source;
       const before = snapshot(sourceDir);
       const applied = applyEdits(sourceDir, hunks, message);
       const summary = diffSummary(before, snapshot(sourceDir));
       states.update(appId, { changed: applied.changed });
+      note('an edit', (k) => {
+        // The size of what the model composed, which is the number report 08b
+        // measured the stall against.
+        k.log.event(
+          'edit',
+          `edited ${String(applied.changed.length)} file(s)`,
+          {
+            paths: applied.changed,
+            hunks: hunks.length,
+            matchedBy: applied.matchedBy ?? [],
+            bytes: Buffer.byteLength(JSON.stringify(hunks), 'utf8'),
+          },
+          identity(envelope, appId, null),
+        );
+        k.evidence.appendEdit(appId, `${message}\n${summary}`);
+      });
       return Promise.resolve({
         changed: applied.changed,
         undo: applied.undo,
@@ -299,20 +394,55 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       'Build a candidate release from the source workspace. Returns the release id, or the problems to fix.',
     inputSchema: appIdInput.toJsonSchema(),
     effect: 'write',
-    run: async (input) => {
+    run: async (input, _signal, envelope) => {
       const { appId } = appIdInput.parse(input);
+      // Taken before the build, so the revision is the one that was built and
+      // the release is the one that was running when it was.
+      const who = identity(envelope, appId, null);
+      const releaseBefore = readCurrent(root, appId);
+      const started = Date.now();
       const built = await buildCandidate({ layout: root, appId, logger });
+      const ms = Date.now() - started;
+      const stamp = { builtFromRev: who.sourceRev, builtAt: Date.now(), stagesRun: built.stagesRun };
       if (!built.ok) {
         // Returned verbatim rather than summarised: the model is going to fix
         // them, and a paraphrase of a compiler error is worth nothing.
-        states.update(appId, { problems: built.problems, releaseId: null });
+        states.update(appId, { ...stamp, problems: built.problems, releaseId: null });
+        note('a build', (k) => {
+          k.log.event(
+            'build',
+            `the build failed with ${String(built.problems.length)} problem(s)`,
+            { ok: false, stagesRun: built.stagesRun, problems: built.problems, ms },
+            who,
+          );
+          // One case per distinct failure; the same failure still open is a
+          // no-op in the store.
+          for (const problem of built.problems) {
+            openCase(k, { appId, stage: problem.stage, problem: problem.message, origin: who, releaseBefore });
+          }
+          // A stage that ran and found nothing has had its failure repaired,
+          // even though the build as a whole still fails: that is what
+          // `stagesRun` exists to say. A stage that ran into a problem of its
+          // own resolves nothing — its old failure became a new one, which is
+          // not a repair.
+          const clean = built.stagesRun.filter(
+            (stage) => !built.problems.some((problem) => problem.stage === stage),
+          );
+          k.evidence.resolveBuild(appId, clean, who, null);
+        });
         return { ok: false, problems: built.problems };
       }
       const granted = readGrants(root, appId)?.capabilities ?? [];
       states.update(appId, {
+        ...stamp,
         releaseId: built.releaseId,
         problems: [],
         capabilityDiff: diffCapabilities(built.spec.manifest.capabilities, granted),
+      });
+      note('a build', (k) => {
+        const after = { ...who, releaseId: built.releaseId };
+        k.log.event('build', 'the build succeeded', { ok: true, releaseId: built.releaseId, stagesRun: built.stagesRun, ms }, after);
+        k.evidence.resolveBuild(appId, built.stagesRun, after, built.releaseId);
       });
       return { ok: true, releaseId: built.releaseId, schemaVersion: built.spec.manifest.schemaVersion };
     },
@@ -329,27 +459,15 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       'Start a candidate release on a copy of the application’s data, so the person can look at it. Nothing it does reaches outside this machine.',
     inputSchema: releaseInput.toJsonSchema(),
     effect: 'write',
-    run: async (input) => {
+    run: async (input, _signal, envelope) => {
       const { appId, releaseId } = releaseInput.parse(input);
-      const app = root.app(appId);
-      const previous = states.get(appId).preview;
-      if (previous !== null) await previous.shutdown(STOP_DEADLINE_MS);
-
-      const directory = app.preview(releaseId);
-      // A fresh copy every time. A preview that reused the last one would show
-      // the person the effects of the previous preview as if they were theirs.
-      rmSync(directory, { recursive: true, force: true });
-      if (existsSync(app.data)) snapshotDirectory(app.data, directory);
-      else mkdirSync(directory, { recursive: true, mode: 0o700 });
-
-      const child = await supervisor.start({
+      // The same function the person's Start preview reaches after a restart.
+      await startPreview(
+        { layout: root, supervisor, states, ...(knowledge === undefined ? {} : { log: knowledge.log }) },
         appId,
-        releaseDir: app.release(releaseId),
         releaseId,
-        dataDir: directory,
-        mode: 'preview',
-      });
-      states.update(appId, { preview: child, releaseId, checks: [] });
+        knowledge === undefined ? {} : identity(envelope, appId, releaseId),
+      );
       // Deliberately not the URL. The person opens the preview from the tab.
       return { ok: true };
     },
@@ -361,7 +479,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       'Run the release’s acceptance examples against the running preview, and report what each one did.',
     inputSchema: releaseInput.toJsonSchema(),
     effect: 'read',
-    run: async (input) => {
+    run: async (input, _signal, envelope) => {
       const { appId, releaseId } = releaseInput.parse(input);
       const preview = states.get(appId).preview;
       if (preview === null) {
@@ -403,7 +521,45 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
           }
         }
       }
-      states.update(appId, { checks: results });
+      // Written down with the example and the child they are about, so a
+      // restart, a rebuild or an edited example is not taken as verified.
+      const previewId = previewIdOf(preview);
+      const hashes = spec.acceptance.map((example) => exampleHash(example));
+      states.update(appId, {
+        checks: {
+          releaseId,
+          previewId,
+          examples: spec.acceptance.map((example, index) => ({ id: example.id, hash: hashes[index] ?? '' })),
+          results,
+          at: Date.now(),
+        },
+      });
+      note('a check', (k) => {
+        const who = identity(envelope, appId, releaseId);
+        const passed = results.filter((result) => result.passed).length;
+        k.log.event(
+          'check',
+          `${String(passed)} of ${String(results.length)} acceptance example(s) passed`,
+          { releaseId, previewId, results },
+          who,
+        );
+        spec.acceptance.forEach((example, index) => {
+          const result = results[index];
+          if (result === undefined) return;
+          if (result.passed) {
+            k.evidence.resolveCheck(appId, hashes[index] ?? '', who, releaseId);
+          } else {
+            openCase(k, {
+              appId,
+              stage: 'check',
+              problem: result.detail ?? 'the example failed',
+              example: { id: example.id, content: example },
+              origin: who,
+              releaseBefore: readCurrent(root, appId),
+            });
+          }
+        });
+      });
       return { results };
     },
   });
@@ -432,16 +588,25 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       'Replace what the person is using with this candidate, moving their data across. Ask them first; this is the only action that changes what they are actually running.',
     inputSchema: releaseInput.toJsonSchema(),
     effect: 'external',
-    run: async (input) => {
+    run: async (input, _signal, envelope) => {
       const { appId, releaseId } = releaseInput.parse(input);
       const preview = states.get(appId).preview;
-      if (preview !== null) {
-        // The preview holds a copy of the data open; the switch is cleaner
-        // without it, and the candidate is about to become the real thing.
-        await preview.shutdown(STOP_DEADLINE_MS);
-        states.update(appId, { preview: null });
-      }
+      // The preview holds a copy of the data open; the switch is cleaner
+      // without it, and the candidate is about to become the real thing. It was
+      // stopped on purpose, so a restart has nothing to offer to start again.
+      if (preview !== null) await preview.shutdown(STOP_DEADLINE_MS);
+      states.update(appId, { preview: null, previewWasRunning: false });
       const result = await activate({ layout: root, supervisor, journal, appId, releaseId, logger });
+      note('an activation', (k) => {
+        k.log.event(
+          'activate',
+          result.ok ? 'the release was activated' : 'the activation did not complete',
+          result.ok
+            ? { ok: true, releaseId }
+            : { ok: false, phase: result.phase, reason: result.reason, recovered: result.recovered, releaseId },
+          identity(envelope, appId, releaseId),
+        );
+      });
       return result.ok
         ? { ok: true, previousRelease: result.previousRelease }
         : { ok: false, phase: result.phase, reason: result.reason, recovered: result.recovered };
@@ -460,7 +625,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       if (state.releaseId !== null) {
         rmSync(root.app(appId).preview(state.releaseId), { recursive: true, force: true });
       }
-      states.update(appId, { preview: null });
+      states.update(appId, { preview: null, previewWasRunning: false });
       return { ok: true };
     },
   });

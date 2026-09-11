@@ -11,14 +11,18 @@
  * the only `external` tool — always asks and could never run in a preview.
  */
 import { createAi, type Ai } from 'broapp/ai/host';
-import type { ProviderAdapter } from 'broapp/ai/host';
+import type { DeliveredContext, ProviderAdapter } from 'broapp/ai/host';
 import type { Gate, HostLogger } from 'broapp/host';
 import type { Bridge } from 'brobridge';
 
 import { ENGINEER_INSTRUCTIONS } from '../engineer/instructions.ts';
 import { createCandidateStates, type CandidateStates } from '../engineer/state.ts';
-import { engineerTools } from '../engineer/tools.ts';
+import { engineerTools, type TurnRecord } from '../engineer/tools.ts';
 import type { RunStore } from '../host/run-store.ts';
+import { recordContext, type Evidence } from '../knowledge/evidence.ts';
+import type { EventLog } from '../knowledge/log.ts';
+import type { Knowledge } from '../knowledge/store.ts';
+import { AUTOAPP_VERSION } from '../knowledge/version.ts';
 import type { Layout } from '../spec/index.ts';
 
 import { createLauncherApp, LAUNCHER_CONFIRM_TIMEOUT_MS, type LauncherApp } from './app.ts';
@@ -51,6 +55,18 @@ export interface CreateLauncherTabOptions {
   /** Creation's two spawns, injectable so a test reaches no registry and no git. */
   readonly install?: PrepareOptions['install'];
   readonly initGit?: PrepareOptions['initGit'];
+  /**
+   * The launcher's knowledge store, its log and its evidence writer.
+   *
+   * Opened by `main.ts` and handed in, never opened here, so a test can build
+   * the same three over a temporary directory and read them afterwards.
+   * Absent, nothing is written down and the tab behaves as it always did.
+   */
+  readonly knowledge?: {
+    readonly store: Knowledge;
+    readonly log: EventLog;
+    readonly evidence: Evidence;
+  };
 }
 
 /** Everything that mounts on the launcher's bridge. */
@@ -59,6 +75,8 @@ export interface LauncherTab {
   readonly app: LauncherApp;
   readonly ai: Ai;
   readonly states: CandidateStates;
+  /** The store this tab writes to, for a test to read; `null` when it writes nowhere. */
+  readonly knowledge: Knowledge | null;
 }
 
 /** What the engineer is, in the words the model is given first. */
@@ -68,7 +86,18 @@ const PURPOSE =
 /** Assemble the launcher's tab. */
 export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTab {
   const logger: HostLogger = options.logger ?? console;
-  const states = createCandidateStates();
+  // Over the layout, so the candidate a person left is the one they come back to.
+  const states = createCandidateStates(options.layout, logger);
+  const knowledge = options.knowledge;
+
+  /**
+   * The live turns: what the person asked and what the turn was given.
+   *
+   * Filled from `onContext`, which arrives before the model is called, and not
+   * from `onRunEnd`, which arrives after every tool the turn made has already
+   * run — too late for the case a failed build opens to say what was asked.
+   */
+  const turns = new Map<string, TurnRecord>();
 
   const app = createLauncherApp({
     layout: options.layout,
@@ -77,6 +106,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     states,
     gate: options.gate,
     logger,
+    ...(knowledge === undefined ? {} : { log: knowledge.log }),
     template: options.template,
     versions: options.versions,
     ...(options.openBrowser === undefined ? {} : { openBrowser: options.openBrowser }),
@@ -111,8 +141,57 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       versions: options.versions,
       ...(options.install === undefined ? {} : { install: options.install }),
       ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
+      ...(knowledge === undefined
+        ? {}
+        : {
+            knowledge: {
+              log: knowledge.log,
+              evidence: knowledge.evidence,
+              autoappVersion: AUTOAPP_VERSION,
+              turn: (runId: string) => turns.get(runId),
+            },
+          }),
     }),
-    onRunEnd: (runId, status, summary) => options.store.finishRun(runId, status, summary),
+    ...(knowledge === undefined
+      ? {}
+      : {
+          onContext: (runId: string, delivered: DeliveredContext) => {
+            // The turn is remembered even when its context cannot be written,
+            // so a case opened during it still carries what was asked.
+            let contextId: number | null = null;
+            try {
+              contextId = recordContext(knowledge.store, {
+                runId,
+                appId: null,
+                instructions: ENGINEER_INSTRUCTIONS,
+                delivered,
+                // Nothing serves knowledge yet, so nothing was asked for or found.
+                requested: [],
+                resolved: [],
+              });
+            } catch (cause) {
+              logger.error(
+                `[autoapp] could not record what a turn was given: ${String(cause instanceof Error ? cause.message : cause)}`,
+              );
+            }
+            turns.set(runId, { message: delivered.message, contextId, model: delivered.model });
+          },
+        }),
+    onRunEnd: (runId, status, summary, detail) => {
+      turns.delete(runId);
+      if (knowledge !== undefined) {
+        knowledge.log.event(
+          'run',
+          `a turn ended: ${status}`,
+          { status, ...(detail === undefined ? {} : { steps: detail.steps, ms: detail.ms }) },
+          { runId },
+        );
+        if (detail?.usage !== undefined) {
+          knowledge.log.event('usage', 'tokens a turn used', { ...detail.usage }, { runId });
+        }
+      }
+      options.store.finishRun(runId, status, summary);
+    },
     logger,
   });
 
@@ -124,5 +203,6 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     app,
     ai,
     states,
+    knowledge: knowledge?.store ?? null,
   };
 }
