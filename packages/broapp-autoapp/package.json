@@ -1,6 +1,6 @@
 {
   "name": "broapp-autoapp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "A Broapp application its owner can reshape while using it: launcher, renderer, specification, engineer, activation",
   "license": "MIT",
@@ -53,7 +53,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
-    "broapp": "^0.4.0",
+    "broapp": "^0.4.1",
     "broapp-ai-anthropic": "^0.3.0",
     "broapp-ai-compatible": "^0.3.0",
     "broapp-ai-elements": "^0.3.0"

@@ -202,16 +202,17 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.0: the knowledge loop. The launcher writes down every build, check
-and edit with the identity it had at the time, resumes where a person left off
-after a restart, opens every engineer turn with an orientation and evidence for
-the request, distils a provisional lesson from a resolved failure for a person
-to confirm, and can replay a case with and without that lesson. The `broapp` AI
-host gained `Ai.model()`, `Ai.turn()` and optional hooks for the delivered
-context and the end of a run. Every package moves: `broapp`,
-`broapp-ai-anthropic`, `broapp-ai-compatible`, `broapp-ai-elements` and
-`create-broapp` at 0.4.0, `broapp-autoapp` at 0.2.0. `bun create broapp`
-generates a project on 0.4.0.
+Version 0.4.1: the change cycle. `candidate.cycle` applies a patch, builds
+it, and when the build passes starts the preview and runs the acceptance
+examples, asking the person at each step; a cycle that ends the same way
+three times in a turn stops and asks. Acceptance examples may assert what a
+page declares as well as what a route returns, and every check report says
+what no check can show. `spec.reference` gives the engineer the rules of each
+file on demand. The `broapp` chat card can answer a tool's own step-by-step
+questions. Packages: `broapp`, `broapp-ai-anthropic`, `broapp-ai-compatible`,
+`broapp-ai-elements` and `create-broapp` at 0.4.1, `broapp-autoapp` at 0.3.0.
+0.4.0 (2026-09-11) was the knowledge loop: what the launcher writes down,
+resumes, serves, distils and replays.
 
 ## Licence
 
