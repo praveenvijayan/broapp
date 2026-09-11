@@ -10,6 +10,7 @@
  * `mount` has an implementation for every route in the contract, which it
  * insists on.
  */
+import type { LanguageModel } from 'ai';
 import type { Bridge } from 'brobridge';
 
 // Imported from the host entry point rather than from `host/app.ts` directly:
@@ -138,6 +139,14 @@ export interface Ai {
   readonly activeStreams: number;
   /** For tests, and for applications that read settings on the host. */
   readonly registry: Registry;
+  /**
+   * The configured model, for host code that needs one outside a chat turn.
+   *
+   * Resolved the same way a turn resolves it, so a caller is told "AI is not
+   * set up yet" in the same words, and always a model instance — never a
+   * string the AI SDK would send to its gateway.
+   */
+  model(override?: { readonly modelId?: string }): Promise<LanguageModel>;
 }
 
 /** How long a provider is given to answer a listing or a connection test. */
@@ -297,5 +306,9 @@ export function createAi(options: CreateAiOptions): Ai {
       return host.activeStreams;
     },
     registry,
+    model: async (override) => {
+      const { adapter, config, modelId } = await registry.resolve(override);
+      return adapter.model(config, modelId);
+    },
   };
 }

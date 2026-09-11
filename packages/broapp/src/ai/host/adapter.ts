@@ -61,7 +61,7 @@ export interface ProviderAdapter {
   models(config: AdapterConfig, signal: AbortSignal): Promise<BroappModel[]>;
   /** Cheapest possible proof the config works. Must reject with {@link AdapterError}. */
   test(config: AdapterConfig, signal: AbortSignal): Promise<void>;
-  /** The AI SDK model. Only `broapp/ai/host` calls this. */
+  /** The AI SDK model. Only `broapp/ai/host` calls this; other host code asks `Ai.model()`. */
   model(config: AdapterConfig, modelId: string): LanguageModel;
 }
 

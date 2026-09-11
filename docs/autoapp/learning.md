@@ -112,10 +112,14 @@ change by three sentences only: read the documents first, and treat a build's
    match, each with a `file:line`, followed by the migration numbering and the
    fixed constraints. When nothing matches it says so and lists the workspace's
    main files with their sizes.
-3. **Supporting evidence.** A `lessons` document with up to three facts whose
-   words match the request, and, beside a failed build, up to three `hints`
-   whose words match its problems and whose stage is the problem's stage or
-   none.
+3. **Supporting evidence.** A `lessons` document with up to three lessons that
+   share at least two words with the request, or that apply to a route the task
+   evidence names; and, beside a failed build, up to three `hints` that share a
+   word with its problems and whose stage is the problem's stage or none. One
+   shared word is not enough for a turn: in 12b's rerun "list" served the
+   migration seed to a request about tags. A provisional lesson is labelled
+   `(provisional)`, and one a person should look at again
+   `(needs review: <reason>)`.
 
 **Which application.** The one the message names by its id or a word of its
 name; else the one last selected; else the only one there is; else none, and
@@ -154,6 +158,77 @@ ranks anything.** An outcome is a fact about one attempt.
 last build's result, and `next: candidate.build`. From the third unverified
 edit it adds a warning. It is advice; nothing is refused and nothing times out.
 
+## Distillation
+
+When a turn ends, every resolved case that has not been asked about is queued,
+and the engineer's own model is asked one structured question about each, one
+at a time, with a 60-second limit: what explains the failure, and could the
+engineer have known? The answer is one of six:
+
+| Diagnosis | Meaning | What is written |
+|---|---|---|
+| `knowledge_missing` | The fact it needed was nowhere in what it was given. | The diagnosis, and a provisional lesson. |
+| `knowledge_not_retrieved` | The fact existed as a lesson but was not delivered. | The diagnosis, and a `search` event with `miss = 1` naming the lesson. |
+| `method_unclear` | The instructions covered it, unclearly. | The diagnosis, and a provisional lesson that is **never served**: it is the queue a person reads before changing `instructions.ts`. |
+| `method_not_followed` | The instructions were clear and not followed. | The diagnosis. |
+| `tool_or_environment` | A tool, the build or the machine failed. | The diagnosis. |
+| `insufficient_evidence` | The record cannot say. | The diagnosis. |
+
+The diagnosis and the model's reasoning are always written to the case, once
+(`episodes.diagnosis`, as JSON). A case whose question fails stays `pending` and
+is asked again at the end of a later turn; after three attempts it is `failed`.
+A second question about the same case is a no-op.
+
+**What the distiller is shown.** Blobs, never live files: the person's request;
+the instructions and every document exactly as delivered to the turn that met
+the failure, from its `contexts` row; the problem and its stage; the acceptance
+example for a check case; the edits, with how each hunk matched; both source
+revisions and releases; and the last 20 events for the application while the
+case was open. When a lesson for the same failure already exists, it is shown
+too, with whether it existed at the turn's corpus version and whether it was
+among the delivered documents.
+
+**Why a lesson is provisional.** A model's account of its own failure is a
+hypothesis. A provisional lesson is served, ranked below confirmed ones and
+labelled so; nothing in the launcher confirms, retires or promotes one. Every
+lesson records the case it came from, where it applies (`stage`, `files`,
+`routes`, and the failure's signature), the hash of the instructions it was
+written against and the launcher version that wrote it. A lesson whose text
+names a path on this machine, an address with a port, or anything shaped like
+a secret is dropped and the diagnosis kept.
+
+**Supersession.** When the model says a new lesson has the same cause as an
+existing one, the new one records `supersedes`. An old provisional lesson
+becomes `superseded` and leaves the index. An old *confirmed* one keeps its
+status — a person confirmed it — and is flagged `needs_review:superseded`.
+
+**Review flags.** On start, the launcher flags, and never changes the status of:
+
+- `needs_review:recurring` — served three times for a failure that came back,
+  and never once resolved, since it was last reviewed;
+- `needs_review:instructions_changed` — written for other instructions than the
+  running ones, and recurred twice since;
+- `needs_review:autoapp_upgraded` — distilled by a launcher of another minor
+  version, and never reviewed.
+
+**Reviewing.** From the launcher binary, reading the database directly:
+
+```
+broapp-autoapp knowledge list [--provisional|--confirmed|--review|--method]
+broapp-autoapp knowledge show <id>
+broapp-autoapp knowledge confirm <id> [--by <name>]
+broapp-autoapp knowledge retire <id>
+broapp-autoapp knowledge export [--json]
+```
+
+`list` shows each lesson's servings as resolved/recurred/blocked/unrelated.
+`confirm` and `retire` record who and when, clear the flag and write a corpus
+version; `retire` takes the lesson out of the index. Both refuse while a
+launcher is serving from the same root, because it holds the database and
+serves lessons from memory. The engineer can read one lesson's detail with the
+`knowledge.show` tool (a `read`), which omits the reviewer's name and refuses a
+`method_unclear` lesson.
+
 ## Retention
 
 When the store opens, events older than 30 days are deleted, and then the oldest
@@ -164,8 +239,6 @@ are deleted. Cases and contexts are never deleted.
 
 | What | Where |
 |---|---|
-| Distilling a resolved case into a provisional lesson that a person confirms | 12c |
 | Replaying a case against a later launcher to see whether it still fails | 12d |
-
-Until then the only lessons are the curated seeds, and cases are written but
-not yet read by anything except the candidate panel.
+| A Lessons panel in the launcher tab | [backlog](backlog.md) |
+| Promoting a lesson without a person | [backlog](backlog.md) |

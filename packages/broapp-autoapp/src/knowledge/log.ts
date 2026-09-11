@@ -103,7 +103,18 @@ const ALLOWED: Readonly<Record<EventKind, Readonly<Record<string, FieldRule>>>> 
   run: { status: 'keep', steps: 'keep', ms: 'keep' },
   usage: { inputTokens: 'keep', outputTokens: 'keep' },
   activate: { ok: 'keep', phase: 'keep', reason: 'text', recovered: 'text', releaseId: 'keep' },
-  search: { tokens: 'text', hits: 'keep', requested: 'keep', resolved: 'keep', included: 'keep' },
+  // `miss` and `lessonId` are the distiller's: a lesson that existed and was
+  // not in what the engineer was given, which is the one thing a search that
+  // matched nothing cannot say about itself.
+  search: {
+    tokens: 'text',
+    hits: 'keep',
+    requested: 'keep',
+    resolved: 'keep',
+    included: 'keep',
+    miss: 'keep',
+    lessonId: 'keep',
+  },
   stderr: { pid: 'keep' },
   log: {},
   dropped: {},

@@ -231,3 +231,30 @@ describe('the AI layer on a bridge', () => {
     ).rejects.toThrow(/reserved/);
   });
 });
+
+describe('Ai.model()', () => {
+  test('returns the configured adapter’s model instance, and says when nothing is configured', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'broapp-ai-model-'));
+    try {
+      const adapter = createFakeAdapter();
+      const ai = createAi({
+        dataDir,
+        providers: [adapter],
+        app: { name: 'test', purpose: 'testing Ai.model' },
+        fetch: noNetwork,
+      });
+      await expect(ai.model()).rejects.toMatchObject({ code: 'unavailable' });
+      expect(adapter.modelCalls).toBe(0);
+
+      await ai.registry.update({ provider: 'fake', modelId: 'fake-1' });
+      const model = await ai.model();
+      expect(adapter.modelCalls).toBe(1);
+      expect(model).toMatchObject({ provider: 'fake', modelId: 'fake-1' });
+      // A conversation may pin a model within the configured provider.
+      expect(await ai.model({ modelId: 'fake-2' })).toMatchObject({ modelId: 'fake-2' });
+      ai.close();
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+});

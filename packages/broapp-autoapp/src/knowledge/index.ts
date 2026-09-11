@@ -38,6 +38,14 @@ export type { Outcome } from './scoring.ts';
 export { SEED_LESSONS, seedLessons } from './seed.ts';
 export type { LessonApplies, SeedLesson } from './seed.ts';
 
+export { DIAGNOSES, DIAGNOSIS, DISTILLER_SYSTEM, createDistiller, distillerPrompt, pendingCases } from './distil.ts';
+export type { CreateDistillerInput, Diagnosis, Distiller } from './distil.ts';
+
+export { REVIEW_REASONS, instructionsHash, reviewFlags } from './freshness.ts';
+
+export { runKnowledgeCommand, showLesson } from './cli.ts';
+export type { KnowledgeCommandOptions, LessonProvenance, LessonRecord, LessonServing } from './cli.ts';
+
 export { SESSION_FILE, openSession } from './session.ts';
 export type { Session } from './session.ts';
 

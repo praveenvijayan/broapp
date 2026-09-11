@@ -81,7 +81,7 @@ const WRITABLE = /^(src\/|autoapp\.json$)/;
  * exist yet, and a symlink in the root's own path (a temporary directory on
  * macOS, for one) would otherwise make every comparison fail.
  */
-function within(sourceDir: string, path: string): string {
+export function within(sourceDir: string, path: string): string {
   const root = existsSync(sourceDir) ? realpathSync(sourceDir) : resolve(sourceDir);
   const target = resolve(root, path);
   const inside = relative(root, target);
@@ -163,6 +163,20 @@ export interface SearchHit {
 /** The most lines one search returns, and the longest line it quotes. */
 const MAX_SEARCH_HITS = 50;
 const MAX_HIT_CHARS = 200;
+/** The longest pattern compiled, and how much of one line it is tested against. */
+const MAX_PATTERN_CHARS = 200;
+const MAX_TESTED_CHARS = 1_000;
+/**
+ * A quantifier applied to a group that already contains one: `(a+)+`,
+ * `(x*)*`, `(a|b+){2,}`.
+ *
+ * These are the known shapes that backtrack catastrophically, and the pattern
+ * comes from a model. JavaScript has no timeout on a regular expression, so a
+ * pattern that takes for ever holds the launcher's one event loop — the
+ * heartbeats included — for ever. Refusing the shape is cruder than a real
+ * analysis and enough for what a code search needs.
+ */
+const NESTED_QUANTIFIER = /\([^()]*[+*][^()]*\)\s*[+*{]/;
 
 /**
  * Find a pattern in the workspace's readable files.
@@ -178,6 +192,16 @@ export function searchWorkspace(
   pattern: string,
   options: { readonly literal?: boolean; readonly files?: string } = {},
 ): { hits: SearchHit[]; truncated: boolean } {
+  if (pattern.length > MAX_PATTERN_CHARS) {
+    throw publicError.invalidInput(
+      `the pattern is ${String(pattern.length)} characters; the most is ${String(MAX_PATTERN_CHARS)}`,
+    );
+  }
+  if (options.literal !== true && NESTED_QUANTIFIER.test(pattern)) {
+    throw publicError.invalidInput(
+      'the pattern repeats a group that already repeats, which can take for ever to test; search for something simpler',
+    );
+  }
   let matcher: RegExp;
   try {
     matcher = new RegExp(options.literal === true ? pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : pattern);
@@ -199,7 +223,8 @@ export function searchWorkspace(
     const lines = text.split(/\r?\n/);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index] ?? '';
-      if (!matcher.test(line)) continue;
+      // Bounded, so a minified or generated line cannot make one test slow.
+      if (!matcher.test(line.slice(0, MAX_TESTED_CHARS))) continue;
       // One past the limit is how "there were more" is known without counting them all.
       if (hits.length === MAX_SEARCH_HITS) return { hits, truncated: true };
       hits.push({ path: entry.path, line: index + 1, text: line.slice(0, MAX_HIT_CHARS) });

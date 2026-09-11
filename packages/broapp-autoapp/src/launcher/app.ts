@@ -337,6 +337,19 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
  */
 export const LAUNCHER_CONFIRM_TIMEOUT_MS = 600_000;
 
+/**
+ * How many model steps one engineer turn may take: forty.
+ *
+ * Not the AI layer's eight, which is right for an assistant answering a
+ * question about its application. The engineer's loop is read, edit, build,
+ * preview, check and explain, and eight steps do not hold it. Report 12b's
+ * rerun of the 08c request ended after sixteen tool calls in exactly eight
+ * model steps, with two edits landed, no closing text and no build — the cap,
+ * not the model, ended the turn. 08c's turn (eighteen calls, ending right after
+ * an edit) fits the same cap.
+ */
+export const LAUNCHER_MAX_STEPS = 40;
+
 /** The launcher's own gate: its tab's clicks and its engineer's tools. */
 export function createLauncherGate(options: {
   releaseId: string;

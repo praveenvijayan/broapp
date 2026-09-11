@@ -193,6 +193,23 @@ returns no path outside the workspace. Selecting an application
 (`launcher.appSelect`) is a `write` because it changes what the next turn is
 about; it stores only the id.
 
+`source.search` compiles a model-supplied pattern, and JavaScript has no timeout
+on a regular expression. It refuses a pattern over 200 characters and one that
+repeats a group that already repeats (`(a+)+`), and tests each line against its
+first 1,000 characters only. The symbol index behind the task evidence follows
+no symbolic link and reads every file through the same containment check.
+
+**The distiller.** Reads blobs only — what the case and the turn's `contexts`
+row recorded — never a live file, and sends them to the configured provider,
+which the turn itself was already sent. Its answer passes the same `sanitise()`
+as everything else, and a lesson whose text names a path on this machine, an
+address with a port, or anything the sanitiser would change is dropped. A
+`method_unclear` lesson never enters a prompt: it is not served, not hinted,
+and `knowledge.show` refuses it. Nothing the distiller writes changes a
+lesson's status except superseding a provisional one; confirming and retiring
+are the `knowledge` command, run by a person, which refuses while a launcher is
+serving.
+
 ## What none of this protects against
 
 A candidate release's host code is **trusted local code**: crash-isolated in

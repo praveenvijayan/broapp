@@ -18,10 +18,11 @@
  * package has, and a wrong claim costs the engineer more than a missing one —
  * it reads the wrong file with confidence.
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { CandidateStates } from '../engineer/state.ts';
+import { within } from '../engineer/workspace.ts';
 import type { AppRow } from '../launcher/apps.ts';
 import { SOURCE } from '../launcher/candidate.ts';
 import { readCurrent, readRelease, type AppSpec, type Layout } from '../spec/index.ts';
@@ -223,23 +224,36 @@ const VIEW_ID = /id: ['"]([\w-]+)['"]/g;
  * `id: '…'` inside `views.ts`, and the migration ids in `autoapp.json`. An
  * operation registered through an alias (`const op = app.operation`) or a
  * computed name is not found, and the evidence says `unknown` for it.
+ *
+ * Only what is really inside the workspace is read: the scan does not follow
+ * a symbolic link, a file that is one is skipped, and every path passes the
+ * same `within` check `source.search` uses. A link in `src/` pointing at a
+ * file elsewhere on the machine would otherwise put that file's names — and a
+ * `file:line` into it — in front of the model.
  */
 export function indexWorkspace(sourceDir: string, rev: string): SymbolIndex {
   const symbols: IndexedSymbol[] = [];
+  /** The file's text, or `null` when it is a link, too large, outside, or unreadable. */
+  const readInside = (file: string): string | null => {
+    try {
+      const full = within(sourceDir, file);
+      const entry = lstatSync(full);
+      if (entry.isSymbolicLink() || !entry.isFile() || entry.size > MAX_INDEXED_BYTES) return null;
+      return readFileSync(full, 'utf8');
+    } catch {
+      return null;
+    }
+  };
   if (existsSync(join(sourceDir, 'src'))) {
-    const files = [...new Bun.Glob('src/**/*.{ts,tsx}').scanSync({ cwd: sourceDir, onlyFiles: true })]
+    const files = [
+      ...new Bun.Glob('src/**/*.{ts,tsx}').scanSync({ cwd: sourceDir, onlyFiles: true, followSymlinks: false }),
+    ]
       .map((path) => path.split('\\').join('/'))
       .filter((path) => !path.includes('/node_modules/'))
       .sort();
     for (const file of files) {
-      const full = join(sourceDir, file);
-      let text: string;
-      try {
-        if (statSync(full).size > MAX_INDEXED_BYTES) continue;
-        text = readFileSync(full, 'utf8');
-      } catch {
-        continue;
-      }
+      const text = readInside(file);
+      if (text === null) continue;
       const views = file === SOURCE.views;
       text.split(/\r?\n/).forEach((content, index) => {
         const line = index + 1;
@@ -259,10 +273,10 @@ export function indexWorkspace(sourceDir: string, rev: string): SymbolIndex {
     }
   }
 
-  const manifestPath = join(sourceDir, SOURCE.manifest);
-  if (existsSync(manifestPath)) {
+  const manifestText = readInside(SOURCE.manifest);
+  if (manifestText !== null) {
     try {
-      const text = readFileSync(manifestPath, 'utf8');
+      const text = manifestText;
       const lines = text.split(/\r?\n/);
       const manifest = JSON.parse(text) as { migrations?: { id?: unknown }[] };
       for (const step of manifest.migrations ?? []) {

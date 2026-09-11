@@ -19,6 +19,7 @@ import { publicError } from 'broapp/host';
 import type { Envelope, Gate, HostLogger } from 'broapp/host';
 import { s } from 'broapp/shared';
 
+import { showLesson } from '../knowledge/cli.ts';
 import { exampleHash, type Evidence, type OpenEpisode } from '../knowledge/evidence.ts';
 import { origin as originOf, type FullOrigin } from '../knowledge/ids.ts';
 import type { EventLog } from '../knowledge/log.ts';
@@ -729,6 +730,29 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       return result.ok
         ? { ok: true, previousRelease: result.previousRelease }
         : { ok: false, phase: result.phase, reason: result.reason, recovered: result.recovered };
+    },
+  });
+
+  const lessonInput = s.object({ lessonId: s.number({ int: true, min: 1 }) });
+  tools['knowledge.show'] = guardedTool(gate, {
+    name: 'knowledge.show',
+    description:
+      'The whole of one lesson from earlier work: its summary and detail, where it applies, the case it came from, and what happened each time it was served. Use it to read the detail behind a hint or a lesson in your documents.',
+    inputSchema: lessonInput.toJsonSchema(),
+    effect: 'read',
+    run: (input) => {
+      const { lessonId } = lessonInput.parse(input);
+      const store = knowledge?.store;
+      if (store === undefined) throw publicError.unavailable('Nothing is written down in this launcher.');
+      const record = showLesson(store, lessonId);
+      // A `method_unclear` lesson is a note about the instructions for a person
+      // to read, and never enters a prompt — this tool's result included.
+      if (record === null || record.diagnosis === 'method_unclear') {
+        throw publicError.notFound(`There is no lesson ${String(lessonId)}.`);
+      }
+      // Without the reviewer's name: who confirmed a lesson is the person's
+      // business, not something the model needs to act on.
+      return Promise.resolve(Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'reviewedBy')));
     },
   });
 

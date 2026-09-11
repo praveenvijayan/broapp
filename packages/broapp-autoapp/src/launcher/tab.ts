@@ -19,7 +19,9 @@ import { ENGINEER_INSTRUCTIONS } from '../engineer/instructions.ts';
 import { createCandidateStates, type CandidateStates } from '../engineer/state.ts';
 import { engineerTools, type TurnRecord } from '../engineer/tools.ts';
 import type { RunStore } from '../host/run-store.ts';
+import { createDistiller, pendingCases, type Distiller } from '../knowledge/distil.ts';
 import { recordContext, type Evidence } from '../knowledge/evidence.ts';
+import { instructionsHash, reviewFlags } from '../knowledge/freshness.ts';
 import type { EventLog } from '../knowledge/log.ts';
 import { scoreRunEnd } from '../knowledge/scoring.ts';
 import { createServe, type Serve, type ServedTurn } from '../knowledge/serve.ts';
@@ -28,7 +30,7 @@ import type { Knowledge } from '../knowledge/store.ts';
 import { AUTOAPP_VERSION } from '../knowledge/version.ts';
 import type { Layout } from '../spec/index.ts';
 
-import { createLauncherApp, LAUNCHER_CONFIRM_TIMEOUT_MS, type LauncherApp } from './app.ts';
+import { createLauncherApp, LAUNCHER_CONFIRM_TIMEOUT_MS, LAUNCHER_MAX_STEPS, type LauncherApp } from './app.ts';
 import { listApps } from './apps.ts';
 import type { Journal } from './journal.ts';
 import type { StarterTemplate } from './starter.ts';
@@ -75,6 +77,8 @@ export interface CreateLauncherTabOptions {
   readonly contextBudgetChars?: number;
   /** Which application is selected. Defaults to `session.json` in `dataDir`. */
   readonly session?: Session;
+  /** Model steps per turn. Defaults to the launcher's forty; tests shorten it. */
+  readonly maxSteps?: number;
 }
 
 /** Everything that mounts on the launcher's bridge. */
@@ -87,6 +91,11 @@ export interface LauncherTab {
   readonly knowledge: Knowledge | null;
   /** Which application the next turn is about, when its message does not say. */
   readonly session: Session;
+  /**
+   * The question asked about each resolved case; `null` when nothing is
+   * written down. The launcher's shutdown closes it; a test awaits `idle()`.
+   */
+  readonly distiller: Distiller | null;
 }
 
 /** What the engineer is, in the words the model is given first. */
@@ -129,6 +138,35 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           apps: () => listApps(options.layout, options.supervisor, options.journal),
         });
 
+  if (knowledge !== undefined) {
+    // Once, on start, after the seeds: which lessons a person should look at
+    // again. A flag, never a change of status.
+    try {
+      reviewFlags(knowledge.store, {
+        instructionsHash: instructionsHash(ENGINEER_INSTRUCTIONS),
+        autoappVersion: AUTOAPP_VERSION,
+      });
+    } catch (cause) {
+      logger.error(`[autoapp] could not check which lessons need review: ${String(cause instanceof Error ? cause.message : cause)}`);
+    }
+  }
+
+  /**
+   * One structured question per resolved case, to the engineer's own model,
+   * after the turn that resolved it has ended. `ai` is built below; the model
+   * is asked for when a question is, never before.
+   */
+  const distiller: Distiller | null =
+    knowledge === undefined
+      ? null
+      : createDistiller({
+          knowledge: knowledge.store,
+          log: knowledge.log,
+          model: () => ai.model(),
+          instructions: ENGINEER_INSTRUCTIONS,
+          autoappVersion: AUTOAPP_VERSION,
+        });
+
   const app = createLauncherApp({
     layout: options.layout,
     supervisor: options.supervisor,
@@ -153,6 +191,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     // undercut the gate's — the person would watch a countdown that was already
     // over.
     confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
+    maxSteps: options.maxSteps ?? LAUNCHER_MAX_STEPS,
     app: {
       name: 'Autoapp',
       purpose: PURPOSE,
@@ -234,12 +273,24 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
         if (detail?.usage !== undefined) {
           knowledge.log.event('usage', 'tokens a turn used', { ...detail.usage }, { runId });
         }
-        // Whatever the turn was served and never tested by a build or a check.
+        // Whatever the turn was served and never tested by a build or a check,
+        // and whatever it was offered and never delivered.
+        serve?.ended(runId);
         try {
           scoreRunEnd(knowledge.store, runId);
         } catch (cause) {
           logger.error(
             `[autoapp] could not close a turn's servings: ${String(cause instanceof Error ? cause.message : cause)}`,
+          );
+        }
+        // After scoring, and after the turn's own model call has finished:
+        // every resolved case still waiting for its question, this turn's
+        // included, asked one at a time.
+        try {
+          distiller?.enqueue(pendingCases(knowledge.store));
+        } catch (cause) {
+          logger.error(
+            `[autoapp] could not queue resolved cases: ${String(cause instanceof Error ? cause.message : cause)}`,
           );
         }
       }
@@ -258,5 +309,6 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     states,
     knowledge: knowledge?.store ?? null,
     session,
+    distiller,
   };
 }

@@ -12,6 +12,12 @@
  * lesson that was found, rendered and then cut by the budget was never seen by
  * the model, and is recorded as `included = 0` so that nothing later credits
  * or blames it for a turn it took no part in.
+ *
+ * Lessons come from two places: the curated seeds, and lessons distilled from
+ * resolved cases (12c), which stay provisional until a person confirms them and
+ * are labelled so. A lesson distilled as `method_unclear` is never served: it
+ * is a note that the instructions need a person's attention, and a document
+ * that amended the instructions would be a second method beside the first.
  */
 import type { AiContextProviders, ContextDocument, ContextRef, DeliveredContext } from 'broapp/ai/host';
 
@@ -22,17 +28,19 @@ import type { Layout } from '../spec/index.ts';
 
 import { sourceRevision, type FullOrigin } from './ids.ts';
 import type { EventLog } from './log.ts';
-import { indexWorkspace, orientation, taskEvidence, type SymbolIndex } from './path.ts';
+import { indexWorkspace, orientation, taskEvidence, type SymbolIndex, type TaskEvidence } from './path.ts';
 import { problemSignature } from './scoring.ts';
 import { seedLessons } from './seed.ts';
 import type { Session } from './session.ts';
 import { ftsQuery, tokens, type Knowledge } from './store.ts';
 
-/** A curated fact returned beside a build failure. */
+/** A fact returned beside a build failure. */
 export interface Hint {
   readonly lessonId: number;
   readonly status: 'confirmed' | 'provisional';
   readonly text: string;
+  /** Why a person should look at it again, when somebody should. */
+  readonly review?: string;
 }
 
 /** What a turn was served, for its `contexts` row. */
@@ -55,6 +63,16 @@ export interface Serve extends AiContextProviders {
    * delivered documents, so both see the same `included`.
    */
   delivered(runId: string, delivered: DeliveredContext): ServedTurn;
+  /**
+   * A turn has ended: forget whatever it was offered and never delivered.
+   *
+   * A turn that throws between `search` and `onContext` never reaches
+   * `delivered`, and without this its entry would stay for the life of the
+   * launcher.
+   */
+  ended(runId: string): void;
+  /** How many turns are between `search` and `delivered`. For tests. */
+  inFlight(): number;
   /** Facts matching a build's problems, each recorded as a serving. */
   hints(appId: string, problems: readonly BuildProblem[], origin: FullOrigin): readonly Hint[];
 }
@@ -76,11 +94,19 @@ export interface CreateServeInput {
 const TURN_LESSONS = 3;
 const HINTS_PER_PROBLEM = 2;
 const MAX_HINTS = 3;
+/** How many full-text matches a turn looks through for three strong ones. */
+const TURN_CANDIDATES = 24;
+/** How many distinct request words a lesson must share to be served on words alone. */
+const TURN_MIN_SHARED = 2;
+/** A turn that has neither delivered nor ended after this long is forgotten. */
+const TURN_TTL_MS = 3_600_000;
 
 interface LessonHit {
   id: number;
   status: 'confirmed' | 'provisional';
+  review: string | null;
   summary: string;
+  trigger: string;
   applies: string;
 }
 
@@ -89,13 +115,53 @@ interface Turn {
   readonly appId: string | null;
   readonly tokens: readonly string[];
   readonly lessons: readonly LessonHit[];
+  /** Computed once in `search`, rendered in `resolve`: the same words, the same answer. */
+  readonly evidence: TaskEvidence | null;
+  readonly at: number;
   requested: string[];
   resolved: string[];
 }
 
+/** "(provisional)", "(needs review: recurring)", both, or nothing. */
+function labelOf(lesson: { status: string; review: string | null }): string {
+  let label = lesson.status === 'provisional' ? ' (provisional)' : '';
+  if (lesson.review !== null) label += ` (needs review: ${lesson.review.replace(/^needs_review:/, '')})`;
+  return label;
+}
+
 /** The line a lesson is rendered as; also how its delivery is recognised. */
 function bullet(lesson: LessonHit): string {
-  return `- ${lesson.summary}${lesson.status === 'provisional' ? ' (provisional)' : ''}`;
+  return `- ${lesson.summary}${labelOf(lesson)}`;
+}
+
+/** The words of a text as FTS5's `unicode61` tokenizer splits them, near enough. */
+function wordsOf(text: string): ReadonlySet<string> {
+  return new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word !== ''));
+}
+
+/** A lesson's `applies.<field>`, as a list of strings. */
+function appliesList(applies: string, field: 'routes' | 'files'): readonly string[] {
+  try {
+    const value = (JSON.parse(applies) as Record<string, unknown>)[field];
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Whether a lesson matched a request by more than one shared word.
+ *
+ * Full-text search joins the request's words with `OR`, because `AND` would
+ * match nothing; the price is that one common word is a match. In 12b's rerun
+ * "list" served the migration seed to a request about tags. So a turn keeps a
+ * lesson only when two distinct request words occur in its summary or trigger,
+ * or when a route it applies to is one the task evidence also names.
+ */
+function strongMatch(lesson: LessonHit, words: readonly string[], routes: ReadonlySet<string>): boolean {
+  if (appliesList(lesson.applies, 'routes').some((route) => routes.has(route))) return true;
+  const own = wordsOf(`${lesson.summary} ${lesson.trigger}`);
+  return words.filter((word) => own.has(word)).length >= TURN_MIN_SHARED;
 }
 
 /** `\b` for identifiers that may contain a hyphen. */
@@ -127,6 +193,12 @@ export function createServe(input: CreateServeInput): Serve {
   const askedBy = new Map<string, string>();
   const indexes = new Map<string, SymbolIndex>();
 
+  /** Forget one turn and every ref it asked for. */
+  function forget(runId: string): void {
+    turns.delete(runId);
+    for (const [ref, owner] of askedBy) if (owner === runId) askedBy.delete(ref);
+  }
+
   /** A workspace's symbols, recomputed when its revision moves and every time when it has none. */
   function indexOf(appId: string): SymbolIndex {
     const source = layout.app(appId).source;
@@ -154,25 +226,26 @@ export function createServe(input: CreateServeInput): Serve {
   }
 
   /**
-   * Lessons matching a text. Curated only in this version, confirmed ranked
-   * above provisional, and, for a build problem, only those about its stage or
-   * about no stage in particular.
+   * Lessons matching a text: confirmed ranked above provisional, never a
+   * `method_unclear` one, global or this application's own, and, for a build
+   * problem, only those about its stage or about no stage in particular.
    */
   function findLessons(text: string, appId: string | null, limit: number, stage?: string): LessonHit[] {
     const query = ftsQuery(text);
     if (query === null) return [];
     return db
       .query<LessonHit, [string, string, string | null, string | null, number]>(
-        `SELECT l.id, l.status, l.summary, l.applies
+        `SELECT l.id, l.status, l.review, l.summary, l.trigger, l.applies
            FROM lessons_fts JOIN lessons l ON l.id = lessons_fts.rowid
           WHERE lessons_fts MATCH ?
-            AND l.status IN ('confirmed', 'provisional') AND l.origin = 'curated'
+            AND l.status IN ('confirmed', 'provisional')
+            AND (l.diagnosis IS NULL OR l.diagnosis <> 'method_unclear')
             AND (l.scope = 'global' OR l.scope = ?)
             AND (? IS NULL OR json_extract(l.applies, '$.stage') IS NULL OR json_extract(l.applies, '$.stage') = ?)
           ORDER BY bm25(lessons_fts, 1.0, 2.0) * CASE l.status WHEN 'confirmed' THEN 1.0 ELSE 0.6 END
           LIMIT ?`,
       )
-      .all(query, appId ?? '', stage ?? null, stage ?? null, limit);
+      .all(query, appId === null ? '' : `app:${appId}`, stage ?? null, stage ?? null, limit);
   }
 
   /** Write one serving; the unique index makes a repeat a no-op. */
@@ -203,7 +276,8 @@ export function createServe(input: CreateServeInput): Serve {
       return { ref, title: `Where ${appId} stands`, content: orientation({ layout, appId, states, apps: rows }).text };
     }
     if (kind === 'evidence') {
-      const evidence = taskEvidence({ layout, appId, tokens: turn?.tokens ?? [], index: indexOf(appId) });
+      const evidence =
+        turn?.evidence ?? taskEvidence({ layout, appId, tokens: turn?.tokens ?? [], index: indexOf(appId) });
       return { ref, title: `What this request touches in ${appId}`, content: evidence.text };
     }
     return null;
@@ -212,10 +286,21 @@ export function createServe(input: CreateServeInput): Serve {
   return {
     search(query) {
       try {
+        const now = Date.now();
+        for (const [runId, turn] of turns) if (now - turn.at > TURN_TTL_MS) forget(runId);
         const words = tokens(query.text);
         const rows = input.apps();
         const appId = chooseApp(query.text, words, rows);
-        const lessons = appId === null ? [] : findLessons(query.text, appId, TURN_LESSONS);
+        const evidence = appId === null ? null : taskEvidence({ layout, appId, tokens: words, index: indexOf(appId) });
+        const routes = new Set(
+          (evidence?.entries ?? []).filter((entry) => entry.kind === 'route').map((entry) => entry.name),
+        );
+        const lessons =
+          appId === null
+            ? []
+            : findLessons(query.text, appId, TURN_CANDIDATES)
+                .filter((lesson) => strongMatch(lesson, words, routes))
+                .slice(0, TURN_LESSONS);
         const refs: ContextRef[] =
           appId === null
             ? []
@@ -226,7 +311,15 @@ export function createServe(input: CreateServeInput): Serve {
               ];
         const offered = refs.slice(0, query.limit);
         if (query.runId !== undefined) {
-          turns.set(query.runId, { appId, tokens: words, lessons, requested: offered.map((ref) => ref.ref), resolved: [] });
+          turns.set(query.runId, {
+            appId,
+            tokens: words,
+            lessons,
+            evidence,
+            at: now,
+            requested: offered.map((ref) => ref.ref),
+            resolved: [],
+          });
           for (const ref of offered) askedBy.set(ref.ref, query.runId);
         }
         return Promise.resolve(offered);
@@ -272,8 +365,7 @@ export function createServe(input: CreateServeInput): Serve {
 
     delivered(runId, delivered) {
       const turn = turns.get(runId);
-      turns.delete(runId);
-      for (const [ref, owner] of askedBy) if (owner === runId) askedBy.delete(ref);
+      forget(runId);
       if (turn === undefined) return { appId: null, requested: [], resolved: [] };
 
       const included = delivered.documents.map((document) => document.ref);
@@ -309,15 +401,28 @@ export function createServe(input: CreateServeInput): Serve {
       return { appId: turn.appId, requested: turn.requested, resolved: turn.resolved };
     },
 
+    ended(runId) {
+      forget(runId);
+    },
+
+    inFlight: () => turns.size,
+
     hints(appId, problems, origin) {
       const out: Hint[] = [];
       const seen = new Set<number>();
       for (const problem of problems) {
         if (out.length >= MAX_HINTS) break;
+        // One shared word is enough here, unlike a turn: the stage filter has
+        // already narrowed the lessons to the part of the build that failed.
         for (const lesson of findLessons(problem.message, appId, HINTS_PER_PROBLEM, problem.stage)) {
           if (out.length >= MAX_HINTS || seen.has(lesson.id)) continue;
           seen.add(lesson.id);
-          out.push({ lessonId: lesson.id, status: lesson.status, text: lesson.summary });
+          out.push({
+            lessonId: lesson.id,
+            status: lesson.status,
+            text: lesson.summary,
+            ...(lesson.review === null ? {} : { review: lesson.review.replace(/^needs_review:/, '') }),
+          });
           // A tool result is delivered by construction: the model reads it.
           serving({
             lessonId: lesson.id,

@@ -77,23 +77,38 @@ export const SEED_LESSONS: readonly SeedLesson[] = [
     trigger: 'mcp external write backup file effect offered agent',
     applies: { files: ['src/shared/contract.ts'] },
   },
+  {
+    summary:
+      "Saved workflows and their promotion to a view action live in the application's runtime and run store, not in the source workspace; a request to 'save this as a workflow' is met by promoting one from a run, not by editing views.ts.",
+    detail:
+      'A workflow is drafted from a run, saved in runs.sqlite and promoted into the person’s overrides.json (prompt 06). The 12b rerun’s model said they did not exist, because nothing in the workspace shows them.',
+    trigger: 'workflow workflows save saved promote promotion repeat automate steps',
+    applies: { stage: 'views' },
+  },
 ];
 
 /**
- * Insert the seeds, once, into an empty lesson table.
+ * Insert the seeds this launcher carries that the table has never held.
  *
- * Once means "when there are no lessons at all": a person who has retired a
- * seed has a table that is not empty, and must not find it back after a
- * restart. Every insert is one corpus version, so a context row can say which
- * body of lessons it was served from.
+ * Compared by summary rather than "when the table is empty", so a launcher
+ * that ships a new seed gives it to a database written by an older one. A seed
+ * a person retired is still in the table, marked retired, and is therefore
+ * never inserted again. Every insert is one corpus version, so a context row
+ * can say which body of lessons it was served from.
  */
 export function seedLessons(knowledge: Knowledge, instructions: string, now: number = Date.now()): number {
   const { db } = knowledge;
-  const count = db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM lessons').get()?.n ?? 0;
-  if (count > 0) return 0;
+  const held = new Set(
+    db
+      .query<{ summary: string }, []>("SELECT summary FROM lessons WHERE origin = 'curated'")
+      .all()
+      .map((row) => row.summary),
+  );
+  const missing = SEED_LESSONS.filter((seed) => !held.has(seed.summary));
+  if (missing.length === 0) return 0;
   const instructionsHash = sha256(instructions).slice(0, 32);
   db.transaction(() => {
-    for (const seed of SEED_LESSONS) {
+    for (const seed of missing) {
       const inserted = db
         .query<null, [string, string, string, string, string, string, number, number]>(
           `INSERT INTO lessons
@@ -123,5 +138,5 @@ export function seedLessons(knowledge: Knowledge, instructions: string, now: num
       ).run(lessonId, now);
     }
   })();
-  return SEED_LESSONS.length;
+  return missing.length;
 }

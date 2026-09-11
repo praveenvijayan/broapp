@@ -28,6 +28,7 @@ import {
   createEventLog,
   createEvidence,
   openKnowledge,
+  runKnowledgeCommand,
   type EventLog,
   type Knowledge,
 } from '../knowledge/index.ts';
@@ -99,6 +100,13 @@ Usage:
   broapp-autoapp releases <appId>
   broapp-autoapp status <appId>
   broapp-autoapp mcp <appId>            Serve one application over MCP, on stdio
+  broapp-autoapp knowledge list [--provisional|--confirmed|--review|--method]
+  broapp-autoapp knowledge show <id>
+  broapp-autoapp knowledge confirm <id> [--by <name>]
+  broapp-autoapp knowledge retire <id>
+  broapp-autoapp knowledge export [--json]
+                                        Review what the engineer learnt. A lesson
+                                        stays provisional until a person confirms it.
 
 Environment:
   BROAPP_DATA_DIR  Override where the launcher keeps everything.
@@ -292,6 +300,9 @@ async function openLauncher(
       control.stop();
       // Applications the launcher started do not outlive it.
       await supervisor.stopAll(STOP_DEADLINE_MS);
+      // A question in flight is stopped and its case stays pending; this
+      // waits at most five seconds, and must finish before knowledge closes.
+      await tab.distiller?.close();
       // The run store, then knowledge: the last things a stopping child says
       // are written to the log before it closes.
       store.close();
@@ -519,6 +530,11 @@ async function main(): Promise<number> {
         const { runMcp } = await import('../mcp/server.ts');
         return await runMcp({ appId, controlPath: root.control });
       }
+
+      case 'knowledge':
+        // Reads the database directly, like `status`, and refuses to change it
+        // while a launcher is serving.
+        return runKnowledgeCommand({ root, argv: argv.slice(1) });
 
       case 'status': {
         const appId = positional(argv, 1);

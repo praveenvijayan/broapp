@@ -23,6 +23,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -39,6 +40,7 @@ import {
   INSTRUCTION_SECTIONS,
   createCandidateStates,
   engineerTools,
+  searchWorkspace,
   type CandidateStates,
   type TurnRecord,
 } from 'broapp-autoapp/engineer';
@@ -46,12 +48,17 @@ import {
   AUTOAPP_VERSION,
   KNOWLEDGE_FILE,
   SEED_LESSONS,
+  createDistiller,
   createEventLog,
   createEvidence,
   createServe,
   ftsQuery,
   indexWorkspace,
+  instructionsHash,
   openKnowledge,
+  recordContext,
+  reviewFlags,
+  seedLessons,
   openSession,
   orientation,
   problemSignature,
@@ -61,6 +68,7 @@ import {
   signature,
   taskEvidence,
   tokens,
+  type Distiller,
   type EventLog,
   type Evidence,
   type FullOrigin,
@@ -70,6 +78,7 @@ import {
 } from 'broapp-autoapp/knowledge';
 import {
   BUILD_STAGES,
+  LAUNCHER_MAX_STEPS,
   SOURCE,
   STAGE_NAMES,
   buildCandidate,
@@ -1186,13 +1195,17 @@ describe('the knowledge path: documents', () => {
     setCurrent(where.root, 'items', built.releaseId);
     const adapter = createFakeAdapter({ script: [{ kind: 'text', chunks: ['ok'] }] });
     const runId = 'run-cut1';
-    await chat(where, makeTab(where, adapter, 1_000), runId, 'add a button that goes back to the list page');
+    // Two lessons, each matched by two of the request's words (12c): the
+    // navigation seed by "back", "button" and "page", the component-id seed by
+    // "component" and "rename". Until 12c the second was the migration seed,
+    // matched by "list" alone — the weak match 12c no longer serves.
+    await chat(where, makeTab(where, adapter, 1_000), runId, 'add a back button to the page and rename its component');
     // The lessons document is cut: the first lesson's line arrived whole, the
     // second's did not.
     const system = systemOf(adapter);
     expect(system).toContain(`- ${SEED_LESSONS[0]?.summary ?? ''}\n`);
     expect(system).toContain('\n[truncated]');
-    expect(system).not.toContain(SEED_LESSONS[3]?.summary ?? '');
+    expect(system).not.toContain(SEED_LESSONS[4]?.summary ?? '');
     const servingOf = (index: number) =>
       where.knowledge.db
         .query<{ included: number; outcome: string | null }, [string, number]>(
@@ -1201,7 +1214,7 @@ describe('the knowledge path: documents', () => {
         .get(runId, seedId(where.knowledge, index));
     expect(servingOf(0)).toEqual({ included: 1, outcome: 'none' });
     // Resolved and then cut: recorded, never delivered, and never scored.
-    expect(servingOf(3)).toEqual({ included: 0, outcome: null });
+    expect(servingOf(4)).toEqual({ included: 0, outcome: null });
   }, 90_000);
 });
 
@@ -1417,4 +1430,567 @@ describe('the knowledge path: seeds and instructions', () => {
       'When a build fails, its `hints` are facts from earlier work; a hint marked provisional has not been confirmed.',
     );
   });
+});
+
+// ── 12c: step 0, carried over from the 12b review ─────────────────────────
+
+/** The `code` a call refused with, or `'none'`. */
+function refusedWith(call: () => unknown): string {
+  try {
+    call();
+    return 'none';
+  } catch (cause) {
+    const code = typeof cause === 'object' && cause !== null ? (cause as { code?: unknown }).code : undefined;
+    return typeof code === 'string' ? code : 'not a PublicError';
+  }
+}
+
+type Step = NonNullable<NonNullable<Parameters<typeof createFakeAdapter>[0]>['script']>[number];
+
+describe('12c step 0: the carry-overs', () => {
+  test("the launcher's turn may take forty steps, where the AI layer's default stops at eight", async () => {
+    expect(LAUNCHER_MAX_STEPS).toBe(40);
+    const where = makeWorld();
+    // Nine read calls, one after another, then an answer: one more than eight.
+    let script: Step[] = [{ kind: 'text', chunks: ['listed them'] }];
+    for (let index = 0; index < 9; index += 1) script = [{ kind: 'tool', name: 'apps.list', input: {}, then: script }];
+    const adapter = createFakeAdapter({ script });
+    const runId = 'run-steps1';
+    await chat(where, makeTab(where, adapter), runId, 'list the applications nine times');
+    const run = events(where.knowledge, 'run').find((row) => row.run_id === runId);
+    expect(JSON.parse(run?.data ?? '{}')).toMatchObject({ status: 'succeeded', steps: 9 });
+  }, 90_000);
+
+  test('a lesson is served on two shared words or a route the evidence names, not on one word; a hint needs one', async () => {
+    const where = makeWorld({ serve: true });
+    const built = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!built.ok) throw new Error(JSON.stringify(built.problems));
+    setCurrent(where.root, 'items', built.releaseId);
+    const add = (summary: string, trigger: string, applies: Record<string, unknown>): number => {
+      const id = Number(
+        where.knowledge.db
+          .query<null, [string, string, string]>(
+            `INSERT INTO lessons (version, status, origin, scope, applies, summary, detail, trigger,
+                                  instructions_hash, autoapp_version, created_at, updated_at)
+             VALUES (99, 'confirmed', 'curated', 'global', ?, ?, 'detail', ?, 'h', '0.1.0', 0, 0)`,
+          )
+          .run(JSON.stringify(applies), summary, trigger).lastInsertRowid,
+      );
+      where.knowledge.db
+        .query<null, [number, string, string]>('INSERT INTO lessons_fts (rowid, summary, trigger) VALUES (?, ?, ?)')
+        .run(id, summary, trigger);
+      return id;
+    };
+    const weak = add('A colour is stored as plain text in the database.', 'palette shade', {});
+    const strong = add('A tag reaches an item through a write route of its own.', 'label', {});
+    const byRoute = add('Check the colour contrast before shipping.', 'contrast', { routes: ['items.add'] });
+
+    const refs = (await served(where).search({ text: 'add an item with a colour tag', limit: 10, runId: 'r-weak' }, signal)).map(
+      (ref) => ref.ref,
+    );
+    expect(refs).toContain(`lesson:${String(strong)}`);
+    expect(refs).toContain(`lesson:${String(byRoute)}`);
+    expect(refs).not.toContain(`lesson:${String(weak)}`);
+    served(where).ended('r-weak');
+
+    const hints = served(where).hints('items', [{ stage: 'views', message: 'the colour is wrong' }], handOrigin('r-weak-hint'));
+    expect(hints.map((hint) => hint.lessonId)).toContain(weak);
+  }, 120_000);
+
+  test('the seventh seed says where saved workflows live', () => {
+    expect(SEED_LESSONS).toHaveLength(7);
+    const seed = SEED_LESSONS[6];
+    expect(seed?.summary).toContain('Saved workflows and their promotion to a view action live in the application');
+    expect(seed?.applies.stage).toBe('views');
+  });
+
+  test('the symbol index reads nothing through a symbolic link', () => {
+    const where = makeWorld();
+    const outside = tempDir();
+    writeFileSync(join(outside, 'elsewhere.ts'), 'export function leakedElsewhere() {}\n');
+    mkdirSync(join(outside, 'dir'));
+    writeFileSync(join(outside, 'dir', 'more.ts'), 'export const leakedDirectory = 1;\n');
+    symlinkSync(join(outside, 'elsewhere.ts'), join(where.source, 'src', 'host', 'elsewhere.ts'));
+    symlinkSync(join(outside, 'dir'), join(where.source, 'src', 'linked'));
+
+    const index = indexWorkspace(where.source, 'no-git');
+    const names = index.symbols.map((symbol) => symbol.name);
+    expect(names.length).toBeGreaterThan(0);
+    expect(names).not.toContain('leakedElsewhere');
+    expect(names).not.toContain('leakedDirectory');
+    expect(index.symbols.some((symbol) => symbol.file.includes('elsewhere') || symbol.file.includes('linked'))).toBe(false);
+    const evidence = taskEvidence({ layout: where.root, appId: 'items', tokens: ['leaked', 'elsewhere', 'directory'], index });
+    expect(evidence.text).not.toContain('elsewhere.ts');
+    expect(evidence.text).not.toContain('src/linked');
+  });
+
+  test('source.search refuses a nested quantifier and a long pattern, and still finds a literal', async () => {
+    const where = makeWorld();
+    expect(refusedWith(() => searchWorkspace(where.source, '(a+)+b'))).toBe('invalid_input');
+    expect(refusedWith(() => searchWorkspace(where.source, 'x'.repeat(300)))).toBe('invalid_input');
+    expect(searchWorkspace(where.source, "header: 'Label'", { literal: true }).hits).toHaveLength(1);
+    // A literal is escaped before it is compiled, so its brackets are only text.
+    expect(refusedWith(() => searchWorkspace(where.source, '(a+)+b', { literal: true }))).toBe('none');
+    await expect(callTool(where, 'source.search', { appId: 'items', pattern: '(a+)+b' })).rejects.toMatchObject({
+      code: 'invalid_input',
+    });
+  }, 60_000);
+
+  test('a turn that never delivers is forgotten when it ends', async () => {
+    const where = makeWorld({ serve: true });
+    await served(where).search({ text: 'rename the label column', limit: 10, runId: 'r-never' }, signal);
+    expect(served(where).inFlight()).toBe(1);
+    // What the tab does in `onRunEnd`, beside `scoreRunEnd`.
+    served(where).ended('r-never');
+    scoreRunEnd(where.knowledge, 'r-never');
+    expect(served(where).inFlight()).toBe(0);
+  });
+});
+
+// ── 12c: distillation ──────────────────────────────────────────────────────
+
+type Model = ReturnType<ReturnType<typeof createFakeAdapter>['model']>;
+
+/** A `fetch` that refuses, for a fake adapter's configuration. */
+const refuse = Object.assign(() => Promise.reject(new Error('no network in tests')), {
+  preconnect: () => undefined,
+}) as unknown as typeof fetch;
+
+/** A fake model that answers each question in turn with one of these objects, as JSON text. */
+function answering(
+  answers: readonly unknown[],
+  chunkDelayMs?: number,
+): { adapter: ReturnType<typeof createFakeAdapter>; model: () => Promise<Model> } {
+  const adapter = createFakeAdapter({
+    script: answers.map((answer): Step => ({ kind: 'text', chunks: [JSON.stringify(answer)] })),
+    ...(chunkDelayMs === undefined ? {} : { chunkDelayMs }),
+  });
+  return { adapter, model: () => Promise.resolve(adapter.model({ apiKey: null, baseUrl: null, fetch: refuse }, 'fake-1')) };
+}
+
+/** A case opened during a recorded turn and resolved by a later build, the way a turn leaves one. */
+function resolvedCase(where: World, problem = 'route "items.tag" must declare an effect before it can be part of an Autoapp release'): number {
+  const runId = `r-case-${String(Math.random()).slice(2, 8)}`;
+  const contextId = recordContext(where.knowledge, {
+    runId,
+    appId: 'items',
+    instructions: ENGINEER_INSTRUCTIONS,
+    delivered: {
+      system: 'the system prompt',
+      documents: [{ ref: 'digest:items', title: 'Where items stands', content: '## Items (items)\nNext: candidate.build' }],
+      message: 'add tags to items',
+      model: { provider: 'fake', id: 'fake-1' },
+    },
+    requested: ['digest:items'],
+    resolved: ['digest:items'],
+  });
+  const id = where.evidence.open({
+    appId: 'items',
+    stage: 'contract',
+    problem,
+    request: 'add tags to items',
+    contextId,
+    origin: handOrigin(runId),
+    releaseBefore: null,
+    dataSnapshot: null,
+    model: { provider: 'fake', id: 'fake-1' },
+    autoappVersion: AUTOAPP_VERSION,
+  });
+  if (id === null) throw new Error('that case is already open');
+  where.evidence.appendEdit('items', 'declare the effect\n~ src/shared/contract.ts');
+  where.evidence.resolveBuild('items', ['spec', 'contract'], { ...handOrigin(runId), sourceRev: 'b'.repeat(40) }, 'f'.repeat(32));
+  return id;
+}
+
+function distillerOver(where: World, model: () => Promise<Model>): Distiller {
+  const distiller = createDistiller({
+    knowledge: where.knowledge,
+    log: where.log,
+    model,
+    instructions: ENGINEER_INSTRUCTIONS,
+    autoappVersion: AUTOAPP_VERSION,
+  });
+  closers.push(() => distiller.close());
+  return distiller;
+}
+
+interface CaseState { diagnosis: string | null; distill_state: string; distill_attempts: number; signature: string }
+function caseOf(knowledge: Knowledge, id: number): CaseState | null {
+  return knowledge.db
+    .query<CaseState, [number]>('SELECT diagnosis, distill_state, distill_attempts, signature FROM episodes WHERE id = ?')
+    .get(id);
+}
+
+interface LessonState {
+  id: number; version: number; status: string; review: string | null; origin: string; supersedes: number | null;
+  diagnosis: string | null; scope: string; applies: string; summary: string; instructions_hash: string; autoapp_version: string;
+}
+function lessonFrom(knowledge: Knowledge, episodeId: number): LessonState | null {
+  return knowledge.db.query<LessonState, [number]>('SELECT * FROM lessons WHERE episode_id = ?').get(episodeId);
+}
+function lessonById(knowledge: Knowledge, id: number): LessonState | null {
+  return knowledge.db.query<LessonState, [number]>('SELECT * FROM lessons WHERE id = ?').get(id);
+}
+function inIndex(knowledge: Knowledge, id: number): boolean {
+  return knowledge.db.query<{ rowid: number }, [number]>('SELECT rowid FROM lessons_fts WHERE rowid = ?').get(id) !== null;
+}
+
+const MISSING = {
+  diagnosis: 'knowledge_missing',
+  reasoning: 'Nothing the engineer was given said a new route needs an effect.',
+  sameCauseAs: null,
+  lesson: {
+    scope: 'app',
+    applies: { stage: 'contract', routes: ['items.tag'] },
+    summary: 'A route added to contract.ts for tags must declare its effect as well as its summary before the build accepts it.',
+    detail: 'The build refused items.tag at the contract stage until the route declared effect: write.',
+    trigger: ['effect', 'tags', 'contract', 'route'],
+  },
+};
+
+describe('12c: distillation', () => {
+  test('knowledge_missing becomes a provisional lesson with its provenance, from what was recorded', async () => {
+    const where = makeWorld();
+    const id = resolvedCase(where);
+    const { adapter, model } = answering([MISSING]);
+    const distiller = distillerOver(where, model);
+    distiller.enqueue([id]);
+    await distiller.idle();
+
+    const state = caseOf(where.knowledge, id);
+    expect(state?.distill_state).toBe('done');
+    expect(JSON.parse(state?.diagnosis ?? '{}')).toEqual({ diagnosis: 'knowledge_missing', reasoning: MISSING.reasoning });
+    const lesson = lessonFrom(where.knowledge, id);
+    expect(lesson).toMatchObject({
+      status: 'provisional',
+      review: null,
+      origin: 'distilled',
+      diagnosis: 'knowledge_missing',
+      scope: 'app:items',
+      supersedes: null,
+      instructions_hash: instructionsHash(ENGINEER_INSTRUCTIONS),
+      autoapp_version: AUTOAPP_VERSION,
+    });
+    expect(JSON.parse(lesson?.applies ?? '{}')).toEqual({ stage: 'contract', routes: ['items.tag'], signature: state?.signature });
+    const latest = where.knowledge.db.query<{ v: number }, []>('SELECT MAX(version) AS v FROM corpus_versions').get()?.v;
+    expect(lesson?.version).toBe(latest ?? -1);
+    expect(inIndex(where.knowledge, lesson?.id ?? 0)).toBe(true);
+
+    // The question was built from the blobs: the request, the instructions as
+    // delivered, the problem, under the fixed system text.
+    expect(adapter.calls).toHaveLength(1);
+    const sent = JSON.stringify(adapter.calls[0]);
+    expect(sent).toContain('add tags to items');
+    expect(sent).toContain('You are the engineer for the applications on this computer.');
+    expect(sent).toContain('must declare an effect');
+    expect(sent).toContain('You are reviewing one failure the engineer hit');
+  });
+
+  test('insufficient_evidence is kept as a diagnosis and writes no lesson', async () => {
+    const where = makeWorld();
+    const id = resolvedCase(where);
+    const distiller = distillerOver(
+      where,
+      answering([{ diagnosis: 'insufficient_evidence', reasoning: 'The edits do not say.', sameCauseAs: null, lesson: null }]).model,
+    );
+    distiller.enqueue([id]);
+    await distiller.idle();
+    expect(caseOf(where.knowledge, id)).toMatchObject({ distill_state: 'done' });
+    expect(JSON.parse(caseOf(where.knowledge, id)?.diagnosis ?? '{}')).toMatchObject({ diagnosis: 'insufficient_evidence' });
+    expect(lessonFrom(where.knowledge, id)).toBeNull();
+  });
+
+  test('a method_unclear lesson is stored, global, and never served or hinted', async () => {
+    const where = makeWorld({ serve: true });
+    const id = resolvedCase(where);
+    const method = {
+      diagnosis: 'method_unclear',
+      reasoning: 'The instructions say to build, but not when.',
+      sameCauseAs: null,
+      lesson: {
+        scope: 'app',
+        applies: {},
+        summary: 'Build after each coherent edit set, before planning the next file, so a failure names one change.',
+        detail: 'The engineer made three edits and planned a fourth before any build.',
+        trigger: ['build', 'edit', 'set', 'planning'],
+      },
+    };
+    const distiller = distillerOver(where, answering([method]).model);
+    distiller.enqueue([id]);
+    await distiller.idle();
+    const lesson = lessonFrom(where.knowledge, id);
+    expect(lesson).toMatchObject({ status: 'provisional', diagnosis: 'method_unclear', scope: 'global' });
+    const ref = `lesson:${String(lesson?.id ?? 0)}`;
+    const refsFor = async (runId: string): Promise<string[]> => {
+      const found = await served(where).search({ text: 'build after each edit set planning', limit: 10, runId }, signal);
+      served(where).ended(runId);
+      return found.map((entry) => entry.ref);
+    };
+    expect(await refsFor('r-m1')).not.toContain(ref);
+    const hinted = served(where).hints('items', [{ stage: 'contract', message: 'build edit set planning' }], handOrigin('r-m2'));
+    expect(hinted.map((hint) => hint.lessonId)).not.toContain(lesson?.id);
+    // The same lesson under any other diagnosis is found by the same words, so
+    // the refusal above is the filter and not a failure to match.
+    where.knowledge.db.query<null, [number]>("UPDATE lessons SET diagnosis = 'knowledge_missing' WHERE id = ?").run(lesson?.id ?? 0);
+    expect(await refsFor('r-m3')).toContain(ref);
+  }, 60_000);
+
+  test('knowledge_not_retrieved naming a seed records the miss', async () => {
+    const where = makeWorld({ serve: true });
+    const id = resolvedCase(where);
+    const seed = seedId(where.knowledge, 1);
+    const distiller = distillerOver(
+      where,
+      answering([{ diagnosis: 'knowledge_not_retrieved', reasoning: 'The effect seed says this.', sameCauseAs: seed, lesson: null }]).model,
+    );
+    distiller.enqueue([id]);
+    await distiller.idle();
+    const miss = events(where.knowledge, 'search').find((row) => JSON.parse(row.data ?? '{}').miss === 1);
+    expect(JSON.parse(miss?.data ?? '{}')).toEqual({ miss: 1, lessonId: seed });
+    expect(miss?.app_id).toBe('items');
+    expect(lessonFrom(where.knowledge, id)).toBeNull();
+    expect(lessonById(where.knowledge, seed)?.status).toBe('confirmed');
+  });
+
+  test('a case is distilled once, and a lesson naming a path on this machine is dropped', async () => {
+    const where = makeWorld();
+    const first = resolvedCase(where);
+    const pathy = {
+      ...MISSING,
+      lesson: { ...MISSING.lesson, summary: 'Edit /Users/someone/project/src/shared/contract.ts before building the tags change.' },
+    };
+    const { adapter, model } = answering([MISSING, pathy]);
+    const distiller = distillerOver(where, model);
+    distiller.enqueue([first]);
+    distiller.enqueue([first]);
+    await distiller.idle();
+    distiller.enqueue([first]);
+    await distiller.idle();
+    expect(adapter.calls).toHaveLength(1);
+    expect(where.knowledge.db.query<{ n: number }, [number]>('SELECT COUNT(*) AS n FROM lessons WHERE episode_id = ?').get(first)?.n).toBe(1);
+
+    const second = resolvedCase(where, 'route "items.colour" must declare a summary before it can be part of an Autoapp release');
+    distiller.enqueue([second]);
+    await distiller.idle();
+    expect(caseOf(where.knowledge, second)).toMatchObject({ distill_state: 'done' });
+    expect(JSON.parse(caseOf(where.knowledge, second)?.diagnosis ?? '{}')).toMatchObject({ diagnosis: 'knowledge_missing' });
+    expect(lessonFrom(where.knowledge, second)).toBeNull();
+    expect(events(where.knowledge, 'log').some((row) => row.message.includes('names a path on this machine'))).toBe(true);
+  });
+
+  test('sameCauseAs supersedes the old lesson and takes it out of the index', async () => {
+    const where = makeWorld();
+    const first = resolvedCase(where);
+    const { model } = answering([
+      MISSING,
+      {
+        ...MISSING,
+        sameCauseAs: 1,
+        lesson: {
+          ...MISSING.lesson,
+          summary: 'Every route added to contract.ts declares its effect and its summary together, or the build refuses it.',
+        },
+      },
+    ]);
+    const distiller = distillerOver(where, model);
+    distiller.enqueue([first]);
+    await distiller.idle();
+    const old = lessonFrom(where.knowledge, first);
+    expect(old?.id).toBe(1);
+    const second = resolvedCase(where, 'route "items.colour" must declare an effect before it can be part of an Autoapp release');
+    distiller.enqueue([second]);
+    await distiller.idle();
+    const replacement = lessonFrom(where.knowledge, second);
+    expect(replacement).toMatchObject({ status: 'provisional', supersedes: 1 });
+    expect(lessonById(where.knowledge, 1)?.status).toBe('superseded');
+    expect(inIndex(where.knowledge, 1)).toBe(false);
+    expect(inIndex(where.knowledge, replacement?.id ?? 0)).toBe(true);
+  });
+
+  test('a model that fails leaves the case pending, and the third failure gives up', async () => {
+    const where = makeWorld();
+    const id = resolvedCase(where);
+    const distiller = distillerOver(where, () => Promise.reject(new Error('the model is unreachable')));
+    distiller.enqueue([id]);
+    await distiller.idle();
+    expect(caseOf(where.knowledge, id)).toMatchObject({ distill_state: 'pending', distill_attempts: 1 });
+    expect(
+      events(where.knowledge, 'log').some(
+        (row) => row.level === 'error' && row.message.includes(`could not distil case ${String(id)}`),
+      ),
+    ).toBe(true);
+    distiller.enqueue([id]);
+    await distiller.idle();
+    distiller.enqueue([id]);
+    await distiller.idle();
+    expect(caseOf(where.knowledge, id)).toMatchObject({ distill_state: 'failed', distill_attempts: 3 });
+    expect(caseOf(where.knowledge, id)?.diagnosis).toBeNull();
+  });
+
+  test('close() during a question returns within five seconds and leaves the case pending', async () => {
+    const where = makeWorld();
+    const id = resolvedCase(where);
+    const { model } = answering([MISSING], 8_000);
+    const distiller = distillerOver(where, model);
+    distiller.enqueue([id]);
+    await until(() => caseOf(where.knowledge, id)?.distill_attempts === 1, 5_000, 'the case to be claimed');
+    const started = Date.now();
+    await distiller.close();
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(caseOf(where.knowledge, id)?.distill_state).toBe('pending');
+    expect(lessonFrom(where.knowledge, id)).toBeNull();
+  }, 30_000);
+});
+
+// ── 12c: freshness and review ──────────────────────────────────────────────
+
+/** Insert a lesson by hand, with its index row. */
+function handLesson(
+  knowledge: Knowledge,
+  fields: { origin: 'curated' | 'distilled'; hash: string; version: string; summary: string; status?: string },
+): number {
+  const id = Number(
+    knowledge.db
+      .query<null, [string, string, string, string, string]>(
+        `INSERT INTO lessons (version, status, origin, scope, applies, summary, detail, trigger,
+                              instructions_hash, autoapp_version, created_at, updated_at)
+         VALUES (1, ?, ?, 'global', '{}', ?, 'detail', 'trigger words here', ?, ?, 0, 0)`,
+      )
+      .run(fields.status ?? 'provisional', fields.origin, fields.summary, fields.hash, fields.version).lastInsertRowid,
+  );
+  knowledge.db
+    .query<null, [number, string]>("INSERT INTO lessons_fts (rowid, summary, trigger) VALUES (?, ?, 'trigger words here')")
+    .run(id, fields.summary);
+  return id;
+}
+
+/** `n` delivered servings of a lesson, closed with this outcome. */
+function closedServings(knowledge: Knowledge, lessonId: number, outcome: string, n: number): void {
+  for (let index = 0; index < n; index += 1) {
+    knowledge.db
+      .query<null, [number, string, number, string]>(
+        `INSERT INTO servings (lesson_id, run_id, app_id, how, included, served_at, outcome)
+         VALUES (?, ?, 'items', 'hint', 1, ?, ?)`,
+      )
+      .run(lessonId, `r-${outcome}-${String(index)}`, Date.now(), outcome);
+  }
+}
+
+describe('12c: freshness', () => {
+  test('recurring, rewritten instructions and an upgrade each flag a lesson, and none changes a status', () => {
+    const directory = tempDir();
+    const knowledge = openKnowledge(directory);
+    closers.push(() => knowledge.close());
+    const hash = instructionsHash(ENGINEER_INSTRUCTIONS);
+    const recurring = handLesson(knowledge, { origin: 'distilled', hash, version: AUTOAPP_VERSION, summary: 'recurs every time' });
+    closedServings(knowledge, recurring, 'recurred', 3);
+    const helpedOnce = handLesson(knowledge, { origin: 'distilled', hash, version: AUTOAPP_VERSION, summary: 'recurs, and helped once' });
+    closedServings(knowledge, helpedOnce, 'recurred', 3);
+    closedServings(knowledge, helpedOnce, 'resolved', 1);
+    const rewritten = handLesson(knowledge, { origin: 'distilled', hash: 'an-older-method', version: AUTOAPP_VERSION, summary: 'written for other instructions' });
+    closedServings(knowledge, rewritten, 'recurred', 2);
+    const confirmed = handLesson(knowledge, { origin: 'curated', hash, version: AUTOAPP_VERSION, summary: 'a confirmed one', status: 'confirmed' });
+    closedServings(knowledge, confirmed, 'recurred', 3);
+
+    reviewFlags(knowledge, { instructionsHash: hash, autoappVersion: AUTOAPP_VERSION });
+    const review = (id: number): { status: string; review: string | null } | null =>
+      knowledge.db.query<{ status: string; review: string | null }, [number]>('SELECT status, review FROM lessons WHERE id = ?').get(id);
+    expect(review(recurring)).toEqual({ status: 'provisional', review: 'needs_review:recurring' });
+    expect(review(helpedOnce)).toEqual({ status: 'provisional', review: null });
+    expect(review(rewritten)).toEqual({ status: 'provisional', review: 'needs_review:instructions_changed' });
+    expect(review(confirmed)).toEqual({ status: 'confirmed', review: 'needs_review:recurring' });
+
+    // A minor version later, every distilled lesson nobody has reviewed is
+    // flagged; a curated one is not.
+    const fresh = handLesson(knowledge, { origin: 'distilled', hash, version: AUTOAPP_VERSION, summary: 'written by this launcher' });
+    const curated = handLesson(knowledge, { origin: 'curated', hash, version: AUTOAPP_VERSION, summary: 'a curated fact', status: 'confirmed' });
+    const [major, minor] = AUTOAPP_VERSION.split('.');
+    reviewFlags(knowledge, { instructionsHash: hash, autoappVersion: `${major ?? '0'}.${String(Number(minor ?? '0') + 1)}.0` });
+    expect(review(fresh)).toEqual({ status: 'provisional', review: 'needs_review:autoapp_upgraded' });
+    expect(review(curated)).toEqual({ status: 'confirmed', review: null });
+    expect(review(helpedOnce)).toEqual({ status: 'provisional', review: 'needs_review:autoapp_upgraded' });
+  });
+
+  test('a flagged lesson is labelled when it is served', async () => {
+    const where = makeWorld({ serve: true });
+    const lesson = handLesson(where.knowledge, {
+      origin: 'distilled',
+      hash: 'h',
+      version: AUTOAPP_VERSION,
+      summary: 'A colour tag is stored on the item row itself, as plain text.',
+    });
+    where.knowledge.db.query<null, [number]>("UPDATE lessons SET review = 'needs_review:recurring' WHERE id = ?").run(lesson);
+    const runId = 'r-label';
+    await served(where).search({ text: 'store a colour tag on each item', limit: 10, runId }, signal);
+    const documents = await served(where).resolve([`lesson:${String(lesson)}`], signal);
+    served(where).ended(runId);
+    expect(documents[0]?.content).toContain(
+      '- A colour tag is stored on the item row itself, as plain text. (provisional) (needs review: recurring)',
+    );
+  });
+});
+
+describe.skipIf(!available)('12c: the review command', () => {
+  test('list, confirm and retire from the command line, and no change while a launcher is serving', async () => {
+    const directory = tempDir();
+    const dataDir = join(directory, 'autoapp', 'launcher');
+    const setup = openKnowledge(dataDir);
+    const hash = instructionsHash(ENGINEER_INSTRUCTIONS);
+    const first = handLesson(setup, { origin: 'distilled', hash, version: AUTOAPP_VERSION, summary: 'The first provisional lesson, about effects.' });
+    const second = handLesson(setup, { origin: 'distilled', hash, version: AUTOAPP_VERSION, summary: 'The second provisional lesson, about views.' });
+    const third = handLesson(setup, { origin: 'distilled', hash, version: AUTOAPP_VERSION, summary: 'The third provisional lesson, about hosts.' });
+    setup.close();
+
+    const run = (...args: string[]): { code: number; out: string; err: string } => {
+      const done = Bun.spawnSync({
+        cmd: [LAUNCHER, 'knowledge', ...args],
+        env: { ...process.env, BROAPP_DATA_DIR: directory },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      return {
+        code: done.exitCode ?? -1,
+        out: new TextDecoder().decode(done.stdout),
+        err: new TextDecoder().decode(done.stderr),
+      };
+    };
+
+    const listed = run('list', '--provisional');
+    expect(listed.code).toBe(0);
+    expect(listed.out).toContain('The first provisional lesson, about effects.');
+    expect(listed.out).toContain('provisional');
+
+    expect(run('confirm', String(first), '--by', 'tester').code).toBe(0);
+    expect(run('retire', String(second)).code).toBe(0);
+
+    // A launcher that is alive: this test process stands in for one.
+    const control = join(directory, 'autoapp', 'launcher.json');
+    writeFileSync(control, JSON.stringify({ v: 1, port: 1, secret: 'not-a-secret', pid: process.pid }));
+    const refused = run('confirm', String(third));
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain('is serving');
+    rmSync(control);
+
+    const after = openKnowledge(dataDir);
+    closers.push(() => after.close());
+    const row = (id: number): { status: string; reviewed_by: string | null; reviewed_at: number | null } | null =>
+      after.db
+        .query<{ status: string; reviewed_by: string | null; reviewed_at: number | null }, [number]>(
+          'SELECT status, reviewed_by, reviewed_at FROM lessons WHERE id = ?',
+        )
+        .get(id);
+    expect(row(first)).toMatchObject({ status: 'confirmed', reviewed_by: 'tester' });
+    expect(row(first)?.reviewed_at).toBeGreaterThan(0);
+    expect(row(second)?.status).toBe('retired');
+    expect(inIndex(after, second)).toBe(false);
+    expect(inIndex(after, first)).toBe(true);
+    expect(row(third)).toMatchObject({ status: 'provisional', reviewed_at: null });
+    const changes = after.db
+      .query<{ lesson_id: number; change: string }, []>("SELECT lesson_id, change FROM corpus_versions WHERE change IN ('confirm', 'retire') ORDER BY version")
+      .all();
+    expect(changes).toEqual([
+      { lesson_id: first, change: 'confirm' },
+      { lesson_id: second, change: 'retire' },
+    ]);
+  }, 60_000);
 });
