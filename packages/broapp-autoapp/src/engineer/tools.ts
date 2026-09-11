@@ -22,7 +22,8 @@ import { isPublicError, s } from 'broapp/shared';
 import { showLesson } from '../knowledge/cli.ts';
 import { exampleHash, type Evidence, type OpenEpisode } from '../knowledge/evidence.ts';
 import { origin as originOf, sourceRevision, type FullOrigin } from '../knowledge/ids.ts';
-import type { EventLog } from '../knowledge/log.ts';
+import { sanitise, type EventLog } from '../knowledge/log.ts';
+import { redact } from '../host/run-store.ts';
 import { problemSignature, scoreBuild, scoreCheck } from '../knowledge/scoring.ts';
 import type { Hint, Serve } from '../knowledge/serve.ts';
 import type { Session } from '../knowledge/session.ts';
@@ -44,7 +45,7 @@ import {
   type Layout,
 } from '../spec/index.ts';
 
-import { coverage, runAcceptance, UNVERIFIED_BY_CHECKS } from './check.ts';
+import { CHECK_STEP_TIMEOUT_MS, coverage, runAcceptance, stepFailure, UNVERIFIED_BY_CHECKS, viewStepFailure } from './check.ts';
 import { REFERENCE_TOPICS, specReference } from './reference.ts';
 import { startPreview } from './preview.ts';
 import { MAX_REPAIR_ATTEMPTS, previewIdOf, type CandidateStates, type CheckResult, type CycleProgress } from './state.ts';
@@ -223,6 +224,19 @@ function currentRelease(root: Layout, appId: string): { releaseId: string; spec:
     throw publicError.notFound(`${appId} has no current release yet.`);
   }
   return { releaseId, spec: readRelease(root, appId, releaseId) };
+}
+
+/** The most of a trial's output the engineer is shown. */
+const TRIAL_OUTPUT_CHARS = 4_000;
+
+/**
+ * A route's output as a trial returns it: secrets by key name redacted, text
+ * sanitised, and cut at a size that is enough to see the shape of a list.
+ */
+function bounded(output: unknown): { output: unknown; truncated?: boolean } {
+  const text = sanitise(canonicalJson(redact(output)));
+  if (text.length <= TRIAL_OUTPUT_CHARS) return { output: JSON.parse(text) as unknown };
+  return { output: `${text.slice(0, TRIAL_OUTPUT_CHARS)}…`, truncated: true };
 }
 
 /** Build the engineer's tools. */
@@ -784,15 +798,113 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     run: async (input, _signal, envelope) => {
       const { appId, releaseId } = releaseInput.parse(input);
       select(appId);
+      // What is about to be replaced, so the receipt can say so. A preview
+      // that stops takes its checks with it: they were about that child.
+      const before = states.get(appId);
+      const replaced = before.preview === null ? null : previewIdOf(before.preview);
+      const invalidated = (before.checks?.results ?? []).map((result) => result.id);
       // The same function the person's Start preview reaches after a restart.
-      await startPreview(
+      const child = await startPreview(
         { layout: root, supervisor, states, ...(knowledge === undefined ? {} : { log: knowledge.log }) },
         appId,
         releaseId,
         knowledge === undefined ? {} : identity(envelope, appId, releaseId),
       );
       // Deliberately not the URL. The person opens the preview from the tab.
-      return { ok: true };
+      return {
+        ok: true,
+        releaseId,
+        previewId: previewIdOf(child),
+        /** The preview this one replaced, or null when none was running. */
+        replacedPreviewId: replaced,
+        /** Always: a preview runs on a fresh copy of the live data, never on the last preview's. */
+        dataReset: true,
+        /** Check results that no longer hold, because they were about the replaced child. */
+        checksInvalidated: invalidated,
+      };
+    },
+  });
+
+  /** One acceptance step, as `autoapp.json` writes it; route or view, decided per step below. */
+  const trialStep = s.object({
+    route: s.optional(s.string({ min: 3, max: 200 })),
+    input: s.optional(s.unknown()),
+    expect: s.optional(s.unknown()),
+    match: s.optional(s.unknown()),
+    view: s.optional(
+      s.object({
+        page: s.string({ min: 1, max: 100 }),
+        component: s.optional(s.string({ min: 1, max: 100 })),
+        exists: s.optional(s.boolean()),
+        match: s.optional(s.unknown()),
+      }),
+    ),
+  });
+  const tryInput = s.object({
+    appId: s.string({ min: 1, max: 40 }),
+    steps: s.array(trialStep, { min: 1, max: 20 }),
+  });
+
+  tools['preview.try'] = guardedTool(gate, {
+    name: 'preview.try',
+    description:
+      'Try acceptance steps against the preview that is already running, without editing autoapp.json and without rebuilding: each route step is called and its actual output returned, each view step is judged against the preview release’s view specification. Read routes only. For finding out what a route really returns and for getting an expect or match right before writing it down. Nothing here counts as verification: the release’s own examples, run by candidate.check or the cycle, are what verifies a candidate.',
+    inputSchema: tryInput.toJsonSchema(),
+    effect: 'read',
+    run: async (input) => {
+      const { appId, steps } = tryInput.parse(input);
+      select(appId);
+      const preview = states.get(appId).preview;
+      if (preview === null) {
+        throw publicError.unavailable(
+          'There is no preview running for this application. Start one with candidate.preview, or run candidate.cycle, then try again.',
+        );
+      }
+      const releaseId = preview.releaseId;
+      const spec = readRelease(root, appId, releaseId);
+      const results: { step: number; passed: boolean; detail?: string; output?: unknown; truncated?: boolean }[] = [];
+      for (const [index, step] of steps.entries()) {
+        const hasRoute = step.route !== undefined;
+        const hasView = step.view !== undefined;
+        if (hasRoute === hasView) {
+          throw publicError.invalidInput(`step ${String(index)} names a route or a view, not both and not neither`);
+        }
+        if (step.view !== undefined) {
+          const detail = viewStepFailure({ view: step.view }, spec.views);
+          results.push({ step: index, passed: detail === null, ...(detail === null ? {} : { detail }) });
+          continue;
+        }
+        const route = step.route ?? '';
+        const declared = spec.contract.operations[route];
+        if (declared === undefined) {
+          throw publicError.invalidInput(`step ${String(index)}: route ${JSON.stringify(route)} is not an operation in release ${releaseId}`);
+        }
+        // Read routes only. A trial is for looking; a write would change the
+        // preview's data under the examples that are about to be judged on it,
+        // and the gate that would ask about it is exactly what this tool skips.
+        if (declared.effect !== 'read') {
+          throw publicError.rejected(
+            `step ${String(index)}: ${route} has effect ${declared.effect}; preview.try runs read routes only. Put a write in an acceptance example and run it with candidate.check.`,
+          );
+        }
+        let output: unknown;
+        try {
+          output = await preview.invoke({
+            route,
+            input: step.input,
+            client: 'launcher',
+            requestId: crypto.randomUUID(),
+            timeoutMs: CHECK_STEP_TIMEOUT_MS,
+            as: 'check',
+          });
+        } catch (cause) {
+          results.push({ step: index, passed: false, detail: String(cause instanceof Error ? cause.message : cause) });
+          continue;
+        }
+        const detail = stepFailure({ route, input: step.input, expect: step.expect, match: step.match }, output);
+        results.push({ step: index, passed: detail === null, ...(detail === null ? {} : { detail }), ...bounded(output) });
+      }
+      return { releaseId, previewId: previewIdOf(preview), results, verification: 'none: a trial is not a check' };
     },
   });
 

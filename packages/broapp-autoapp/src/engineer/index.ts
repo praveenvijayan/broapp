@@ -28,7 +28,7 @@ export type {
   StoredChecks,
 } from './state.ts';
 
-export { CHECK_STEP_TIMEOUT_MS, contains, coverage, findComponent, runAcceptance, stepFailure, UNVERIFIED_BY_CHECKS, viewStepFailure } from './check.ts';
+export { CHECK_STEP_TIMEOUT_MS, contains, coverage, divergence, findComponent, runAcceptance, stepFailure, UNVERIFIED_BY_CHECKS, viewStepFailure } from './check.ts';
 
 export { CYCLE_STEPS, MAX_REPAIR_ATTEMPTS } from './state.ts';
 export type { CycleProgress } from './state.ts';

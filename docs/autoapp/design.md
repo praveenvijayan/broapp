@@ -154,7 +154,11 @@ page is told to draw. Neither renders a page, and every check report says so
 in the same words, because "the checks pass" is not "it looks right" and only
 a person at the preview can say the second. The engineer reads the rules of
 each file with `spec.reference` before changing it, a topic at a time, rather
-than being handed the whole schema every turn.
+than being handed the whole schema every turn. Before writing an example down
+it can try steps against the preview that is already running with
+`preview.try`: read routes only, the actual output returned, nothing recorded
+as verification. A failed step names where the output diverged and under
+which comparison, so the fix is to the right field.
 
 ## The rollback boundary
 

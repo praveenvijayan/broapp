@@ -56,8 +56,8 @@ not exist, create it with \`apps.create\` — a short id from its name.
 2. Say what the application will do differently, in one or two sentences, and
    add or update an acceptance example in \`autoapp.json\` that fails today and
    passes afterwards: a route step for what the host returns, a view step for
-   what a page declares. Neither shows the rendered page; say so. Before
-   changing a file, read its rules with \`spec.reference\`.
+   what a page declares; \`preview.try\` shows what a route really returns first.
+   Neither shows the rendered page; say so. Read a file's rules with \`spec.reference\`.
 3. Read the file with \`source.read\`, then make the change with \`candidate.cycle\`:
    it takes the hunks \`source.edit\` takes, applies them, builds, and when the
    build passes starts the preview and runs the checks, asking the person at

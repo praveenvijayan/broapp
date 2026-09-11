@@ -15,9 +15,11 @@ import { join } from 'node:path';
 import type { ChildHandle } from 'broapp-autoapp/launcher';
 import {
   coverage,
+  divergence,
   REFERENCE_TOPICS,
   runAcceptance,
   specReference,
+  stepFailure,
   UNVERIFIED_BY_CHECKS,
   viewStepFailure,
 } from 'broapp-autoapp/engineer';
@@ -135,5 +137,25 @@ describe('the specification reference', () => {
     for (const topic of REFERENCE_TOPICS) expect(whole).toContain(specReference(topic));
     expect(specReference('views')).toMatch(/confirmText.*required on a button/s);
     expect(specReference('views')).toMatch(/submit.*exempt/s);
+  });
+});
+
+describe('where a step diverges', () => {
+  test('names the first field that differs, under expect and under match', () => {
+    expect(divergence({ items: [{ id: 1, count: 2 }], total: 1 }, { items: [{ id: 1, count: 3 }], total: 1 }, 'expect')).toBe('items.0.count');
+    expect(divergence({ items: [] }, { items: [{ id: 1 }] }, 'match')).toBe('items.length');
+    expect(divergence({ a: 1, extra: true }, { a: 1 }, 'expect')).toBe('extra');
+    // Under match an extra key is not a difference; the value itself is the divergence only when nothing narrower is.
+    expect(divergence({ a: 1, extra: true }, { a: 2 }, 'match')).toBe('a');
+    expect(divergence('x', 'y', 'expect')).toBe('$');
+    expect(divergence({ notes: { count: 1 } }, { notes: { count: 1, list: [] } }, 'match')).toBe('notes.list');
+  });
+
+  test('a failed route step says which comparison failed and where', () => {
+    const detail = stepFailure({ route: 'items.list', input: null, expect: { items: [], count: 99 } }, { items: [], count: 0 });
+    expect(detail).toMatch(/\(expect; differs at count\)/);
+    const partial = stepFailure({ route: 'items.list', input: null, match: { items: [{ label: 'a' }] } }, { items: [] });
+    expect(partial).toMatch(/\(match; differs at items\.length\)/);
+    expect(stepFailure({ route: 'items.list', input: null, match: { count: 0 } }, { items: [], count: 0 })).toBeNull();
   });
 });

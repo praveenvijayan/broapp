@@ -51,12 +51,51 @@ export function contains(actual: unknown, wanted: unknown): boolean {
  */
 export function stepFailure(step: RouteStep, output: unknown): string | null {
   if (step.expect !== undefined && canonicalJson(output) !== canonicalJson(step.expect)) {
-    return `${step.route} returned ${JSON.stringify(output)}, not ${JSON.stringify(step.expect)}`;
+    return `${step.route} returned ${JSON.stringify(output)}, not ${JSON.stringify(step.expect)} (expect; differs at ${divergence(output, step.expect, 'expect')})`;
   }
   if (step.match !== undefined && !contains(output, step.match)) {
-    return `${step.route} returned ${JSON.stringify(output)}, which does not contain ${JSON.stringify(step.match)}`;
+    return `${step.route} returned ${JSON.stringify(output)}, which does not contain ${JSON.stringify(step.match)} (match; differs at ${divergence(output, step.match, 'match')})`;
   }
   return null;
+}
+
+/**
+ * Where `actual` first stops satisfying `wanted`, as a dotted path, or `$` for
+ * the value itself.
+ *
+ * Under `expect` every key on either side counts, so a key `actual` has and
+ * `wanted` does not is a divergence; under `match` only `wanted`'s keys are
+ * looked at, the way {@link contains} judges. The first difference in key order
+ * is the one named, which is enough to send the engineer to the right field.
+ */
+export function divergence(actual: unknown, wanted: unknown, mode: 'expect' | 'match', at: readonly string[] = []): string {
+  const here = at.length === 0 ? '$' : at.join('.');
+  if (Array.isArray(wanted)) {
+    if (!Array.isArray(actual)) return here;
+    if (actual.length !== wanted.length) return `${here}.length`;
+    for (const [index, item] of wanted.entries()) {
+      if (mode === 'expect' ? canonicalJson(actual[index]) !== canonicalJson(item) : !contains(actual[index], item)) {
+        return divergence(actual[index], item, mode, [...at, String(index)]);
+      }
+    }
+    return here;
+  }
+  if (typeof wanted === 'object' && wanted !== null) {
+    if (typeof actual !== 'object' || actual === null || Array.isArray(actual)) return here;
+    const record = actual as Record<string, unknown>;
+    for (const [key, value] of Object.entries(wanted)) {
+      if (!Object.prototype.hasOwnProperty.call(record, key)) return [...at, key].join('.');
+      if (mode === 'expect' ? canonicalJson(record[key]) !== canonicalJson(value) : !contains(record[key], value)) {
+        return divergence(record[key], value, mode, [...at, key]);
+      }
+    }
+    if (mode === 'expect') {
+      const extra = Object.keys(record).find((key) => !Object.prototype.hasOwnProperty.call(wanted, key));
+      if (extra !== undefined) return [...at, extra].join('.');
+    }
+    return here;
+  }
+  return here;
 }
 
 /** The component with this id anywhere on the page, or `null`. */

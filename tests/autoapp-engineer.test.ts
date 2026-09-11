@@ -756,7 +756,7 @@ describe.skipIf(!available)('the tools', () => {
       { approve: true },
     );
     // The model is told whether, not where.
-    expect(started).toEqual({ ok: true });
+    expect(started).toMatchObject({ ok: true, dataReset: true, replacedPreviewId: null });
     expect(JSON.stringify(started)).not.toContain('127.0.0.1');
 
     const preview = where.states.get('items').preview;
@@ -1314,4 +1314,73 @@ describe('the specification tools', () => {
       /Start one with candidate.preview/,
     );
   });
+});
+
+describe.skipIf(!available)('trying steps against a preview', () => {
+  test('preview.try returns what a route returns, judges view steps, refuses writes, and records nothing', async () => {
+    const where = makeWorld();
+    const app = where.root.app('items');
+    const built = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!built.ok) throw new Error(JSON.stringify(built.problems));
+    setCurrent(where.root, 'items', built.releaseId);
+    mkdirSync(app.data, { recursive: true });
+
+    await expect(callTool(where, 'preview.try', { appId: 'items', steps: [{ route: 'items.list', input: null }] })).rejects.toThrow(
+      /no preview running/,
+    );
+
+    const first = (await callTool(where, 'candidate.preview', { appId: 'items', releaseId: built.releaseId }, { approve: true })) as {
+      previewId: string;
+      replacedPreviewId: string | null;
+      dataReset: boolean;
+      checksInvalidated: string[];
+    };
+    expect(first.replacedPreviewId).toBeNull();
+    expect(first.dataReset).toBe(true);
+    expect(first.checksInvalidated).toEqual([]);
+
+    const tried = (await callTool(where, 'preview.try', {
+      appId: 'items',
+      steps: [
+        { route: 'items.list', input: null },
+        { route: 'items.list', input: null, expect: { items: [], count: 99 } },
+        { view: { page: 'items', component: 'items-table', match: { kind: 'table' } } },
+        { view: { page: 'items', component: 'nowhere' } },
+      ],
+    })) as {
+      releaseId: string;
+      previewId: string;
+      verification: string;
+      results: { step: number; passed: boolean; detail?: string; output?: unknown }[];
+    };
+    expect(tried.releaseId).toBe(built.releaseId);
+    expect(tried.previewId).toBe(first.previewId);
+    expect(tried.verification).toMatch(/not a check/);
+    expect(tried.results.map((result) => result.passed)).toEqual([true, false, true, false]);
+    expect(tried.results[0]?.output).toMatchObject({ items: [] });
+    expect(tried.results[1]?.detail).toMatch(/\(expect; differs at count\)/);
+    expect(tried.results[3]?.detail).toMatch(/not declared/);
+    // A trial verifies nothing: the candidate's checks are as they were.
+    expect(where.states.get('items').checks).toBeNull();
+
+    // A write route is refused before it runs, naming the effect.
+    await expect(
+      callTool(where, 'preview.try', { appId: 'items', steps: [{ route: 'items.add', input: { label: 'x' } }] }),
+    ).rejects.toThrow(/effect write; preview.try runs read routes only/);
+    await expect(callTool(where, 'preview.try', { appId: 'items', steps: [{ route: 'items.nope', input: null }] })).rejects.toThrow(
+      /not an operation/,
+    );
+
+    // Checks, then a second preview: the receipt names what it replaced and which results no longer hold.
+    await callTool(where, 'candidate.check', { appId: 'items', releaseId: built.releaseId });
+    const second = (await callTool(where, 'candidate.preview', { appId: 'items', releaseId: built.releaseId }, { approve: true })) as {
+      previewId: string;
+      replacedPreviewId: string | null;
+      checksInvalidated: string[];
+    };
+    expect(second.replacedPreviewId).toBe(first.previewId);
+    expect(second.previewId).not.toBe(first.previewId);
+    expect(second.checksInvalidated.length).toBeGreaterThan(0);
+    await callTool(where, 'preview.stop', { appId: 'items' }, { approve: true });
+  }, 120_000);
 });
