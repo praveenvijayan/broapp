@@ -202,17 +202,14 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.1: the change cycle. `candidate.cycle` applies a patch, builds
-it, and when the build passes starts the preview and runs the acceptance
-examples, asking the person at each step; a cycle that ends the same way
-three times in a turn stops and asks. Acceptance examples may assert what a
-page declares as well as what a route returns, and every check report says
-what no check can show. `spec.reference` gives the engineer the rules of each
-file on demand. The `broapp` chat card can answer a tool's own step-by-step
-questions. Packages: `broapp`, `broapp-ai-anthropic`, `broapp-ai-compatible`,
-`broapp-ai-elements` and `create-broapp` at 0.4.1, `broapp-autoapp` at 0.3.0.
-0.4.0 (2026-09-11) was the knowledge loop: what the launcher writes down,
-resumes, serves, distils and replays.
+Version 0.4.2: `preview.try`. The engineer can try acceptance steps against
+the preview that is already running — a route's actual output, a view step's
+judgement — without editing `autoapp.json` and without a rebuild, and nothing
+it learns there counts as verification. A failed step names where the output
+diverged and under which comparison; starting a preview returns which one it
+replaced and which checks no longer hold. Launcher only: `broapp-autoapp` at
+0.3.1, every other package unchanged at 0.4.1. Earlier the same day: 0.4.1
+(the change cycle) and 0.4.0 (the knowledge loop).
 
 ## Licence
 
