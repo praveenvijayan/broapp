@@ -294,7 +294,7 @@ async function openLauncher(
   const running = await startApp({
     page,
     appName: 'Autoapp',
-    version: '0.1.0',
+    version: selfManifest.version,
     mode: 'background',
     openBrowser: open,
     register: (bridge) => tab.mount(bridge),
