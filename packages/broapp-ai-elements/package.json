@@ -1,6 +1,6 @@
 {
   "name": "broapp-ai-elements",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "type": "module",
   "description": "The AI SDK transport and AI Elements chat panel for a Broapp application",
   "license": "MIT",

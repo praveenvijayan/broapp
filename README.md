@@ -202,13 +202,14 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.8: the host keeps each turn's own tool calls and results under
-its run id and gives them back, bounded, when the next turn names that run,
-so "continue" no longer starts from a prose summary; both chat clients name
-the run, and `knowledge evaluate` has two-turn tasks under text and
-structured history to measure it. Three packages: `broapp` 0.4.2,
-`broapp-ai-elements` 0.4.4 and `broapp-autoapp` 0.3.7; the providers and
-`create-broapp` stay at 0.4.1. Earlier: 0.4.7 (`.DS_Store`, expired
+Version 0.4.9: approving a change cycle works. The panel's transport gave
+the SDK an approval for a step of a call (`<call>.build`) that the SDK had
+never been told about, the SDK threw, and the turn was cancelled the moment
+Allow was clicked; a step's question now sits on its call's card, named
+after the step. Two packages: `broapp-ai-elements` 0.4.5 and
+`broapp-autoapp` 0.3.8; `broapp` stays at 0.4.2, the providers and
+`create-broapp` at 0.4.1. Earlier: 0.4.8 (the host keeps each turn's tool
+calls and results and gives them back on "continue"), 0.4.7 (`.DS_Store`, expired
 questions, the waiting strip), 0.4.6 (the running mark), 0.4.5 (remove to
 trash, the blank template, the `design` topic), 0.4.4 (the banner), 0.4.3
 (the theme contract and the first rendered check), 0.4.2, 0.4.1 and 0.4.0
