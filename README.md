@@ -202,14 +202,17 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.2: `preview.try`. The engineer can try acceptance steps against
-the preview that is already running — a route's actual output, a view step's
-judgement — without editing `autoapp.json` and without a rebuild, and nothing
-it learns there counts as verification. A failed step names where the output
-diverged and under which comparison; starting a preview returns which one it
-replaced and which checks no longer hold. Launcher only: `broapp-autoapp` at
-0.3.1, every other package unchanged at 0.4.1. Earlier the same day: 0.4.1
-(the change cycle) and 0.4.0 (the knowledge loop).
+Version 0.4.3: the theme contract and the first rendered check. One table of
+64 tokens declares the renderer's theme; its stylesheet, the engineer's `theme`
+reference and the checks on presets are generated from it. An application sets
+seven palette variables once and the renderer and the AI panel follow. A
+headless browser opens the compiled page under three themes and three schemes
+and reads computed styles and contrast; on its first run it found that the AI
+panel's portalled menus and selects read no theme and that every rounded corner
+in the panel was zero, both fixed here. `preview.try` (0.4.2) and the change
+cycle (0.4.1) came earlier the same day. Packages: `broapp-autoapp` 0.3.2,
+`broapp-ai-elements` 0.4.2; `broapp`, the providers and `create-broapp`
+unchanged at 0.4.1.
 
 ## Licence
 

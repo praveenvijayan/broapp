@@ -6,19 +6,20 @@ what a maintainer has to do, and what they have to decide.
 ## Status
 
 Published on npm from the `Publish to npm` workflow, each with provenance:
-`broapp`, `create-broapp`, `broapp-ai-anthropic`, `broapp-ai-compatible` and
-`broapp-ai-elements` at 0.4.1, and `broapp-autoapp` at 0.3.1 (2026-09-11).
-Earlier the same day: 0.4.1 with `broapp-autoapp` 0.3.0, and 0.4.0 with 0.2.0.
-Before that: 0.1.0 on 2026-09-05, 0.2.0 after it, 0.3.0 on 2026-09-08 (0.2.1
-was prepared and never published). To generate from an unreleased checkout
-instead, see [troubleshooting.md](troubleshooting.md).
+`broapp`, `create-broapp`, `broapp-ai-anthropic` and `broapp-ai-compatible` at
+0.4.1, `broapp-ai-elements` at 0.4.2, and `broapp-autoapp` at 0.3.2
+(2026-09-12). Earlier: 0.4.2 with the launcher at 0.3.1, 0.4.1 with 0.3.0, and
+0.4.0 with 0.2.0, all on 2026-09-11; 0.3.0 on 2026-09-08; 0.2.0 and 0.1.0
+before that. To generate from an unreleased checkout instead, see
+[troubleshooting.md](troubleshooting.md).
 
-Repository release v0.4.2 ships the launcher binaries built from the same
-commit and moves only `broapp-autoapp`, because nothing under `packages/broapp`
-changed. The launcher's package moves whenever the launcher itself does: a
-created application installs `broapp-autoapp@^<the launcher's version>`, so a
-launcher whose package is not on npm creates applications that cannot install.
-A created application installs `broapp@^0.4.1` and `broapp-autoapp@^0.3.1`.
+Repository release v0.4.3 ships the launcher binaries built from the same
+commit. Two packages move: the launcher, because a created application installs
+`broapp-autoapp@^<the launcher's version>` and 0.3.2 carries the theme contract
+its starter now relies on; and the AI panel, because its portalled components
+and its corner radius were fixed. The launcher's peer range on the panel is
+`>=0.4.2`. A created application installs `broapp@^0.4.1` and
+`broapp-autoapp@^0.3.2`.
 
 ## Before publishing
 

@@ -142,7 +142,7 @@
     },
     "packages/broapp-ai-elements": {
       "name": "broapp-ai-elements",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
         "@ai-sdk/react": "4.0.96",
         "ai": "7.0.93",
@@ -184,7 +184,7 @@
         "broapp": "^0.4.1",
         "broapp-ai-anthropic": "^0.3.0",
         "broapp-ai-compatible": "^0.3.0",
-        "broapp-ai-elements": "^0.3.0",
+        "broapp-ai-elements": ">=0.4.2",
       },
       "devDependencies": {
         "@types/react": "^19.0.0",
@@ -1012,8 +1012,6 @@
     "broapp-autoapp/broapp-ai-anthropic": ["broapp-ai-anthropic@0.3.0", "", { "dependencies": { "@ai-sdk/anthropic": "4.0.49", "ai": "7.0.93" }, "peerDependencies": { "broapp": ">=0.3.0" } }, "sha512-nt8W4a303o1ENFDv8fu6hx3xt8qQD8DEjyfVsi8Ls2BS8eFNiMlloBhc2Vyq0DCl/sQ1aFogiSBdjHMRdd6auQ=="],
 
     "broapp-autoapp/broapp-ai-compatible": ["broapp-ai-compatible@0.3.0", "", { "dependencies": { "@ai-sdk/openai-compatible": "3.0.44", "ai": "7.0.93" }, "peerDependencies": { "broapp": ">=0.3.0" } }, "sha512-g+17RxoegLWgC8shGVPLHI13Ks6algh4wAF+DbLKn8/h4I9is0TNezPadDeRiP4ckGGRdXFvmlXuSO+X1Ua88g=="],
-
-    "broapp-autoapp/broapp-ai-elements": ["broapp-ai-elements@0.3.0", "", { "dependencies": { "@ai-sdk/react": "4.0.96", "ai": "7.0.93", "class-variance-authority": "0.7.1", "clsx": "2.1.1", "cmdk": "1.1.1", "lucide-react": "1.42.0", "nanoid": "6.0.1", "radix-ui": "1.6.7", "streamdown": "2.6.0", "tailwind-merge": "3.6.0", "use-stick-to-bottom": "1.1.6" }, "peerDependencies": { "broapp": ">=0.3.0", "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-c0rMk0TSYwz2MdQEyTh7lwhqG93MmxLyAc0vEndXXybnum3GIzqgNJBabxONpJL4KhWc2oGuOEibzdmwo55LbQ=="],
 
     "lightningcss/detect-libc": ["detect-libc@2.1.2", "", {}, "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="],
 

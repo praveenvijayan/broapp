@@ -58,7 +58,7 @@
     "broapp": "^0.4.1",
     "broapp-ai-anthropic": "^0.3.0",
     "broapp-ai-compatible": "^0.3.0",
-    "broapp-ai-elements": "^0.3.0"
+    "broapp-ai-elements": ">=0.4.2"
   },
   "peerDependencies": {
     "ai": "7.0.93",
