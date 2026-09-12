@@ -1,6 +1,6 @@
 {
   "name": "broapp-autoapp",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "type": "module",
   "description": "A Broapp application its owner can reshape while using it: launcher, renderer, specification, engineer, activation",
   "license": "MIT",
