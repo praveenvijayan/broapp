@@ -84,6 +84,12 @@ The launcher passes the same 600 s to `createAi`, because the AI layer applies
 a deadline of its own to a chat turn; a shorter one there would silently
 undercut the gate's and the person would watch a countdown that was already
 over.
+A question nobody answers within the window is a denial to the gate; the
+engineer is told the difference. A `rejected` that arrives no sooner than the
+window is reported as "not answered within 10 minutes; nobody declined it",
+so the engineer offers to run the step again rather than blaming the person,
+and the launcher's tab shows a strip above the conversation, which scrolls
+to the card, for as long as a question waits.
 
 Every question carries `askedAt` and `expiresAt`, so the approvals strip and
 the chat's confirm card show the time left and turn amber under a minute. The
