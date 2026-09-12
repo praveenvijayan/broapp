@@ -483,8 +483,9 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     // computer, as they are for every write.
     effect: 'external',
     run: async (input) => {
-      const { appId, name, description } = parsed(createInput, input);
+      const { appId, name, description, template } = parsed(createInput, input);
       const created = await createApplication({
+        ...(template === undefined ? {} : { template }),
         layout: root,
         templates: options.templates,
         versions: options.versions,

@@ -617,6 +617,54 @@ describe.skipIf(!available)('the route and the tool', () => {
     // Refused before anything ran: not even the directory exists.
     expect(existsSync(join(where.directory, 'apps'))).toBe(false);
   }, 60_000);
+
+  test('apps.create with template "blank" writes the blank, not the starter', async () => {
+    // The tool took `template` in its schema and, once, never read it: every
+    // creation through the engineer was the starter whatever was asked. This
+    // goes through the tool, not createApplication, which is where that hid.
+    const where = makeWorld();
+    const tools = engineerTools({
+      layout: where.root,
+      supervisor: where.supervisor,
+      journal: where.journal,
+      gate: where.gate,
+      states: createCandidateStates(),
+      templates: TEMPLATES,
+      versions: STARTER_VERSIONS,
+      install: installedOk,
+      initGit: noGit,
+      logger: quiet,
+    });
+    const tool = tools['apps.create'];
+    if (tool === undefined) throw new Error('no apps.create tool');
+    const approvals = createPendingApprovals(quiet);
+    const envelope: Envelope = {
+      requestId: 'run-1:apps.create-2',
+      channel: 'ai',
+      caller: 'ai:test',
+      approver: approvals,
+    };
+    const running = tool.execute(
+      { appId: 'empty', name: 'Empty', template: 'blank' },
+      envelope,
+      new AbortController().signal,
+    );
+    while (approvals.pending.length === 0) await Bun.sleep(5);
+    const question = approvals.pending[0];
+    if (question === undefined) throw new Error('nothing to answer');
+    approvals.answer({
+      requestId: question.requestId,
+      approved: true,
+      releaseId: question.releaseId,
+      argumentsHash: question.argumentsHash,
+    });
+    const created = (await running) as { ok: boolean };
+    expect(created.ok).toBe(true);
+    const manifest = JSON.parse(readFileSync(join(where.root.app('empty').source, 'autoapp.json'), 'utf8')) as {
+      migrations: unknown[];
+    };
+    expect(manifest.migrations).toEqual([]);
+  }, 180_000);
 });
 
 describe('one implementation of the steps after the source is on disk', () => {
