@@ -28,7 +28,16 @@ export type Phase =
   | 'done'
   | 'failed-before-switch'
   | 'failed-after-switch'
-  | 'rolled-back';
+  | 'rolled-back'
+  /**
+   * The application was removed.
+   *
+   * Not an activation at all, and the one row of its kind: a removal is the
+   * last thing that happens to an application, and the journal is the only
+   * place that still answers about it afterwards. It is terminal, so recovery
+   * never looks at it — there is nothing left to recover.
+   */
+  | 'removed';
 
 /** Phases an activation can still be in the middle of. */
 export const TERMINAL_PHASES: readonly Phase[] = [
@@ -36,6 +45,7 @@ export const TERMINAL_PHASES: readonly Phase[] = [
   'failed-before-switch',
   'failed-after-switch',
   'rolled-back',
+  'removed',
 ];
 
 /** One activation, as the journal holds it. */

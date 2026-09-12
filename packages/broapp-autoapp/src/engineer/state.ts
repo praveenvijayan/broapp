@@ -147,6 +147,16 @@ export interface CandidateStates {
   noteEdit(appId: string): number;
   /** A build ran: the edits before it are verified, or at least tried. */
   resetEdits(appId: string): void;
+  /**
+   * Forget one application entirely.
+   *
+   * What a removal calls. Everything here is either a cache of a file that has
+   * just moved to the trash or a count about a workspace that is no longer
+   * there, so keeping any of it would mean answering questions about an
+   * application nobody has — including, if an id were ever reused, answering
+   * them wrongly.
+   */
+  drop(appId: string): void;
   /** Every application with a preview child alive. */
   readonly previews: readonly CandidateState[];
 }
@@ -322,6 +332,12 @@ export function createCandidateStates(layout?: Layout, logger: HostLogger = cons
     },
 
     resetEdits(appId) {
+      unverified.delete(appId);
+    },
+
+    drop(appId) {
+      entries.delete(appId);
+      revisions.delete(appId);
       unverified.delete(appId);
     },
 

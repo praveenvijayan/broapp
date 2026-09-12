@@ -284,10 +284,16 @@ What it adds:
   operations as tools through the same gate. `external` operations are not
   offered.
 - **Two ways in.** `broapp-autoapp import <sourceDir> --as <appId>` takes a
-  workspace that already exists; `broapp-autoapp create <appId> [--name …]` —
-  the **New application** button, and the engineer's `apps.create` — writes out
-  the starter workspace carried inside the launcher's binary. Both then install,
-  build and make current through the same code.
+  workspace that already exists; `broapp-autoapp create <appId> [--name …]
+  [--template starter|blank]` — the **New application** button, and the
+  engineer's `apps.create` — writes out one of the two starter workspaces
+  carried inside the launcher's binary: an items list, or a blank page with no
+  operations. Both ways in then install, build and make current through the same
+  code.
+- **One way out.** `broapp-autoapp remove <appId> --yes`, and **Remove** on the
+  row in the tab, move the application's directory to `<root>/trash/` after the
+  person confirms. Nothing is deleted, nothing is removed while it serves, and
+  the engineer has no tool for it.
 
 **Design work in an application.** If the Impeccable skill is installed, use it
 for anything that draws — product register, never the brand one: `critique` and

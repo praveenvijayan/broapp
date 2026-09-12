@@ -2,10 +2,17 @@
  * The applications on this computer, and what each is doing.
  *
  * The card also carries the one way in for somebody who has nothing: **New
- * application** writes the starter the launcher carries inside its binary,
- * installs it, builds it and opens it. That is a route rather than something
- * this page does, because it starts a process and opens a browser tab — and
- * because the address it opens must never reach a page.
+ * application** writes one of the two starters the launcher carries inside its
+ * binary, installs it, builds it and opens it. That is a route rather than
+ * something this page does, because it starts a process and opens a browser tab
+ * — and because the address it opens must never reach a page.
+ *
+ * And the way out. **Remove** opens a confirmation in the table itself rather
+ * than a modal, and it does not enable until the person has typed the
+ * application's id: a removal is the one action here that a mis-click on the
+ * wrong row could make irreversible, and a dialog somebody dismisses by habit
+ * is not a decision. Nothing is deleted — the directory moves to the launcher's
+ * trash, and the notice afterwards says where.
  *
  * The form is deliberately patient about failure. A creation that could not
  * install stays on screen with what was typed still in it: the workspace is on
@@ -16,7 +23,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 
 import { useOperation } from 'broapp/react';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 
 import type { LauncherContract } from '../contract.ts';
 
@@ -39,7 +46,22 @@ export interface AppsTableProps {
   onStop(appId: string): void;
   /** A new application exists. The list is stale and the id should be selected. */
   onCreated(appId: string): void;
+  /** One is gone. The list is stale and nothing is selected any more. */
+  onRemoved(appId: string): void;
 }
+
+/** Which starter **New application** writes, and how each is described. */
+const TEMPLATES = [
+  { id: 'starter', label: 'Items list', hint: 'a table and a form to start from' },
+  {
+    id: 'blank',
+    label: 'Blank',
+    hint: 'one empty page; describe what it should do to the engineer',
+  },
+] as const;
+
+/** One of the two. Kept narrow so the route's input is not widened by a cast. */
+type TemplateChoice = (typeof TEMPLATES)[number]['id'];
 
 /** The same bounds the contract puts on the route's input. */
 const MAX_ID = 40;
@@ -70,14 +92,22 @@ export function AppsTable({
   onOpen,
   onStop,
   onCreated,
+  onRemoved,
 }: AppsTableProps): ReactElement {
   const create = useOperation<LauncherContract, 'launcher.appCreate'>('launcher.appCreate');
+  const remove = useOperation<LauncherContract, 'launcher.appRemove'>('launcher.appRemove');
 
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState('');
   const [appId, setAppId] = useState('');
   const [touchedId, setTouchedId] = useState(false);
   const [description, setDescription] = useState('');
+  const [template, setTemplate] = useState<TemplateChoice>('starter');
+  /** The application whose confirmation is open, if any, and what has been typed into it. */
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [typedId, setTypedId] = useState('');
+  /** What the last removal moved, so the notice outlives the call that returned it. */
+  const [removed, setRemoved] = useState<{ appId: string; trashPath: string } | null>(null);
   // Remembered rather than read from `create.data`, which is cleared as soon
   // as a creation succeeds so that a second one starts from nothing.
   const [notOpened, setNotOpened] = useState(false);
@@ -119,6 +149,23 @@ export function AppsTable({
     onCreated(madeId);
   }, [created, resetCreate, onCreated]);
 
+  const { data: receipt, reset: resetRemove } = remove;
+  useEffect(() => {
+    if (receipt === null) return;
+    setRemoved({ appId: receipt.appId, trashPath: receipt.trashPath });
+    resetRemove();
+    setRemovingId(null);
+    setTypedId('');
+    onRemoved(receipt.appId);
+  }, [receipt, resetRemove, onRemoved]);
+
+  /** Open, close or move the confirmation, always with an empty field. */
+  const confirmRemoval = (appId: string | null): void => {
+    setRemovingId(appId);
+    setTypedId('');
+    remove.reset();
+  };
+
   const chooseName = (value: string): void => {
     setName(value);
     if (!touchedId) setAppId(idFromName(value));
@@ -130,6 +177,7 @@ export function AppsTable({
     void create.run({
       appId,
       name,
+      template,
       ...(description.trim() === '' ? {} : { description: description.trim() }),
     });
   };
@@ -170,6 +218,23 @@ export function AppsTable({
             submit();
           }}
         >
+          <fieldset className="launcher__choice">
+            <legend>Start from</legend>
+            {TEMPLATES.map((option) => (
+              <label className="launcher__choice-option" key={option.id}>
+                <input
+                  checked={template === option.id}
+                  name="template"
+                  onChange={() => setTemplate(option.id)}
+                  type="radio"
+                  value={option.id}
+                />
+                <span>
+                  <strong>{option.label}</strong> — {option.hint}
+                </span>
+              </label>
+            ))}
+          </fieldset>
           <label className="launcher__field">
             <span>Name</span>
             <input
@@ -257,6 +322,13 @@ export function AppsTable({
         </p>
       )}
 
+      {removed !== null && (
+        <p className="launcher__message" role="status">
+          {removed.appId} was moved to <code>{removed.trashPath}</code> inside the launcher’s
+          directory. Nothing was deleted.
+        </p>
+      )}
+
       <table className="launcher__table">
         <thead>
           <tr>
@@ -275,7 +347,7 @@ export function AppsTable({
               </td>
             </tr>
           ) : (
-            apps.map((app) => (
+            apps.flatMap((app) => [
               <tr
                 key={app.appId}
                 className={app.appId === selected ? 'launcher__row launcher__row--selected' : 'launcher__row'}
@@ -317,9 +389,88 @@ export function AppsTable({
                   >
                     Stop
                   </button>
+                  <button
+                    aria-expanded={removingId === app.appId}
+                    className="launcher__button launcher__button--small"
+                    type="button"
+                    // Disabled with the reason on it rather than hidden: a
+                    // person looking for this needs to be told why it is not
+                    // available, not left wondering where it went.
+                    disabled={app.serving}
+                    title={app.serving ? 'Stop it first' : undefined}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      confirmRemoval(removingId === app.appId ? null : app.appId);
+                    }}
+                  >
+                    <Trash2 aria-hidden="true" size={13} /> Remove
+                  </button>
                 </td>
-              </tr>
-            ))
+              </tr>,
+              ...(removingId === app.appId
+                ? [
+                    <tr key={`${app.appId}-confirm`}>
+                      <td colSpan={4}>
+                        <form
+                          className="launcher__form"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void remove.run({ appId: app.appId, confirm: typedId });
+                          }}
+                        >
+                          <p className="launcher__lede">
+                            Everything belonging to <strong>{app.name}</strong> — its releases,
+                            its source workspace, its data and its snapshots — moves to the
+                            launcher’s trash. Nothing is deleted, and the launcher never empties
+                            the trash. A running preview is stopped.
+                          </p>
+                          <label className="launcher__field">
+                            <span>
+                              Type <code>{app.appId}</code> to confirm
+                            </span>
+                            <input
+                              autoFocus
+                              className="launcher__input"
+                              maxLength={MAX_ID}
+                              onChange={(event) => setTypedId(event.target.value)}
+                              onClick={(event) => event.stopPropagation()}
+                              type="text"
+                              value={typedId}
+                            />
+                          </label>
+                          <div className="launcher__row-actions">
+                            <button
+                              className="launcher__button launcher__button--danger"
+                              // Enabled only by the id itself: this is the
+                              // whole confirmation, and a button that could be
+                              // reached without typing it would not be one.
+                              disabled={typedId !== app.appId || remove.pending}
+                              type="submit"
+                            >
+                              {remove.pending ? 'Removing…' : 'Remove'}
+                            </button>
+                            <button
+                              className="launcher__button launcher__button--small"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                confirmRemoval(null);
+                              }}
+                              type="button"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          {remove.error !== null && (
+                            <p className="launcher__message launcher__message--error" role="alert">
+                              {remove.error.message}
+                            </p>
+                          )}
+                        </form>
+                      </td>
+                    </tr>,
+                  ]
+                : []),
+            ])
           )}
         </tbody>
       </table>

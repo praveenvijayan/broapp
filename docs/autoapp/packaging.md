@@ -149,12 +149,12 @@ with a reviewer on the environment, like every other package here.
 
 Two of its files are build artifacts rather than git contents, and both are
 imported by `src/launcher/main.ts`: the launcher's page, and
-`dist/starter-template.json` — `templates/autoapp-starter` packed by
-`scripts/build-template.ts`, embedded in every target's binary the same way the
-page is, and worth 64.5 KiB of it. `build:launcher` builds both before it
-compiles, `publish.yml` builds both before it publishes, and
+`dist/templates.json` — `templates/autoapp-starter` and
+`templates/autoapp-blank` packed by `scripts/build-template.ts`, embedded in
+every target's binary the same way the page is. `build:launcher` builds both
+before it compiles, `publish.yml` builds both before it publishes, and
 `scripts/autoapp-dry-run.ts` checks that both are in the installed tarball. A
-package without the template is a launcher whose **New application** button has
+package without the templates is a launcher whose **New application** button has
 nothing to write.
 
 Two things are particular to it. Its page is a build artifact — not in git — and

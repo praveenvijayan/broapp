@@ -1,5 +1,5 @@
 /**
- * Creating an application from the starter in the binary.
+ * Creating an application from one of the starters in the binary.
  *
  * The other way in is `import`, which takes a source workspace somebody
  * already has. This is for the person who downloaded a binary and has nothing:
@@ -24,13 +24,15 @@ import { publicError } from 'broapp/host';
 import { APP_ID_PATTERN } from '../spec/types.ts';
 
 import type { BuildProblem } from './candidate.ts';
-import { writeStarter, type StarterTemplate } from './starter.ts';
+import { writeStarter, type TemplateName, type Templates } from './starter.ts';
 import { adopt, prepareWorkspace, type PrepareOptions } from './workspace.ts';
 
 /** What {@link createApplication} needs. */
 export interface CreateOptions extends Omit<PrepareOptions, 'appId'> {
-  /** The starter, as the binary carries it. */
-  readonly template: StarterTemplate;
+  /** Both starters, as the binary carries them. */
+  readonly templates: Templates;
+  /** Which one to write. Default `starter`, so an existing caller is unchanged. */
+  readonly template?: TemplateName;
   /** The ranges the created workspace depends on. */
   readonly versions: { readonly broapp: string; readonly autoapp: string };
   readonly appId: string;
@@ -99,7 +101,7 @@ export async function createApplication(options: CreateOptions): Promise<CreateR
   }
 
   try {
-    writeStarter(options.template, app.source, {
+    writeStarter(options.templates[options.template ?? 'starter'], app.source, {
       appId,
       name,
       description,

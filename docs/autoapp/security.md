@@ -46,6 +46,23 @@ have, and it opens nothing: a tool that reported a tab had opened would be
 telling somebody about a screen that had not changed. Neither route returns a
 path outside the launcher's root, and neither returns a URL.
 
+Removing one is a person's action and only a person's. `launcher.appRemove` is
+a `write`, and the person's own click is channel `user`; **there is no engineer
+tool**, and there is not going to be one, because a model asking to delete
+somebody's application is not a request this launcher relays. The route takes
+the application's id twice — once as `appId` and once as `confirm`, typed into
+a field beside a list of what will move — and a `confirm` that does not match
+is `invalid_input` before anything happens. The `remove` command asks the same
+question with `--yes`, and refuses first if a running launcher says over the
+control connection that it is serving the application.
+
+What an agent would see: nothing new to call. The MCP adapter offers an
+application's own routes, not the launcher's, so `appRemove` is not reachable
+from it at all; through a workflow it would arrive as a `write` on a channel
+that asks. And nothing is deleted either way — the directory moves to
+`<root>/trash/`, which the launcher never empties, so the worst outcome of a
+removal that should not have happened is a directory in the wrong place.
+
 ## Approvals
 
 An approval binds to `{ requestId, appId, releaseId, route, argumentsHash }`.

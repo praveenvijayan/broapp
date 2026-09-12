@@ -460,6 +460,9 @@ describe.skipIf(!available)('the stdio server', () => {
             streams: {},
           },
         }),
+      // Nothing here asks; the MCP server never needs to know whether a
+      // launcher is serving, which is a question the `remove` command asks.
+      serving: () => Promise.resolve(true),
       invoke: ({ route, client: name }) => {
         calls.push({ route, client: name });
         return Promise.resolve({ ok: true as const, output: { route } });

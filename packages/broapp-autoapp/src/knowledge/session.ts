@@ -23,6 +23,14 @@ export const SESSION_FILE = 'session.json';
 export interface Session {
   get(): { selectedAppId: string | null };
   select(appId: string): void;
+  /**
+   * Forget the choice.
+   *
+   * What a removal calls when the application that went was the selected one.
+   * The file is rewritten rather than deleted: its absence and a `null` in it
+   * mean the same thing, and rewriting is one code path instead of two.
+   */
+  clear(): void;
 }
 
 /** Open the session file in `dataDir`, creating nothing until something is chosen. */
@@ -45,6 +53,20 @@ export function openSession(dataDir: string, logger: HostLogger = console): Sess
     }
   }
 
+  /** Write the choice down. A failure is reported and the choice still stands. */
+  function save(appId: string | null): void {
+    try {
+      mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      writeAtomic(path, `${JSON.stringify({ selectedAppId: appId }, null, 2)}\n`);
+    } catch (cause) {
+      // Remembered for this process anyway: a choice that cannot be saved is
+      // still the person's choice until the launcher stops.
+      logger.error(
+        `[autoapp] the selected application could not be saved: ${String(cause instanceof Error ? cause.message : cause)}`,
+      );
+    }
+  }
+
   return {
     get() {
       if (selected === undefined) selected = load();
@@ -54,16 +76,13 @@ export function openSession(dataDir: string, logger: HostLogger = console): Sess
       if (!APP_ID_PATTERN.test(appId)) return;
       if (selected === appId) return;
       selected = appId;
-      try {
-        mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-        writeAtomic(path, `${JSON.stringify({ selectedAppId: appId }, null, 2)}\n`);
-      } catch (cause) {
-        // Remembered for this process anyway: a choice that cannot be saved is
-        // still the person's choice until the launcher stops.
-        logger.error(
-          `[autoapp] the selected application could not be saved: ${String(cause instanceof Error ? cause.message : cause)}`,
-        );
-      }
+      save(appId);
+    },
+
+    clear() {
+      if (selected === null) return;
+      selected = null;
+      save(null);
     },
   };
 }

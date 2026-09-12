@@ -66,8 +66,8 @@ async function compile(target: Target | null): Promise<number> {
 
 async function main(): Promise<number> {
   // Both of the launcher's artefacts are part of the binary: `main.ts` imports
-  // the page as text and the starter workspace as JSON, and a binary without
-  // the second is a **New application** button that cannot work. `build:assets`
+  // the page as text and the two starter workspaces as JSON, and a binary
+  // without the second is a **New application** button that cannot work. `build:assets`
   // is the same script the pack and the publish workflow call, so a binary and
   // a tarball never disagree about what was built.
   const assets = Bun.spawn({

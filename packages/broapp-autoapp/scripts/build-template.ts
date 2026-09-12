@@ -1,12 +1,16 @@
 #!/usr/bin/env bun
 /**
- * Pack the starter workspace into the launcher's binary.
+ * Pack the starter workspaces into the launcher's binary.
  *
- * `templates/autoapp-starter/` is reviewed in git as an ordinary source
- * workspace. This turns it into one JSON file that `src/launcher/main.ts`
- * imports the way it imports its own page, so a downloaded launcher carries a
- * whole application inside it and the **New application** button has something
- * to write.
+ * `templates/autoapp-starter/` and `templates/autoapp-blank/` are reviewed in
+ * git as ordinary source workspaces. This turns them into one JSON file that
+ * `src/launcher/main.ts` imports the way it imports its own page, so a
+ * downloaded launcher carries two whole applications inside it and the **New
+ * application** button has something to write whichever a person chooses.
+ *
+ * One file rather than two, because a launcher carrying one template and not
+ * the other is a choice it cannot honour — and a `files` list is easier to get
+ * right with one name in it than with two.
  *
  *   bun run --cwd packages/broapp-autoapp build:template
  *
@@ -23,6 +27,18 @@ import { dirname, join, resolve } from 'node:path';
 export interface StarterTemplate {
   readonly files: Readonly<Record<string, string>>;
 }
+
+/** Both of them, under the names the route, the command and the tool use. */
+export interface Templates {
+  readonly starter: StarterTemplate;
+  readonly blank: StarterTemplate;
+}
+
+/** The directory each one is packed from, relative to `templates/`. */
+export const TEMPLATE_DIRS = {
+  starter: 'autoapp-starter',
+  blank: 'autoapp-blank',
+} as const;
 
 /** Directories that must not appear anywhere in a template tree. */
 const FORBIDDEN = new Set(['node_modules', 'dist', 'release', '.git']);
@@ -78,18 +94,21 @@ function main(): number {
   const packageDir = resolve(import.meta.dir, '..');
   // `import.meta.dir` rather than a URL's `pathname`: on Windows the latter is
   // `/D:/a/...`, which resolves against the drive again and fails to open.
-  const from = resolve(packageDir, '..', '..', 'templates', 'autoapp-starter');
-  const to = join(packageDir, 'dist', 'starter-template.json');
+  const templatesDir = resolve(packageDir, '..', '..', 'templates');
+  const to = join(packageDir, 'dist', 'templates.json');
 
-  const template = packTemplate(from);
-  const json = `${JSON.stringify(template, null, 2)}\n`;
+  const templates: Templates = {
+    starter: packTemplate(join(templatesDir, TEMPLATE_DIRS.starter)),
+    blank: packTemplate(join(templatesDir, TEMPLATE_DIRS.blank)),
+  };
+  const json = `${JSON.stringify(templates, null, 2)}\n`;
   mkdirSync(dirname(to), { recursive: true });
   writeFileSync(to, json, 'utf8');
 
-  const count = Object.keys(template.files).length;
-  console.log(
-    `starter  dist/starter-template.json  ${String(count)} files  ${(json.length / 1024).toFixed(1)} KiB`,
-  );
+  const counts = Object.entries(templates)
+    .map(([name, template]) => `${name} ${String(Object.keys(template.files).length)} files`)
+    .join(', ');
+  console.log(`templates  dist/templates.json  ${counts}  ${(json.length / 1024).toFixed(1)} KiB`);
   return 0;
 }
 

@@ -33,7 +33,8 @@ import { appIds, listApps, serving as servingChild } from './apps.ts';
 import { launcherContract, type LauncherContract } from './contract.ts';
 import { createApplication } from './create.ts';
 import type { Journal } from './journal.ts';
-import type { StarterTemplate } from './starter.ts';
+import { removeApplication } from './remove.ts';
+import type { Templates } from './starter.ts';
 import type { ChildHandle, Supervisor } from './supervisor.ts';
 import type { PrepareOptions } from './workspace.ts';
 
@@ -55,8 +56,8 @@ export interface CreateLauncherAppOptions {
    * opener; tests pass a stub so a suite does not open tabs.
    */
   readonly openBrowser?: (url: string) => Promise<boolean>;
-  /** The starter workspace this launcher carries, for `launcher.appCreate`. */
-  readonly template: StarterTemplate;
+  /** The starter workspaces this launcher carries, for `launcher.appCreate`. */
+  readonly templates: Templates;
   /** The dependency ranges a created workspace is written with. */
   readonly versions: { readonly broapp: string; readonly autoapp: string };
   /** Creation's two spawns, injectable so a test reaches no registry and no git. */
@@ -145,10 +146,11 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
     return await openTab(child);
   }
 
-  host.operation('launcher.appCreate', async ({ appId, name, description }) => {
+  host.operation('launcher.appCreate', async ({ appId, name, description, template }) => {
     const created = await createApplication({
       layout: root,
-      template: options.template,
+      templates: options.templates,
+      ...(template === undefined ? {} : { template }),
       versions: options.versions,
       appId,
       name,
@@ -179,6 +181,35 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   });
 
   host.operation('launcher.appOpen', async ({ appId }) => await openApplication(appId));
+
+  /**
+   * Move an application to the trash.
+   *
+   * The confirmation is checked here rather than in `removeApplication`,
+   * because it is about how this request reached the host: somebody typed the
+   * id into a field beside a list of what would go. The command line asks its
+   * own way, with `--yes`, and neither of them is a rule the removal itself
+   * should be carrying.
+   */
+  host.operation('launcher.appRemove', async ({ appId, confirm }) => {
+    if (confirm !== appId) {
+      throw publicError.invalidInput(
+        `Type ${appId} to confirm. Nothing has been removed.`,
+      );
+    }
+    return await removeApplication(
+      {
+        layout: root,
+        supervisor,
+        states,
+        journal,
+        ...(options.session === undefined ? {} : { session: options.session }),
+        ...(options.log === undefined ? {} : { log: options.log }),
+        logger,
+      },
+      appId,
+    );
+  });
 
   host.operation('launcher.appSelect', ({ appId }) => {
     if (!appIds(root).includes(appId)) throw publicError.notFound(`There is no application called ${appId}.`);

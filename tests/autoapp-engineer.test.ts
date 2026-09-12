@@ -57,7 +57,7 @@ import {
   type CandidateStates,
 } from 'broapp-autoapp/engineer';
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
-import { STARTER, STARTER_VERSIONS } from './autoapp-template.ts';
+import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
 import { harness, type Harness } from './harness.ts';
 import { pageCost } from '../packages/broapp-autoapp/src/launcher/ui/CandidatePanel.tsx';
 
@@ -136,7 +136,7 @@ function makeWorld(options: { mode?: 'live' | 'preview' } = {}): World {
     gate,
     states,
     logger: quiet,
-    template: STARTER,
+    templates: TEMPLATES,
     versions: STARTER_VERSIONS,
     // Nothing in this file creates an application, and nothing in it may reach
     // a registry or somebody's git configuration.
@@ -1004,7 +1004,7 @@ describe.skipIf(!available)('the launcher tab', () => {
       gate: where.gate,
       dataDir: join(where.directory, 'launcher'),
       store: where.store,
-      template: STARTER,
+      templates: TEMPLATES,
       versions: STARTER_VERSIONS,
       install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
       initGit: () => false,

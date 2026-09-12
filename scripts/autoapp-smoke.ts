@@ -15,7 +15,15 @@
  * not. Nothing here is skipped on any platform; a step that cannot work
  * somewhere must say so out loud rather than quietly passing.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -228,11 +236,53 @@ async function main(): Promise<number> {
     }
   }
 
+  // 1c. Create again, from the blank template.
+  //
+  // The same command with one flag, so what this proves is that the binary
+  // carries both templates and that a workspace with no operations, no
+  // migrations and one page is a release like any other.
+  const blank = run(['create', 'empty', '--name', 'Empty', '--template', 'blank']);
+  const blankRelease = blank.stdout.trim().split(/\s+/).pop() ?? '';
+  if (blank.code !== 0 || !/^[0-9a-f]{32}$/.test(blankRelease)) {
+    fail('create (blank)', blank.stderr.trim() || blank.stdout.trim());
+  } else {
+    const status = run(['status', 'empty']);
+    if (!status.stdout.includes(blankRelease)) {
+      fail('create (blank)', `status empty says ${JSON.stringify(status.stdout.trim())}`);
+    } else ok('create (blank)', blankRelease);
+  }
+
+  // 1d. Remove it: refused without `--yes`, moved with it.
+  const refused = run(['remove', 'empty']);
+  const emptyDir = join(root, 'autoapp', 'apps', 'empty');
+  if (refused.code === 0) fail('remove', 'a removal without --yes succeeded');
+  else if (!existsSync(emptyDir)) fail('remove', 'a refused removal moved the application anyway');
+  else {
+    const moved = run(['remove', 'empty', '--yes']);
+    const trash = join(root, 'autoapp', 'trash');
+    const stillThere = existsSync(emptyDir);
+    const inTrash = existsSync(trash) ? readdirSync(trash) : [];
+    if (moved.code !== 0) fail('remove', moved.stderr.trim() || moved.stdout.trim());
+    else if (stillThere) fail('remove', 'the directory is still under apps/');
+    else if (!inTrash.some((entry) => entry.startsWith('empty-'))) {
+      fail('remove', `nothing named empty-* is in the trash: ${inTrash.join(', ')}`);
+    } else if (!existsSync(join(trash, inTrash[0] ?? '', 'source', 'autoapp.json'))) {
+      fail('remove', 'the moved directory does not carry its source workspace');
+    } else ok('remove', moved.stdout.trim().replaceAll('\n', ' — '));
+  }
+
   // 2. Serve, and reach it over the control connection.
   if (!(await startServing())) {
     fail('serve', 'no launcher.json appeared within 30s');
   } else {
     ok('serve', `control on port ${String(controlFile()?.port ?? 0)}`);
+    // A removal asks the launcher that is serving, over the control
+    // connection, rather than believing its own empty supervisor.
+    const whileServing = run(['remove', 'items', '--yes']);
+    if (whileServing.code === 0) fail('remove (serving)', 'it removed a serving application');
+    else if (!whileServing.stderr.includes('being served')) {
+      fail('remove (serving)', whileServing.stderr.trim() || whileServing.stdout.trim());
+    } else ok('remove (serving)', 'refused while a launcher serves it');
     try {
       const described = (await describeOverControl('items')) as {
         ok?: boolean;

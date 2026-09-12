@@ -42,12 +42,18 @@ import {
   type Journal,
   type StarterTemplate,
   type Supervisor,
+  type Templates,
 } from 'broapp-autoapp/launcher';
-import { createCandidateStates, engineerTools } from 'broapp-autoapp/engineer';
-import { layout, readCurrent, readGrants, type Layout } from 'broapp-autoapp/spec';
+import {
+  createCandidateStates,
+  engineerTools,
+  runAcceptance,
+  startPreview,
+} from 'broapp-autoapp/engineer';
+import { layout, readCurrent, readGrants, readRelease, type Layout } from 'broapp-autoapp/spec';
 
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
-import { STARTER, STARTER_DIR, STARTER_VERSIONS } from './autoapp-template.ts';
+import { BLANK, BLANK_DIR, STARTER, STARTER_DIR, STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
 import { harness, type Harness } from './harness.ts';
 
 const failure = await ensureLauncher();
@@ -121,9 +127,9 @@ function makeWorld(): World {
   return built;
 }
 
-/** The starter with one file replaced, for the cases that need a bad one. */
-function templateWith(path: string, contents: string): StarterTemplate {
-  return { files: { ...STARTER.files, [path]: contents } };
+/** Both templates, with one of the starter's files replaced by a bad one. */
+function templatesWith(path: string, contents: string): Templates {
+  return { ...TEMPLATES, starter: { files: { ...STARTER.files, [path]: contents } } };
 }
 
 /** Everything under a directory, sorted, for a before-and-after comparison. */
@@ -191,6 +197,56 @@ describe('the starter template', () => {
         rmSync(runRoot, { recursive: true, force: true });
       }
     }
+  });
+});
+
+describe('the blank template', () => {
+  test('packs, and carries everything a build reads', () => {
+    const paths = Object.keys(BLANK.files);
+    for (const required of Object.values(SOURCE)) expect(paths).toContain(required);
+    expect(paths).toContain('package.json');
+    expect(paths).toContain('README.md');
+    expect(paths).toContain('PRODUCT.md');
+    expect(paths).toContain('.gitignore');
+    // No database: a blank application has no migrations and nothing to keep.
+    expect(paths).not.toContain('src/host/db.ts');
+    expect(existsSync(join(BLANK_DIR, 'autoapp.json'))).toBe(true);
+  });
+
+  test('claims nothing: no operations, no migrations, one view example', () => {
+    const manifest = JSON.parse(BLANK.files['autoapp.json'] ?? '{}') as {
+      schemaVersion: number;
+      migrations: unknown[];
+      capabilities: unknown[];
+      acceptance: { steps: { view?: { page: string } }[] }[];
+    };
+    // Zero is what the migrations reach, which is what `parseSpec` insists on.
+    expect(manifest.schemaVersion).toBe(0);
+    expect(manifest.migrations).toEqual([]);
+    expect(manifest.capabilities).toEqual([]);
+    expect(manifest.acceptance).toHaveLength(1);
+    expect(manifest.acceptance[0]?.steps[0]?.view?.page).toBe('home');
+    const contract = BLANK.files['src/shared/contract.ts'] ?? '';
+    expect(contract).toContain('operations: {}');
+    expect(contract).toContain('streams: {}');
+  });
+
+  test('is titled with the name, and survives a name that would break a file', () => {
+    const where = makeWorld();
+    const target = join(where.directory, 'workspace');
+    writeStarter(BLANK, target, {
+      appId: 'recipes',
+      // The two characters that would break a TypeScript string literal.
+      name: 'A "difficult" \\ name',
+      description: '',
+      broappVersion: '^0.3.0',
+      autoappVersion: '^0.1.0',
+    });
+    const views = readFileSync(join(target, 'src', 'shared', 'views.ts'), 'utf8');
+    for (const marker of STARTER_MARKERS) expect(views).not.toContain(marker);
+    // Encoded for the literal it sits in, so the module still parses — and the
+    // name comes back exactly as it was typed.
+    expect(views).toContain('title: "A \\"difficult\\" \\\\ name"');
   });
 });
 
@@ -263,7 +319,7 @@ describe('createApplication', () => {
     const where = makeWorld();
     const created = await createApplication({
       layout: where.root,
-      template: STARTER,
+      templates: TEMPLATES,
       versions: STARTER_VERSIONS,
       appId: 'recipes',
       name: 'Recipe tracker',
@@ -294,7 +350,7 @@ describe('createApplication', () => {
     await expect(
       createApplication({
         layout: where.root,
-        template: STARTER,
+        templates: TEMPLATES,
         versions: STARTER_VERSIONS,
         appId: 'No',
         name: 'No',
@@ -310,7 +366,7 @@ describe('createApplication', () => {
     const where = makeWorld();
     const first = await createApplication({
       layout: where.root,
-      template: STARTER,
+      templates: TEMPLATES,
       versions: STARTER_VERSIONS,
       appId: 'recipes',
       name: 'Recipe tracker',
@@ -324,7 +380,7 @@ describe('createApplication', () => {
     await expect(
       createApplication({
         layout: where.root,
-        template: STARTER,
+        templates: TEMPLATES,
         versions: STARTER_VERSIONS,
         appId: 'recipes',
         name: 'Something else',
@@ -340,7 +396,7 @@ describe('createApplication', () => {
     const where = makeWorld();
     const created = await createApplication({
       layout: where.root,
-      template: STARTER,
+      templates: TEMPLATES,
       versions: STARTER_VERSIONS,
       appId: 'recipes',
       name: 'Recipe tracker',
@@ -362,7 +418,7 @@ describe('createApplication', () => {
     const where = makeWorld();
     const created = await createApplication({
       layout: where.root,
-      template: templateWith('src/shared/contract.ts', 'export const contract = {\n'),
+      templates: templatesWith('src/shared/contract.ts', 'export const contract = {\n'),
       versions: STARTER_VERSIONS,
       appId: 'recipes',
       name: 'Recipe tracker',
@@ -388,7 +444,7 @@ describe('createApplication', () => {
     ];
     const created = await createApplication({
       layout: where.root,
-      template: templateWith('autoapp.json', JSON.stringify(manifest, null, 2)),
+      templates: templatesWith('autoapp.json', JSON.stringify(manifest, null, 2)),
       versions: STARTER_VERSIONS,
       appId: 'recipes',
       name: 'Recipe tracker',
@@ -405,6 +461,68 @@ describe('createApplication', () => {
   }, 120_000);
 });
 
+describe.skipIf(!available)('createApplication, from the blank', () => {
+  test('builds, is current, and its one example passes on a preview', async () => {
+    const where = makeWorld();
+    const created = await createApplication({
+      layout: where.root,
+      templates: TEMPLATES,
+      template: 'blank',
+      versions: STARTER_VERSIONS,
+      appId: 'recipes',
+      name: 'Recipe tracker',
+      install: installedOk,
+      initGit: noGit,
+      logger: quiet,
+    });
+
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(readCurrent(where.root, 'recipes')).toBe(created.releaseId);
+
+    // A release with no operations is a release like any other: the child
+    // starts, serves its page, and answers the view step from the
+    // specification it carries.
+    const spec = readRelease(where.root, 'recipes', created.releaseId);
+    expect(Object.keys(spec.contract.operations)).toEqual([]);
+    expect(spec.manifest.schemaVersion).toBe(0);
+    expect(spec.views.pages[0]?.title).toBe('Recipe tracker');
+
+    const states = createCandidateStates(where.root, quiet);
+    states.update('recipes', { releaseId: created.releaseId });
+    await startPreview(
+      { layout: where.root, supervisor: where.supervisor, states },
+      'recipes',
+      created.releaseId,
+      { runId: 'r', callId: 'c' },
+    );
+    const child = states.get('recipes').preview;
+    expect(child).not.toBeNull();
+    if (child === null) return;
+    expect(child.schemaVersion).toBe(0);
+    const results = await runAcceptance(child, spec.acceptance, spec.views);
+    expect(results.map((one) => [one.id, one.passed])).toEqual([['home-exists', true]]);
+  }, 180_000);
+
+  test('the default is still the items list', async () => {
+    const where = makeWorld();
+    const created = await createApplication({
+      layout: where.root,
+      templates: TEMPLATES,
+      versions: STARTER_VERSIONS,
+      appId: 'recipes',
+      name: 'Recipe tracker',
+      install: installedOk,
+      initGit: noGit,
+      logger: quiet,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const spec = readRelease(where.root, 'recipes', created.releaseId);
+    expect(Object.keys(spec.contract.operations)).toContain('items.list');
+  }, 120_000);
+});
+
 describe.skipIf(!available)('the route and the tool', () => {
   /** The launcher's tab over a real bridge, with a model that reaches nothing. */
   async function startTab(where: World): Promise<Harness> {
@@ -416,7 +534,7 @@ describe.skipIf(!available)('the route and the tool', () => {
       gate: where.gate,
       dataDir: join(where.directory, 'launcher'),
       store: where.store,
-      template: STARTER,
+      templates: TEMPLATES,
       versions: STARTER_VERSIONS,
       install: installedOk,
       initGit: noGit,
@@ -466,7 +584,7 @@ describe.skipIf(!available)('the route and the tool', () => {
       journal: where.journal,
       gate: where.gate,
       states: createCandidateStates(),
-      template: STARTER,
+      templates: TEMPLATES,
       versions: STARTER_VERSIONS,
       install: installedOk,
       initGit: noGit,

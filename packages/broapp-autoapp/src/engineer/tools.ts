@@ -33,7 +33,7 @@ import { listApps } from '../launcher/apps.ts';
 import { buildCandidate, SOURCE, type BuildProblem } from '../launcher/candidate.ts';
 import { createApplication } from '../launcher/create.ts';
 import type { Journal } from '../launcher/journal.ts';
-import type { StarterTemplate } from '../launcher/starter.ts';
+import { TEMPLATE_NAMES, type Templates } from '../launcher/starter.ts';
 import type { Supervisor } from '../launcher/supervisor.ts';
 import type { PrepareOptions } from '../launcher/workspace.ts';
 import {
@@ -69,8 +69,8 @@ export interface EngineerToolsOptions {
   readonly gate: Gate;
   readonly states: CandidateStates;
   readonly logger?: HostLogger;
-  /** The starter workspace `apps.create` writes, and what it depends on. */
-  readonly template: StarterTemplate;
+  /** The starter workspaces `apps.create` writes, and what they depend on. */
+  readonly templates: Templates;
   readonly versions: { readonly broapp: string; readonly autoapp: string };
   /** Creation's two spawns, injectable so a test reaches no registry and no git. */
   readonly install?: PrepareOptions['install'];
@@ -470,11 +470,12 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     appId: s.string({ min: 3, max: 40 }),
     name: s.string({ min: 1, max: 200 }),
     description: s.optional(s.string({ max: 400 })),
+    template: s.optional(s.enum([...TEMPLATE_NAMES])),
   });
   tools['apps.create'] = guardedTool(gate, {
     name: 'apps.create',
     description:
-      'Create a new application from the starter: a list of items with a label, a note and a done flag. Writes the source workspace, installs its dependencies, builds the first release and makes it current. Choose a short id from the name. Creation needs the network once.',
+      'Create a new application from one of two starters. "starter" (the default) is a list of items with a label, a note and a done flag; "blank" is one empty page and no operations, for something that is not a list. Writes the source workspace, installs its dependencies, builds the first release and makes it current. Choose a short id from the name. Creation needs the network once.',
     inputSchema: createInput.toJsonSchema(),
     // `external`, because creation installs the application's dependencies from
     // the registry: it reaches the network, which is what that classification
@@ -485,7 +486,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       const { appId, name, description } = parsed(createInput, input);
       const created = await createApplication({
         layout: root,
-        template: options.template,
+        templates: options.templates,
         versions: options.versions,
         appId,
         name,

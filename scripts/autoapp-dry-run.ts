@@ -115,17 +115,17 @@ try {
 
   const launcher = join(project, 'node_modules', 'broapp-autoapp', 'src', 'launcher', 'main.ts');
   const page = join(project, 'node_modules', 'broapp-autoapp', 'dist', 'launcher-page.html');
-  const template = join(project, 'node_modules', 'broapp-autoapp', 'dist', 'starter-template.json');
+  const template = join(project, 'node_modules', 'broapp-autoapp', 'dist', 'templates.json');
   if (!existsSync(launcher)) fail('the installed package', `no launcher entry at ${launcher}`);
   else if (!existsSync(page)) {
     // The one fault this script exists for: `main.ts` imports the page, so a
     // `files` list without it produces a package that cannot start.
     fail('the installed package', 'the launcher page is missing from the tarball');
   } else if (!existsSync(template)) {
-    // The same fault, one artefact along: a tarball without the starter is a
+    // The same fault, one artefact along: a tarball without the templates is a
     // launcher whose New application button has nothing to write.
-    fail('the installed package', 'the starter template is missing from the tarball');
-  } else ok('the installed package', 'launcher entry, page and starter all present');
+    fail('the installed package', 'dist/templates.json is missing from the tarball');
+  } else ok('the installed package', 'launcher entry, page and templates all present');
 
   console.log('\n3. The Notes workspace, depending on the tarballs rather than the monorepo');
   const source = join(project, 'notes');

@@ -33,7 +33,7 @@ import type { Layout } from '../spec/index.ts';
 import { createLauncherApp, LAUNCHER_CONFIRM_TIMEOUT_MS, LAUNCHER_MAX_STEPS, type LauncherApp } from './app.ts';
 import { listApps } from './apps.ts';
 import type { Journal } from './journal.ts';
-import type { StarterTemplate } from './starter.ts';
+import type { Templates } from './starter.ts';
 import type { Supervisor } from './supervisor.ts';
 import type { PrepareOptions } from './workspace.ts';
 
@@ -55,8 +55,8 @@ export interface CreateLauncherTabOptions {
   readonly logger?: HostLogger;
   /** How a tab is opened for an application or a preview. Tests stub it. */
   readonly openBrowser?: (url: string) => Promise<boolean>;
-  /** The starter workspace this launcher carries, and what it depends on. */
-  readonly template: StarterTemplate;
+  /** The starter workspaces this launcher carries, and what they depend on. */
+  readonly templates: Templates;
   readonly versions: { readonly broapp: string; readonly autoapp: string };
   /** Creation's two spawns, injectable so a test reaches no registry and no git. */
   readonly install?: PrepareOptions['install'];
@@ -195,7 +195,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     logger,
     session,
     ...(knowledge === undefined ? {} : { log: knowledge.log }),
-    template: options.template,
+    templates: options.templates,
     versions: options.versions,
     ...(options.openBrowser === undefined ? {} : { openBrowser: options.openBrowser }),
     ...(options.install === undefined ? {} : { install: options.install }),
@@ -228,7 +228,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       gate: options.gate,
       states,
       logger,
-      template: options.template,
+      templates: options.templates,
       versions: options.versions,
       ...(options.install === undefined ? {} : { install: options.install }),
       ...(options.initGit === undefined ? {} : { initGit: options.initGit }),

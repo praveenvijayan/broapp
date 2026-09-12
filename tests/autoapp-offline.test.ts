@@ -45,7 +45,7 @@ import {
 import { layout, setCurrent, type Layout } from 'broapp-autoapp/spec';
 
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
-import { STARTER, STARTER_VERSIONS } from './autoapp-template.ts';
+import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
 import { harness, type Harness } from './harness.ts';
 
 /** The compiled binary every child in this file is started from. */
@@ -279,7 +279,7 @@ describe.skipIf(!available)('edit offline', () => {
       gate: where.gate,
       dataDir: join(where.directory, 'launcher'),
       store: where.store,
-      template: STARTER,
+      templates: TEMPLATES,
       versions: STARTER_VERSIONS,
       // This file's whole point is a machine with no network, so creation's
       // one fetch is injected as a refusal rather than attempted.

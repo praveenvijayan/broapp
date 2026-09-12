@@ -23,7 +23,7 @@ import { evaluate, openKnowledge } from 'broapp-autoapp/knowledge';
 import { layout } from 'broapp-autoapp/spec';
 
 import { LAUNCHER } from './autoapp-launcher.ts';
-import { STARTER, STARTER_VERSIONS } from './autoapp-template.ts';
+import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
 
 const noNetwork = Object.assign(() => Promise.reject(new Error('no network in tests')), {
   preconnect: () => undefined,
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
       execPath: LAUNCHER,
       logger: { warn: () => undefined, error: (line) => console.error(line) },
       notesDir: join(import.meta.dir, '..', 'examples', 'notes'),
-      template: STARTER,
+      templates: TEMPLATES,
       versions: STARTER_VERSIONS,
       fetch: noNetwork,
       turnTimeoutMs: 60_000,

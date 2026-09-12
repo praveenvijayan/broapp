@@ -37,8 +37,11 @@ export type { Control, ControlFile, StartControlOptions } from './control.ts';
 export { createApplication } from './create.ts';
 export type { CreateOptions, CreateResult } from './create.ts';
 
-export { STARTER_MARKERS, writeStarter } from './starter.ts';
-export type { StarterTemplate, StarterValues } from './starter.ts';
+export { isTemplateName, STARTER_MARKERS, TEMPLATE_NAMES, writeStarter } from './starter.ts';
+export type { StarterTemplate, StarterValues, TemplateName, Templates } from './starter.ts';
+
+export { describeReceipt, describeRemoval, removeApplication } from './remove.ts';
+export type { RemovalDescription, RemovalReceipt, RemoveDeps } from './remove.ts';
 
 export { adopt, prepareWorkspace } from './workspace.ts';
 export type { PrepareOptions, PrepareResult } from './workspace.ts';

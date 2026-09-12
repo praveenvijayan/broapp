@@ -34,6 +34,7 @@ export type EventKind =
   | 'run'
   | 'usage'
   | 'activate'
+  | 'remove'
   | 'stderr'
   | 'search'
   | 'dropped';
@@ -103,6 +104,18 @@ const ALLOWED: Readonly<Record<EventKind, Readonly<Record<string, FieldRule>>>> 
   run: { status: 'keep', steps: 'keep', ms: 'keep' },
   usage: { inputTokens: 'keep', outputTokens: 'keep' },
   activate: { ok: 'keep', phase: 'keep', reason: 'text', recovered: 'text', releaseId: 'keep' },
+  // Every field is a count or a host-made path, so all of them are kept: a
+  // sanitiser that trimmed the trash path would leave a row that cannot say
+  // where the application went, which is the one thing this row is for.
+  remove: {
+    trashPath: 'keep',
+    releases: 'keep',
+    hadSource: 'keep',
+    dataBytes: 'keep',
+    snapshots: 'keep',
+    dataPrev: 'keep',
+    previewStopped: 'keep',
+  },
   // `miss` and `lessonId` are the distiller's: a lesson that existed and was
   // not in what the engineer was given, which is the one thing a search that
   // matched nothing cannot say about itself.

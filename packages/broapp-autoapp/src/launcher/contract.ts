@@ -103,6 +103,8 @@ export const launcherContract = defineContract({
         appId: s.string({ min: 3, max: 40 }),
         name: s.string({ min: 1, max: 200 }),
         description: s.optional(s.string({ max: 400 })),
+        /** Which starter to write. Absent is `starter`, so nothing existing changes. */
+        template: s.optional(s.enum(['starter', 'blank'])),
       }),
       output: s.object({
         ok: s.boolean(),
@@ -113,7 +115,31 @@ export const launcherContract = defineContract({
         opened: s.boolean(),
       }),
       summary:
-        'Create an application from the starter, build it, make it current, and open it in a browser tab.',
+        'Create an application from a starter, build it, make it current, and open it in a browser tab.',
+    },
+    'launcher.appRemove': {
+      // A write, and a person's own. There is no engineer tool for this, so
+      // the only way it arrives on channel `ai` at all is through the MCP
+      // adapter or a workflow, where the gate asks as it does for any write.
+      effect: 'write',
+      input: s.object({
+        appId: s.string({ min: 1, max: 40 }),
+        // The id again, typed by the person. A confirmation that is a boolean
+        // is a confirmation somebody can give by clicking the wrong row.
+        confirm: s.string({ min: 1, max: 40 }),
+      }),
+      output: s.object({
+        appId: s.string({ max: 40 }),
+        trashPath: s.string({ max: 4_096 }),
+        releases: s.number({ int: true, min: 0 }),
+        hadSource: s.boolean(),
+        dataBytes: s.number({ int: true, min: 0 }),
+        snapshots: s.number({ int: true, min: 0 }),
+        dataPrev: s.number({ int: true, min: 0 }),
+        previewStopped: s.boolean(),
+      }),
+      summary:
+        'Move an application’s directory — its releases, its source workspace and its data — to the launcher’s trash.',
     },
     'launcher.appOpen': {
       // A write: it may start a process and it opens a browser tab, which is

@@ -144,6 +144,20 @@ export function App(): React.ReactElement {
     setChanged((count) => count + 1);
   }, []);
 
+  /**
+   * One is gone: refresh the list, and stop showing the panels about it.
+   *
+   * Cleared rather than moved to a neighbour. The effect above selects the
+   * first row when nothing is selected, which is the same rule that runs when
+   * the launcher opens — and it is better than choosing an application on
+   * somebody's behalf straight after they removed one.
+   */
+  const noteRemoved = useCallback((appId: string): void => {
+    setSelected((current) => (current === appId ? null : current));
+    setAwaitingSelection((current) => (current === appId ? null : current));
+    setChanged((count) => count + 1);
+  }, []);
+
   // A row the person clicked is what the engineer's next turn is about. Only a
   // click: the first row shown by default is not a choice anybody made.
   const { run: rememberSelection } = selectOperation;
@@ -421,6 +435,7 @@ export function App(): React.ReactElement {
             selected={selected}
             onSelect={chooseApp}
             onCreated={noteCreated}
+            onRemoved={noteRemoved}
             onOpen={(appId) => void openApp(appId)}
             onStop={(appId) => void stop.run({ appId }).then(() => setChanged((count) => count + 1))}
           />

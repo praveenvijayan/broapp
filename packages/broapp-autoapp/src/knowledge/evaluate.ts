@@ -22,7 +22,7 @@ import type { HostLogger } from 'broapp/host';
 
 import { LAUNCHER_MAX_STEPS } from '../launcher/app.ts';
 import { createApplication } from '../launcher/create.ts';
-import type { StarterTemplate } from '../launcher/starter.ts';
+import type { Templates } from '../launcher/starter.ts';
 import { adopt, prepareWorkspace, type PrepareOptions } from '../launcher/workspace.ts';
 import { layout as layoutOf, readCurrent, readRelease, type AcceptanceExample, type Layout } from '../spec/index.ts';
 
@@ -164,7 +164,7 @@ export interface EvaluateOptions {
   readonly install?: PrepareOptions['install'];
   /** `examples/notes`. */
   readonly notesDir: string;
-  readonly template: StarterTemplate;
+  readonly templates: Templates;
   readonly versions: { readonly broapp: string; readonly autoapp: string };
   readonly turnTimeoutMs?: number;
   readonly fetch?: typeof fetch;
@@ -229,7 +229,7 @@ async function prepareTask(directory: string, task: EvaluationTask, options: Eva
   } else {
     const created = await createApplication({
       layout: taskLayout,
-      template: options.template,
+      templates: options.templates,
       versions: options.versions,
       appId: task.appId,
       name: 'Items',
@@ -645,7 +645,7 @@ export interface EvaluateCommandOptions {
   readonly providers: ProvidersFor;
   readonly aiDataDir: string;
   readonly notesDir: string;
-  readonly template: StarterTemplate;
+  readonly templates: Templates;
   readonly versions: { readonly broapp: string; readonly autoapp: string };
   readonly execPath?: string;
   readonly install?: PrepareOptions['install'];
@@ -694,7 +694,7 @@ export async function runEvaluateCommand(options: EvaluateCommandOptions): Promi
       aiDataDir: options.aiDataDir,
       logger,
       notesDir: options.notesDir,
-      template: options.template,
+      templates: options.templates,
       versions: options.versions,
       onRun: err,
       ...(options.execPath === undefined ? {} : { execPath: options.execPath }),

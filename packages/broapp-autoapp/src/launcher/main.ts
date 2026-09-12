@@ -13,7 +13,7 @@
  * sequence.
  */
 import launcherPage from '../../dist/launcher-page.html' with { type: 'text' };
-import starterTemplate from '../../dist/starter-template.json' with { type: 'json' };
+import packedTemplates from '../../dist/templates.json' with { type: 'json' };
 import selfManifest from '../../package.json' with { type: 'json' };
 
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
@@ -23,12 +23,15 @@ import { anthropic } from 'broapp-ai-anthropic';
 import { customServer, ollama, openai } from 'broapp-ai-compatible';
 import { ensureDataDir, openBrowser, startApp } from 'broapp/host';
 
+import { createCandidateStates } from '../engineer/state.ts';
 import { createRunStore } from '../host/run-store.ts';
+import { connectControl, type ControlClient } from '../mcp/client.ts';
 import {
   createEventLog,
   createEvidence,
   openKnowledge,
   runEvaluateCommand,
+  openSession,
   runKnowledgeCommand,
   runReplayCommand,
   type EventLog,
@@ -56,7 +59,8 @@ import { recover } from './recover.ts';
 import { createSupervisor, type Supervisor } from './supervisor.ts';
 import { createLauncherGate } from './app.ts';
 import { createApplication } from './create.ts';
-import type { StarterTemplate } from './starter.ts';
+import { describeReceipt, describeRemoval, removeApplication, type RemovalDescription } from './remove.ts';
+import { isTemplateName, type TemplateName, type Templates } from './starter.ts';
 import { createLauncherTab } from './tab.ts';
 import { adopt, prepareWorkspace } from './workspace.ts';
 
@@ -69,14 +73,15 @@ import { adopt, prepareWorkspace } from './workspace.ts';
 const page = launcherPage as unknown as string;
 
 /**
- * The starter workspace, inlined into the binary the same way.
+ * The starter workspaces, inlined into the binary the same way.
  *
  * A person who downloaded a launcher has no source workspace to import, so the
- * launcher carries one. `scripts/build-template.ts` packs
- * `templates/autoapp-starter` into this file; it is a build artefact, not in
- * git, and `files` ships it.
+ * launcher carries two: an items list to take apart, and a blank page to
+ * describe. `scripts/build-template.ts` packs `templates/autoapp-starter` and
+ * `templates/autoapp-blank` into this file; it is a build artefact, not in git,
+ * and `files` ships it.
  */
-const starter = starterTemplate as StarterTemplate;
+const templates = packedTemplates as unknown as Templates;
 
 /**
  * What a created workspace depends on.
@@ -96,6 +101,10 @@ Usage:
   broapp-autoapp                        Open the launcher's own tab
   broapp-autoapp serve <appId> [--no-open]
   broapp-autoapp create <appId> [--name <name>] [--description <text>]
+                                [--template starter|blank]
+                                        starter (the default) is a list of items;
+                                        blank is one empty page to describe.
+  broapp-autoapp remove <appId> [--yes] Move an application to the launcher's trash.
   broapp-autoapp import <sourceDir> --as <appId> [--grant]
   broapp-autoapp build <appId>
   broapp-autoapp activate <appId> <releaseId>
@@ -279,7 +288,7 @@ async function openLauncher(
             evidence: createEvidence(recording.knowledge, recording.log),
           },
         }),
-    template: starter,
+    templates,
     versions: VERSIONS,
     providers: [anthropic(), ollama(), openai(), customServer()],
     // The offline tier tests need a launcher whose AI layer cannot reach the
@@ -394,10 +403,12 @@ async function createApp(
   appId: string,
   name: string,
   description: string,
+  template: TemplateName,
 ): Promise<number> {
   const created = await createApplication({
     layout: root,
-    template: starter,
+    templates,
+    template,
     versions: VERSIONS,
     appId,
     name,
@@ -410,6 +421,85 @@ async function createApp(
   }
   console.log(`${appId} ${created.releaseId}`);
   return 0;
+}
+
+/**
+ * `remove <appId> [--yes]` — the other way to remove one.
+ *
+ * Two refusals before anything moves. A launcher that is serving the
+ * application is asked over its control connection, because this process has a
+ * supervisor of its own with no children in it and would otherwise believe
+ * nothing was running; and without `--yes` the command prints what would move
+ * and stops, which is the whole of its confirmation. The panel asks for the id
+ * to be typed instead — a terminal already made somebody type it once.
+ */
+async function removeApp(
+  root: Layout,
+  journal: Journal,
+  supervisor: Supervisor,
+  appId: string,
+  confirmed: boolean,
+): Promise<number> {
+  let described: RemovalDescription;
+  try {
+    described = describeRemoval(root, appId);
+  } catch (cause) {
+    console.error(String(cause instanceof Error ? cause.message : cause));
+    return 1;
+  }
+  console.log(`${appId} — ${describeReceipt(described)}`);
+
+  // Asked before `--yes` is looked at, so somebody who has not passed it is
+  // told the real reason they cannot remove this rather than told to come back
+  // with a flag that will not help.
+  if (await servedElsewhere(root, appId)) {
+    console.error(`refused: ${appId} is being served by a running launcher. Stop it first.`);
+    return 1;
+  }
+  if (!confirmed) {
+    console.error('refused: pass --yes to move it to trash');
+    return 1;
+  }
+
+  const receipt = await removeApplication(
+    {
+      layout: root,
+      supervisor,
+      states: createCandidateStates(root),
+      journal,
+      // The same file the tab writes: a selection naming an application that is
+      // in the trash would send the engineer's next turn at nothing.
+      session: openSession(join(root.root, 'launcher')),
+    },
+    appId,
+  );
+  console.log(`moved to ${receipt.trashPath}`);
+  return 0;
+}
+
+/**
+ * Whether a launcher other than this process is serving the application.
+ *
+ * `launcher.json` may name a launcher that has gone — it is removed on a clean
+ * exit and is not on Windows, where a terminated console process runs no
+ * handler — so an unreachable one is treated as no launcher at all. The child
+ * is what would be harmed by a rename, and there is no child behind a socket
+ * that does not answer.
+ */
+async function servedElsewhere(root: Layout, appId: string): Promise<boolean> {
+  let control: ControlClient;
+  try {
+    control = await connectControl(root.control);
+  } catch {
+    return false;
+  }
+  try {
+    return await control.serving(appId);
+  } catch {
+    return false;
+  } finally {
+    control.close();
+  }
 }
 
 /** Everything after the subcommand, and the flags mixed into it. */
@@ -476,12 +566,23 @@ async function main(): Promise<number> {
       case 'create': {
         const appId = positional(argv, 1);
         if (appId === undefined) return usage('create <appId> [--name <name>] [--description <text>]');
+        const template = flagValue(argv, '--template') ?? 'starter';
+        if (!isTemplateName(template)) {
+          return usage('create <appId> [--template starter|blank]');
+        }
         return await createApp(
           root,
           appId,
           flagValue(argv, '--name') ?? appId,
           flagValue(argv, '--description') ?? '',
+          template,
         );
+      }
+
+      case 'remove': {
+        const appId = positional(argv, 1);
+        if (appId === undefined) return usage('remove <appId> [--yes]');
+        return await removeApp(root, journal, supervisor, appId, argv.includes('--yes'));
       }
 
       case 'import': {
@@ -554,7 +655,7 @@ async function main(): Promise<number> {
             // Notes is not in the binary; the evaluation is a developer's
             // measurement, run from a checkout.
             notesDir: resolve(flagValue(argv, '--notes') ?? join('examples', 'notes')),
-            template: starter,
+            templates,
             versions: VERSIONS,
           });
         }

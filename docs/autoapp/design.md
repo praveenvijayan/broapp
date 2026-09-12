@@ -43,13 +43,29 @@ changes; it does not apply them.
 There are two ways an application comes to exist, and they meet after the first
 step. `import <sourceDir> --as <appId>` copies a workspace somebody already
 has. `create <appId>` — the **New application** button in the launcher's tab,
-the `create` command, and the engineer's `apps.create` tool — writes out the
-starter workspace the launcher carries inside its own binary. From there both
-take the same steps, in `src/launcher/workspace.ts`: install, `git init`,
-build, and then whatever the caller decides about capabilities. The starter is
-an ordinary Autoapp source workspace with one table and five routes; once it is
-on disk it is imported in every sense that matters, and every command and every
-tool works on it.
+the `create` command, and the engineer's `apps.create` tool — writes out one of
+the two starter workspaces the launcher carries inside its own binary. From
+there both take the same steps, in `src/launcher/workspace.ts`: install,
+`git init`, build, and then whatever the caller decides about capabilities.
+Each starter is an ordinary Autoapp source workspace; once it is on disk it is
+imported in every sense that matters, and every command and every tool works on
+it.
+
+The two are `templates/autoapp-starter`, one table and five routes drawn as a
+table and a form, and `templates/autoapp-blank`, one page with one sentence on
+it and no operations at all. The choice is a `template` field on all three ways
+in, and it defaults to the items list. Blank is for the person who would rather
+describe what they want than take apart a list they did not ask for.
+
+There is one way an application stops existing, and it is a person's.
+`launcher.appRemove` — a **Remove** action on the row, and the `remove`
+command — renames `<root>/apps/<appId>` into `<root>/trash/<appId>-<stamp>`
+with one `rename`, so nothing is copied and nothing can be half-gone. It
+refuses while the application is serving, because renaming a directory out from
+under a process that is writing to it is how somebody loses the data this is
+trying not to lose. The launcher never empties the trash: a removal that tidied
+up after itself is a removal that will one day tidy away the wrong thing. The
+journal keeps its rows, so what happened to an application outlives it.
 
 ## The gate
 

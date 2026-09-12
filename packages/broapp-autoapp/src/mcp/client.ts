@@ -21,6 +21,8 @@ export interface Described {
 /** A connection to a running launcher. */
 export interface ControlClient {
   describe(appId: string): Promise<Described>;
+  /** Whether the launcher on the other end has a live child for this application. */
+  serving(appId: string): Promise<boolean>;
   invoke(params: {
     appId: string;
     route: string;
@@ -144,6 +146,14 @@ export async function connectControl(controlPath: string): Promise<ControlClient
         throw new Error(String(reply['message'] ?? 'the application could not be described'));
       }
       return reply['output'] as Described;
+    },
+
+    async serving(appId) {
+      const reply = await request({ type: 'serving', appId });
+      if (reply['ok'] !== true) {
+        throw new Error(String(reply['message'] ?? 'the launcher would not say'));
+      }
+      return (reply['output'] as { serving?: unknown }).serving === true;
     },
 
     async invoke({ appId, route, input, client }) {

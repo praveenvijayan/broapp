@@ -106,7 +106,7 @@ import {
 import { layout, setCurrent, type Layout } from 'broapp-autoapp/spec';
 
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
-import { STARTER, STARTER_VERSIONS } from './autoapp-template.ts';
+import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
 import { harness, until, type Harness } from './harness.ts';
 
 const fixture = join(import.meta.dir, 'fixtures', 'autoapp-app');
@@ -259,7 +259,7 @@ function makeWorld(
     gate,
     states,
     logger: quiet,
-    template: STARTER,
+    templates: TEMPLATES,
     versions: STARTER_VERSIONS,
     install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
     initGit: () => false,
@@ -815,7 +815,7 @@ describe.skipIf(!available)('with children', () => {
       gate: where.gate,
       logger: quiet,
       log: where.log,
-      template: STARTER,
+      templates: TEMPLATES,
       versions: STARTER_VERSIONS,
       openBrowser: () => Promise.resolve(true),
     });
@@ -892,7 +892,7 @@ describe('the launcher tab', () => {
       gate: where.gate,
       dataDir: join(where.directory, 'launcher'),
       store: where.store,
-      template: STARTER,
+      templates: TEMPLATES,
       versions: STARTER_VERSIONS,
       install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
       initGit: () => false,
@@ -991,7 +991,7 @@ async function makeStarterWorld(): Promise<{ root: Layout; source: string }> {
   const root = layout(directory);
   const created = await createApplication({
     layout: root,
-    template: STARTER,
+    templates: TEMPLATES,
     versions: STARTER_VERSIONS,
     appId: 'items',
     name: 'Items',
@@ -1012,7 +1012,7 @@ function makeTab(where: World, adapter: ReturnType<typeof createFakeAdapter>, co
     gate: where.gate,
     dataDir: join(where.directory, 'launcher'),
     store: where.store,
-    template: STARTER,
+    templates: TEMPLATES,
     versions: STARTER_VERSIONS,
     install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
     initGit: () => false,

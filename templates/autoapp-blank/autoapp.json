@@ -1,0 +1,14 @@
+{
+  "appId": "__APP_ID__",
+  "name": "__APP_NAME__",
+  "schemaVersion": 0,
+  "capabilities": [],
+  "migrations": [],
+  "acceptance": [
+    {
+      "id": "home-exists",
+      "title": "There is a page to put something on",
+      "steps": [{ "view": { "page": "home" } }]
+    }
+  ]
+}

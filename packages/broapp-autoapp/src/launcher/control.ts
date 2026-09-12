@@ -101,6 +101,18 @@ export function startControl(options: StartControlOptions): Control {
       return reply({ ok: true, output: { releaseId, name: spec.manifest.name, contract: spec.contract } });
     }
 
+    if (request['type'] === 'serving') {
+      // Asked by `broapp-autoapp remove`, which runs in its own process and so
+      // has a supervisor with no children in it. Only whether, never where: an
+      // answer carrying a launch URL would put a credential on this socket for
+      // a question that does not need one.
+      const appId = String(request['appId'] ?? '');
+      const child = supervisor.children.find(
+        (candidate) => candidate.appId === appId && candidate.mode === 'live',
+      );
+      return reply({ ok: true, output: { serving: child !== undefined } });
+    }
+
     if (request['type'] === 'invoke') {
       const appId = String(request['appId'] ?? '');
       const child = supervisor.children.find(

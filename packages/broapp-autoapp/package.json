@@ -32,7 +32,7 @@
   "files": [
     "src",
     "dist/launcher-page.html",
-    "dist/starter-template.json",
+    "dist/templates.json",
     "presets",
     "README.md",
     "LICENSE",

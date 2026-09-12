@@ -489,6 +489,11 @@ body {
   cursor: default;
 }
 
+.launcher__button--danger {
+  border-color: var(--launcher-error-text);
+  color: var(--launcher-error-text);
+}
+
 .launcher__button--small {
   padding: 0.2rem 0.5rem;
   font-size: 0.85rem;
@@ -611,6 +616,39 @@ code {
 }
 
 .launcher__input:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 1px;
+}
+
+/*
+ * The two starters, as a choice above the name.
+ *
+ * A fieldset rather than a select: there are two of them, each needs a
+ * sentence saying what it is, and a person choosing what their application
+ * starts as should be able to read both without opening anything.
+ */
+.launcher__choice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0.85rem;
+  color: var(--launcher-muted);
+}
+
+.launcher__choice legend {
+  padding: 0;
+}
+
+.launcher__choice-option {
+  display: flex;
+  gap: 0.45rem;
+  align-items: baseline;
+}
+
+.launcher__choice-option input:focus-visible {
   outline: 2px solid var(--launcher-accent);
   outline-offset: 1px;
 }

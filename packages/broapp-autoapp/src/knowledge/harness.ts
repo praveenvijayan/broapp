@@ -233,7 +233,7 @@ export function openRun(options: OpenRunOptions): RunHandle {
     providers: options.providers,
     logger,
     openBrowser: () => Promise.resolve(false),
-    template: { files: {} },
+    templates: { starter: { files: {} }, blank: { files: {} } },
     versions: { broapp: '*', autoapp: '*' },
     install: options.install ?? noInstall,
     initGit: () => false,

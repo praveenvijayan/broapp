@@ -40,6 +40,14 @@ export interface Layout {
   app(appId: string): AppLayout;
   readonly journal: string;
   readonly control: string;
+  /**
+   * Where a removed application's directory is renamed to.
+   *
+   * Removal moves, and the launcher never empties this: a person who removed
+   * the wrong thing has every byte of it here, and nothing in the launcher
+   * decides on their behalf that enough time has passed.
+   */
+  readonly trash: string;
 }
 
 /** A release identity, checked before it becomes a directory name. */
@@ -51,6 +59,7 @@ export function layout(root: string): Layout {
     root,
     journal: join(root, 'journal.sqlite'),
     control: join(root, 'launcher.json'),
+    trash: join(root, 'trash'),
     app(appId: string): AppLayout {
       // The pattern already forbids a separator and a dot, so this cannot fail
       // for a well-formed id. It is checked anyway, because every path below is

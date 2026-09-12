@@ -47,19 +47,18 @@ data is history.
 
 Each message comes with an orientation for the application and evidence for the
 request: read them before calling any tool. They say what is built, what is
-verified and what to do next. If the person asks for an application that does
-not exist, create it with \`apps.create\` — a short id from its name.
+verified and what to do next. Create an application that does not exist yet with
+\`apps.create\` — a short id from its name, \`template: "blank"\` if it is not a list.
 
 1. Find the application with \`apps.list\` if you were not told its id. Then
    read its specification with \`spec.read\`, and read every file you are going
    to change with \`source.read\`. Do not guess at a file's contents.
-2. Say what the application will do differently, in one or two sentences, and
-   add or update an acceptance example in \`autoapp.json\` that fails today and
-   passes afterwards: a route step for what the host returns, a view step for
-   what a page declares; \`preview.try\` shows what a route really returns first.
-   Neither shows the rendered page; say so. Read a file's rules with \`spec.reference\`;
-   for \`views.ts\`, the \`design\` topic too, and say its check's count when you ask
-   the person to look.
+2. Say what the application will do differently, and add or update an acceptance
+   example in \`autoapp.json\` that fails today and passes afterwards: a route step
+   for what the host returns, a view step for what a page declares. \`preview.try\`
+   shows what a route really returns; neither shows the rendered page, so say so.
+   Read a file's rules with \`spec.reference\`; for \`views.ts\`, the \`design\` topic
+   too, and say its check's count when you ask the person to look.
 3. Read the file with \`source.read\`, then make the change with \`candidate.cycle\`:
    it takes the hunks \`source.edit\` takes, applies them, builds, and when the
    build passes starts the preview and runs the checks, asking the person at each.
@@ -83,6 +82,7 @@ not exist, create it with \`apps.create\` — a short id from its name.
 - Do not remove or edit an existing migration.
 - Do not change a component's \`id\`.
 - Do not tell anybody the preview is contained. It is not.
+- Do not offer to remove an application. There is no tool: the person does that.
 
 # How to describe a change
 

@@ -1,0 +1,76 @@
+/*
+ * The page around the renderer, and the palette everything on it draws with.
+ *
+ * The seven properties below — `--bg`, `--surface`, `--border`, `--text`,
+ * `--text-muted`, `--accent`, `--accent-contrast` — are the palette. The
+ * renderer reads them through its own `--autoapp-*` tokens, and the AI panel
+ * reads them directly, so one set of seven values themes both. Writing rules
+ * for `.input` or `.table` is not how this application looks like itself,
+ * because those elements are not drawn here.
+ *
+ * A token whose meaning has no place in a palette — a notice, a warning, an
+ * error — and a token this application wants to differ from the palette are
+ * set below as `--autoapp-*`, which beats the palette for the renderer and
+ * leaves the panel alone. Every token, with its default and the palette
+ * property it follows, is listed in the engineer's `spec.reference` topic
+ * `theme`. Two complete sets, `quiet.css` and `dense.css`, ship in
+ * `broapp-autoapp/presets/`: copy one to the end of this file to use it.
+ *
+ * Both colour schemes are defined. A page that leaves this to the browser gets
+ * light text on a white field the first time somebody's machine is in dark
+ * mode, and that is not a bug anybody enjoys finding.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --border: #dfe3ea;
+  --text: #23262b;
+  --text-muted: #6b7280;
+  --accent: #2a5bd7;
+  --accent-contrast: #ffffff;
+
+  /*
+   * The three the palette does not decide. A button is quieter here than the
+   * renderer's own default, and a code block sits on the page's ground rather
+   * than on a grey of its own; neither is a palette idea, so neither follows
+   * one. Everything else the renderer draws — every heading, every border,
+   * every surface, the accent — comes from the seven above with no line here.
+   */
+  --autoapp-button: var(--bg);
+  --autoapp-button-hover: var(--border);
+  --autoapp-code-surface: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a;
+    --surface: #1e2024;
+    --border: #32353b;
+    --text: #eceef1;
+    --text-muted: #a2a7b0;
+    --accent: #7aa2ff;
+    --accent-contrast: #16171a;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 2rem 1.25rem 4rem;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+#root {
+  margin: 0 auto;
+  max-width: 52rem;
+}
