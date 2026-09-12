@@ -202,12 +202,15 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.4: the launcher says which version it is. Its banner had printed
-"Autoapp v0.1.0" since the first release, from a literal nobody changed; it
-now reads the package manifest. Launcher only: `broapp-autoapp` 0.3.3. 0.4.3,
-the same day, brought the theme contract, the palette adapter and the first
-rendered check, with `broapp-ai-elements` 0.4.2; `broapp`, the providers and
-`create-broapp` are unchanged at 0.4.1.
+Version 0.4.5: an application can be removed to the launcher's trash after
+its id is typed, and created blank instead of from the items starter; the
+engineer reads a `design` reference topic it can act on, distilled from
+Impeccable's product register under Apache 2.0, and reports an eight-item
+check when it asks you to look. Launcher only: `broapp-autoapp` 0.3.4;
+`broapp-ai-elements` stays at 0.4.2 and `broapp`, the providers and
+`create-broapp` at 0.4.1. Earlier: 0.4.4 (the banner), 0.4.3 (the theme
+contract and the first rendered check), 0.4.2, 0.4.1 and 0.4.0 (the
+knowledge loop), all on 2026-09-11 and 12.
 
 ## Licence
 
