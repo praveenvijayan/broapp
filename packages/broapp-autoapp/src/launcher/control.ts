@@ -48,6 +48,13 @@ export interface StartControlOptions {
   readonly logger?: HostLogger;
   /** How long one forwarded call may take. Default 300_000, to allow for a person. */
   readonly invokeTimeoutMs?: number;
+  /**
+   * Whether this launcher serves, or is about to serve, an application, from
+   * its own knowledge rather than from the children it has already spawned.
+   * A `serve` command knows its application before the child exists; a
+   * `remove` that asked during that window would otherwise be told "no".
+   */
+  readonly serves?: (appId: string) => boolean;
 }
 
 /** The one address anything may connect from. */
@@ -110,7 +117,8 @@ export function startControl(options: StartControlOptions): Control {
       const child = supervisor.children.find(
         (candidate) => candidate.appId === appId && candidate.mode === 'live',
       );
-      return reply({ ok: true, output: { serving: child !== undefined } });
+      const serving = child !== undefined || options.serves?.(appId) === true;
+      return reply({ ok: true, output: { serving } });
     }
 
     if (request['type'] === 'invoke') {

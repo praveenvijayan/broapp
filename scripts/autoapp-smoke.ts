@@ -276,13 +276,6 @@ async function main(): Promise<number> {
     fail('serve', 'no launcher.json appeared within 30s');
   } else {
     ok('serve', `control on port ${String(controlFile()?.port ?? 0)}`);
-    // A removal asks the launcher that is serving, over the control
-    // connection, rather than believing its own empty supervisor.
-    const whileServing = run(['remove', 'items', '--yes']);
-    if (whileServing.code === 0) fail('remove (serving)', 'it removed a serving application');
-    else if (!whileServing.stderr.includes('being served')) {
-      fail('remove (serving)', whileServing.stderr.trim() || whileServing.stdout.trim());
-    } else ok('remove (serving)', 'refused while a launcher serves it');
     try {
       const described = (await describeOverControl('items')) as {
         ok?: boolean;
@@ -295,6 +288,16 @@ async function main(): Promise<number> {
         const routes = Object.keys(described.output.contract?.operations ?? {});
         ok('describe', `${String(routes.length)} operations`);
       }
+      // A removal asks the launcher that is serving, over the control
+      // connection, rather than believing its own empty supervisor. Asked here,
+      // after `describe` has answered, so the launcher is known to be listening;
+      // the launcher answers "serving" from the moment `serve` names the
+      // application, before its child exists, so the order is belt and braces.
+      const whileServing = run(['remove', 'items', '--yes']);
+      if (whileServing.code === 0) fail('remove (serving)', 'it removed a serving application');
+      else if (!whileServing.stderr.includes('being served')) {
+        fail('remove (serving)', whileServing.stderr.trim() || whileServing.stdout.trim());
+      } else ok('remove (serving)', 'refused while a launcher serves it');
     } catch (cause) {
       fail('describe', String(cause instanceof Error ? cause.message : cause));
     }

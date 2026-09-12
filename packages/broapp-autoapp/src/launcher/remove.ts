@@ -100,6 +100,40 @@ function bytesUnder(directory: string): number {
 }
 
 /** What would move if this application were removed. */
+/** How long a directory is given to be let go of before a move is refused. */
+const RELEASE_WAIT_MS = 5_000;
+const RELEASE_STEP_MS = 250;
+
+/**
+ * Rename, waiting for the files inside to be released first.
+ *
+ * On Windows a directory cannot be renamed while any file in it is open, and
+ * a child that was told to stop a moment ago still holds its database for a
+ * few hundred milliseconds after its process has gone. The move is atomic
+ * either way: it happens whole on some attempt, or not at all and this says so.
+ */
+async function renameWhenReleased(from: string, to: string): Promise<void> {
+  const deadline = Date.now() + RELEASE_WAIT_MS;
+  for (;;) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (cause) {
+      const code = (cause as { code?: unknown }).code;
+      const busy = code === 'EPERM' || code === 'EBUSY' || code === 'ENOTEMPTY';
+      if (!busy || Date.now() >= deadline) {
+        if (busy) {
+          throw publicError.unavailable(
+            `${from} could not be moved: something still has its files open. Stop the application and try again.`,
+          );
+        }
+        throw cause;
+      }
+      await Bun.sleep(RELEASE_STEP_MS);
+    }
+  }
+}
+
 export function describeRemoval(layout: Layout, appId: string): RemovalDescription {
   const app = layout.app(appId);
   if (!existsSync(app.dir)) {
@@ -169,7 +203,7 @@ export async function removeApplication(deps: RemoveDeps, appId: string): Promis
   const currentRelease = readCurrent(root, appId);
   const target = join(root.trash, `${appId}-${stamp(Date.now())}`);
   mkdirSync(root.trash, { recursive: true, mode: 0o700 });
-  renameSync(app.dir, target);
+  await renameWhenReleased(app.dir, target);
 
   // Written after the move, not before: the journal's write-ahead discipline is
   // for a sequence that can be interrupted halfway, and this one cannot be.

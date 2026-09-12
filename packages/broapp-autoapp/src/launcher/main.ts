@@ -204,7 +204,9 @@ async function serve(
   }
   // Opened here too, so `serve <appId>` — one application without the launcher
   // tab — is still reachable over MCP.
-  let control: Control | null = startControl({ layout: root, supervisor, ...loggerOf(recording) });
+  // Said before the child exists: a remove that asks in the seconds a child
+  // takes to start must hear "yes", not "not yet".
+  let control: Control | null = startControl({ layout: root, supervisor, serves: (id) => id === appId, ...loggerOf(recording) });
   process.on('exit', () => control?.stop());
 
   console.log(`${appId} ${current}`);
@@ -491,12 +493,17 @@ async function servedElsewhere(root: Layout, appId: string): Promise<boolean> {
   try {
     control = await connectControl(root.control);
   } catch {
+    // No control file, or nothing answering on its port: no launcher.
     return false;
   }
   try {
     return await control.serving(appId);
   } catch {
-    return false;
+    // A launcher answered the connection and then did not answer the question.
+    // Treated as serving: the cost of a wrong "yes" is a person stopping a
+    // launcher and trying again; the cost of a wrong "no" is a rename under a
+    // running child, which on Windows fails halfway into the question.
+    return true;
   } finally {
     control.close();
   }
