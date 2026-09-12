@@ -202,16 +202,17 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.7: a stray `.DS_Store` in the apps directory no longer breaks
-`apps.list` and the engineer's documents; a question nobody answers within
-ten minutes is reported to the engineer as expired, not declined; and a
-strip above the conversation says when a question is waiting and scrolls to
-it. Launcher only: `broapp-autoapp` 0.3.6; `broapp-ai-elements` stays at
-0.4.3 and `broapp`, the providers and `create-broapp` at 0.4.1. Earlier:
-0.4.6 (the running mark for the whole turn), 0.4.5 (remove to trash, the
-blank template, the `design` topic), 0.4.4 (the banner), 0.4.3 (the theme
-contract and the first rendered check), 0.4.2, 0.4.1 and 0.4.0 (the
-knowledge loop), all on 2026-09-11 and 12.
+Version 0.4.8: the host keeps each turn's own tool calls and results under
+its run id and gives them back, bounded, when the next turn names that run,
+so "continue" no longer starts from a prose summary; both chat clients name
+the run, and `knowledge evaluate` has two-turn tasks under text and
+structured history to measure it. Three packages: `broapp` 0.4.2,
+`broapp-ai-elements` 0.4.4 and `broapp-autoapp` 0.3.7; the providers and
+`create-broapp` stay at 0.4.1. Earlier: 0.4.7 (`.DS_Store`, expired
+questions, the waiting strip), 0.4.6 (the running mark), 0.4.5 (remove to
+trash, the blank template, the `design` topic), 0.4.4 (the banner), 0.4.3
+(the theme contract and the first rendered check), 0.4.2, 0.4.1 and 0.4.0
+(the knowledge loop), all on 2026-09-11 and 12.
 
 ## Licence
 

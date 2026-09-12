@@ -6,17 +6,19 @@ what a maintainer has to do, and what they have to decide.
 ## Status
 
 Published on npm from the `Publish to npm` workflow, each with provenance:
-`broapp`, `create-broapp`, `broapp-ai-anthropic` and `broapp-ai-compatible` at
-0.4.1, `broapp-ai-elements` at 0.4.3, and `broapp-autoapp` at 0.3.6
-(2026-09-12). Earlier the same day: 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
+`broapp` at 0.4.2, `create-broapp`, `broapp-ai-anthropic` and
+`broapp-ai-compatible` at 0.4.1, `broapp-ai-elements` at 0.4.4, and
+`broapp-autoapp` at 0.3.7 (2026-09-13). Earlier: 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
 0.4.0 with 0.2.0, all on 2026-09-11; 0.3.0 on 2026-09-08; 0.2.0 and 0.1.0
 before that. To generate from an unreleased checkout instead, see
 [troubleshooting.md](troubleshooting.md).
 
-Repository release v0.4.7 ships the launcher binaries built from the same
-commit; it moves only the launcher: the apps directory listing ignores
-stray files, an unanswered question is reported as expired, and a strip
-shows while one waits. v0.4.6 before it moved the AI panel, for the running
+Repository release v0.4.8 ships the launcher binaries built from the same
+commit; it moves the core, for the per-run transcript and the optional
+`runId` on a history turn (additive, so a patch), the AI panel, which names
+the run, and the launcher, which depends on both. v0.4.7 before it moved only
+the launcher: the apps directory listing ignores stray files, an unanswered
+question is reported as expired, and a strip shows while one waits. v0.4.6 moved the AI panel, for the running
 mark that stays the whole turn, and the launcher, which depends on it and
 whose engineer stops walking lesson ids. v0.4.5 moved only the launcher, for removal, the blank
 template and the design topic; v0.4.4 only the launcher, for its banner; v0.4.3 moved two
@@ -24,8 +26,8 @@ packages: the launcher, because a created application installs
 `broapp-autoapp@^<the launcher's version>` and 0.3.2 carries the theme contract
 its starter now relies on; and the AI panel, because its portalled components
 and its corner radius were fixed. The launcher's peer range on the panel is
-`>=0.4.3`. A created application installs `broapp@^0.4.1` and
-`broapp-autoapp@^0.3.6`.
+`>=0.4.4`. A created application installs `broapp@^0.4.2` and
+`broapp-autoapp@^0.3.7`.
 
 ## Before publishing
 

@@ -243,6 +243,8 @@ host writes the turn's own messages (its tool calls and their results, as the
 AI SDK gave them) to a `transcripts` table in the same `threads.sqlite`, under
 the turn's run id. A tool call that never got its result is dropped, provider
 metadata is dropped, and a transcript over 200,000 characters is not kept.
+Because of this, the first turn now creates `threads.sqlite` even in an
+application that never opens the conversation list.
 
 Each assistant turn a client sends back in `history` may carry `runId`. Both
 clients set it: `useAiChat` from the run that wrote the message, and the AI
