@@ -143,7 +143,7 @@
     },
     "packages/broapp-ai-elements": {
       "name": "broapp-ai-elements",
-      "version": "0.4.2",
+      "version": "0.4.3",
       "dependencies": {
         "@ai-sdk/react": "4.0.96",
         "ai": "7.0.93",
@@ -176,7 +176,7 @@
     },
     "packages/broapp-autoapp": {
       "name": "broapp-autoapp",
-      "version": "0.3.4",
+      "version": "0.3.5",
       "bin": {
         "broapp-autoapp": "src/launcher/main.ts",
       },
@@ -185,7 +185,7 @@
         "broapp": "^0.4.1",
         "broapp-ai-anthropic": "^0.3.0",
         "broapp-ai-compatible": "^0.3.0",
-        "broapp-ai-elements": ">=0.4.2",
+        "broapp-ai-elements": ">=0.4.3",
       },
       "devDependencies": {
         "@types/react": "^19.0.0",

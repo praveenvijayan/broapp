@@ -202,15 +202,14 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.5: an application can be removed to the launcher's trash after
-its id is typed, and created blank instead of from the items starter; the
-engineer reads a `design` reference topic it can act on, distilled from
-Impeccable's product register under Apache 2.0, and reports an eight-item
-check when it asks you to look. Launcher only: `broapp-autoapp` 0.3.4;
-`broapp-ai-elements` stays at 0.4.2 and `broapp`, the providers and
-`create-broapp` at 0.4.1. Earlier: 0.4.4 (the banner), 0.4.3 (the theme
-contract and the first rendered check), 0.4.2, 0.4.1 and 0.4.0 (the
-knowledge loop), all on 2026-09-11 and 12.
+Version 0.4.6: the chat panel's running mark stays for the whole turn,
+between tool cards too, with the tool that is running, the elapsed time and
+the call count; and the engineer no longer walks lesson ids one after
+another. Two packages: `broapp-ai-elements` 0.4.3 and `broapp-autoapp`
+0.3.5; `broapp`, the providers and `create-broapp` stay at 0.4.1. Earlier:
+0.4.5 (remove to trash, the blank template, the `design` topic), 0.4.4 (the
+banner), 0.4.3 (the theme contract and the first rendered check), 0.4.2,
+0.4.1 and 0.4.0 (the knowledge loop), all on 2026-09-11 and 12.
 
 ## Licence
 
