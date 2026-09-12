@@ -202,13 +202,13 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.9: approving a change cycle works. The panel's transport gave
-the SDK an approval for a step of a call (`<call>.build`) that the SDK had
-never been told about, the SDK threw, and the turn was cancelled the moment
-Allow was clicked; a step's question now sits on its call's card, named
-after the step. Two packages: `broapp-ai-elements` 0.4.5 and
-`broapp-autoapp` 0.3.8; `broapp` stays at 0.4.2, the providers and
-`create-broapp` at 0.4.1. Earlier: 0.4.8 (the host keeps each turn's tool
+Version 0.4.10: the launcher's tab shows its own log. A scroll icon on the
+rail opens the knowledge store's events newest first, filtered by level and
+application, searched by a word, following every five seconds, with the
+shown lines copied as text for a bug report. Launcher only: `broapp-autoapp`
+0.3.9; `broapp-ai-elements` stays at 0.4.5, `broapp` at 0.4.2, the providers
+and `create-broapp` at 0.4.1. Earlier: 0.4.9 (approving a change cycle
+works), 0.4.8 (the host keeps each turn's tool
 calls and results and gives them back on "continue"), 0.4.7 (`.DS_Store`, expired
 questions, the waiting strip), 0.4.6 (the running mark), 0.4.5 (remove to
 trash, the blank template, the `design` topic), 0.4.4 (the banner), 0.4.3

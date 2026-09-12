@@ -8,15 +8,16 @@ what a maintainer has to do, and what they have to decide.
 Published on npm from the `Publish to npm` workflow, each with provenance:
 `broapp` at 0.4.2, `create-broapp`, `broapp-ai-anthropic` and
 `broapp-ai-compatible` at 0.4.1, `broapp-ai-elements` at 0.4.5, and
-`broapp-autoapp` at 0.3.8 (2026-09-13). Earlier: 0.4.8 with the launcher at 0.3.7 and the panel at 0.4.4, 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
+`broapp-autoapp` at 0.3.9 (2026-09-13). Earlier: 0.4.9 with the launcher at 0.3.8 and the panel at 0.4.5, 0.4.8 with the launcher at 0.3.7 and the panel at 0.4.4, 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
 0.4.0 with 0.2.0, all on 2026-09-11; 0.3.0 on 2026-09-08; 0.2.0 and 0.1.0
 before that. To generate from an unreleased checkout instead, see
 [troubleshooting.md](troubleshooting.md).
 
-Repository release v0.4.9 ships the launcher binaries built from the same
-commit; it moves the AI panel, whose transport now puts a step's question on
-its call's card instead of cancelling the turn, and the launcher, which
-depends on it. v0.4.8 before it moved the core, for the per-run transcript
+Repository release v0.4.10 ships the launcher binaries built from the same
+commit; it moves only the launcher, for the log in its tab. v0.4.9 before it
+moved the AI panel, whose transport now puts a step's question on its call's
+card instead of cancelling the turn, and the launcher, which depends on it.
+v0.4.8 moved the core, for the per-run transcript
 and the optional `runId` on a history turn (additive, so a patch), the AI
 panel, which names the run, and the launcher. v0.4.7 moved only
 the launcher: the apps directory listing ignores stray files, an unanswered
@@ -29,7 +30,7 @@ packages: the launcher, because a created application installs
 its starter now relies on; and the AI panel, because its portalled components
 and its corner radius were fixed. The launcher's peer range on the panel is
 `>=0.4.5`. A created application installs `broapp@^0.4.2` and
-`broapp-autoapp@^0.3.8`.
+`broapp-autoapp@^0.3.9`.
 
 ## Before publishing
 
