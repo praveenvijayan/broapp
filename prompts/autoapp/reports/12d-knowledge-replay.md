@@ -51,6 +51,39 @@ Verdict **unrelated**: the build error names `confirmText`, so the engineer repa
 
 **No evaluation table.** `knowledge evaluate` writes its table only once every cell has run; neither of the two `--runs 1` attempts reached that point (9 of 12 turns, then 4 of 12). Their run directories and stores are still under `<root>/evaluate/` for anyone who wants to read them; no number below is taken from them. The four-condition comparison is therefore **not measured** by this prompt, and the backlog's "What was measured" table says so beside the 08c and 12b numbers.
 
+**The clean run, after 0.4.2** (2026-09-12, launcher built at `354e23f`, one process on the root, `--runs 1`, `qwen3.8:27b-mlx`, 40 steps and 20 minutes a turn):
+
+Model ollama.chat/qwen3.8:27b-mlx; 1 run(s) per cell; 40 steps a turn; 20m00s a turn.
+Working code: the evaluation built and previewed what the turn left, and the task example passed. Workflow completed: the engineer itself checked the release it last built and every example passed. The harness answers every question at once, so tool time holds no person’s wait; activation is never part of a run.
+
+| condition | task | runs | working code | workflow completed | calls to first edit | calls to first build | reached a build | failed builds | timed out | mean model time | mean tool time | approvals | mean tokens | recurring signatures | included refs used | included refs ignored | reads not offered | unrelated hint credit |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| baseline | notes-archive | 1 | 0 | 0 | 23.0 | – | 0 | 0 | 1 | 19m59s | 1s | 8 | 0 | 0 | 0 | 0 | 9 | 0 |
+| baseline | starter-done-filter | 1 | 1 | 0 | – | – | 0 | 0 | 0 | 5m28s | 1s | 6 | 124,553 | 0 | 0 | 0 | 5 | 0 |
+| baseline | notes-tags | 1 | 0 | 0 | – | – | 0 | 0 | 1 | 20m00s | 0s | 0 | 0 | 0 | 0 | 0 | 6 | 0 |
+| orientation | notes-archive | 1 | 1 | 0 | – | – | 0 | 0 | 0 | 19m17s | 2s | 10 | 257,033 | 0 | 0 | 0 | 11 | 0 |
+| orientation | starter-done-filter | 1 | 1 | 0 | 11.0 | – | 0 | 0 | 0 | 5m10s | 1s | 10 | 155,547 | 0 | 0 | 0 | 5 | 0 |
+| orientation | notes-tags | 1 | 0 | 0 | – | – | 0 | 0 | 1 | 19m59s | 1s | 0 | 0 | 0 | 0 | 0 | 11 | 0 |
+| orientation+facts | notes-archive | 1 | 0 | 0 | – | – | 0 | 0 | 1 | 19m59s | 1s | 1 | 0 | 0 | 5 | 0 | 4 | 0 |
+| orientation+facts | starter-done-filter | 1 | 1 | 0 | – | – | 0 | 0 | 0 | 7m55s | 1s | 7 | 146,211 | 0 | 3 | 0 | 2 | 0 |
+| orientation+facts | notes-tags | 1 | 0 | 0 | – | – | 0 | 0 | 1 | 19m59s | 1s | 4 | 0 | 0 | 4 | 1 | 3 | 0 |
+| learned | notes-archive | 1 | 1 | 0 | – | – | 0 | 0 | 0 | 16m35s | 1s | 6 | 171,261 | 0 | 4 | 1 | 3 | 0 |
+| learned | starter-done-filter | 1 | 1 | 0 | – | – | 0 | 0 | 0 | 4m55s | 1s | 6 | 102,448 | 0 | 3 | 0 | 4 | 0 |
+| learned | notes-tags | 1 | 0 | 0 | – | – | 0 | 0 | 0 | 17m44s | 1s | 11 | 274,750 | 0 | 5 | 0 | 3 | 0 |
+
+**Read it with two caveats.** First, `n = 1` per cell: a difference of one is noise. Second, five columns are blind to `candidate.cycle`. The evaluation counts `source.edit` for "first edit" and `candidate.build` for "first build", "reached a build", "failed builds" and "workflow completed" (`evaluate.ts` lines 294–463), and since 12c's instructions route every change through the cycle, those columns read `–` and 0 for every run that in fact edited and built. "Working code" is judged by the harness building what the turn left and running the task's example, so it stands; so do timeouts, times, tokens, approvals, the reference-usage counts and the call counts. The five stale columns need `evaluate.ts` to count the cycle's steps before the next run.
+
+What the valid columns say, one run per cell:
+
+| condition | working code | timed out | mean tokens (finished runs) |
+|---|---|---|---|
+| baseline | 1 of 3 | 2 | 124,553 |
+| orientation | 2 of 3 | 1 | 206,290 |
+| orientation + facts | 1 of 3 | 2 | 146,211 |
+| learned | 2 of 3 | 0 | 182,820 |
+
+`notes-tags`, the task that touches the contract, a migration, the views and an example, produced working code under no condition. `learned` was the only condition with no timeout, and the fastest on the starter task. Two tool failures in the log reached the model as a bare "the tool failed": `candidate.cycle` with `hunks[21].replace` failing the input schema, and `knowledge.show` called with `lessonId: 0`. Both are the open question below about validation errors, now seen costing turns in a measured run.
+
 ## Commands run
 
 ```
