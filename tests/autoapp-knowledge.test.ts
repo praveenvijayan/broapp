@@ -1176,6 +1176,17 @@ describe('the knowledge path: documents', () => {
       expect(entry.line).toBeGreaterThan(0);
     }
 
+    // The starter ships a PRODUCT.md, so the brief is named with its first line
+    // rather than left for the engineer to find by listing files. DESIGN.md is
+    // optional and absent here, and a file nobody wrote is not mentioned.
+    expect(found.text).toMatch(/Context: PRODUCT\.md \(.+\)$/m);
+    expect(found.text).not.toContain('DESIGN.md');
+    expect(found.entries.some((entry) => entry.name === 'context')).toBe(true);
+
+    writeFileSync(join(source, 'DESIGN.md'), '# Design\n\nOne accent, everything else grey.\n', 'utf8');
+    const both = taskEvidence({ layout: root, appId: 'items', tokens: ['items', 'add'], index });
+    expect(both.text).toContain('DESIGN.md (One accent, everything else grey.)');
+
     const nothing = taskEvidence({ layout: root, appId: 'items', tokens: ['zebra'], index });
     expect(nothing.entries).toEqual([]);
     expect(nothing.text).toContain('Nothing in items matched these words.');

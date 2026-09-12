@@ -70,8 +70,15 @@ const MAX_DIFF_BYTES = 20_000;
 /** Directories that are never part of the workspace an agent sees. */
 const EXCLUDED = new Set(['node_modules', 'dist', 'release', '.git', 'source-history']);
 
-/** What may be read, and what may be written. */
-const READABLE = /^(src\/|autoapp\.json$|package\.json$|broapp\.config\.ts$|tsconfig\.json$)/;
+/**
+ * What may be read, and what may be written.
+ *
+ * `PRODUCT.md` and `DESIGN.md` are readable and deliberately not writable: they
+ * are the person's answers about who the application is for and what it should
+ * look like, and an engineer that can rewrite the brief can agree with itself
+ * about anything.
+ */
+const READABLE = /^(src\/|autoapp\.json$|package\.json$|broapp\.config\.ts$|tsconfig\.json$|(PRODUCT|DESIGN)\.md$)/;
 const WRITABLE = /^(src\/|autoapp\.json$)/;
 
 /**
@@ -143,6 +150,10 @@ export function readWorkspaceFile(sourceDir: string, path: string): string {
     throw publicError.invalidInput(`${path} is not part of this application's source`);
   }
   const target = within(sourceDir, normalised);
+  // `PRODUCT.md` and `DESIGN.md` are readable and usually absent, so a missing
+  // readable file is an ordinary answer rather than a raw ENOENT thrown at an
+  // agent that cannot read it.
+  if (!existsSync(target)) throw publicError.notFound(`${path} is not in this application's workspace`);
   const stats = statSync(target);
   if (!stats.isFile()) throw publicError.notFound(`${path} is not a file`);
   if (stats.size > MAX_FILE_BYTES) {

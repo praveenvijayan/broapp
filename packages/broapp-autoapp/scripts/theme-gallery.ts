@@ -174,10 +174,12 @@ function main(): number {
 <meta charset="utf-8">
 <title>Autoapp theme gallery</title>
 <style>
-/* The gallery's own frame. */
-body { margin: 0; padding: 1.5rem; background: #8a8d93; font: 14px system-ui, sans-serif; }
-.g-intro { max-width: 60rem; color: #fff; }
-.g-title { margin: 2rem 0 0.75rem; color: #fff; font-size: 1.1rem; }
+/* The gallery's own frame. A dark, faintly cool ground rather than the mid grey
+   it had: the detector measured that one at 3.3:1 behind this page's own text,
+   which is a page about contrast failing its own rule. Neither value is pure. */
+body { margin: 0; padding: 1.5rem; background: #32353c; font: 14px system-ui, sans-serif; }
+.g-intro { max-width: 60rem; color: #f2f3f5; }
+.g-title { margin: 2rem 0 0.75rem; color: #f2f3f5; font-size: 1.1rem; }
 .g-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .g-panel { border-radius: 6px; }
 .g-scheme { margin: 0 0 1rem; font: 600 11px system-ui; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.6; }

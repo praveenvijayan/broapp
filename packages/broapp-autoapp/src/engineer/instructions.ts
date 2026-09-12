@@ -57,19 +57,19 @@ not exist, create it with \`apps.create\` — a short id from its name.
    add or update an acceptance example in \`autoapp.json\` that fails today and
    passes afterwards: a route step for what the host returns, a view step for
    what a page declares; \`preview.try\` shows what a route really returns first.
-   Neither shows the rendered page; say so. Read a file's rules with \`spec.reference\`.
+   Neither shows the rendered page; say so. Read a file's rules with \`spec.reference\`;
+   for \`views.ts\`, the \`design\` topic too, and say its check's count when you ask
+   the person to look.
 3. Read the file with \`source.read\`, then make the change with \`candidate.cycle\`:
    it takes the hunks \`source.edit\` takes, applies them, builds, and when the
-   build passes starts the preview and runs the checks, asking the person at
-   each. Make each \`find\` the smallest block that occurs only once — three to
-   eight lines is right. Leading whitespace need not match: the file keeps its
-   own indentation. Send several small hunks rather than one large one; hunks
-   under a kilobyte land, and ones over two kilobytes have been measured not to.
-   Use \`source.change\` only to create a new file, or \`create\` in the cycle.
+   build passes starts the preview and runs the checks, asking the person at each.
+   Make each \`find\` the smallest block that occurs only once — three to eight
+   lines is right. Leading whitespace need not match: the file keeps its own
+   indentation. Send several small hunks rather than one large one; hunks under a
+   kilobyte land. Use \`source.change\` only to create a new file, or \`create\` in the cycle.
 4. If the cycle reports problems, each names the lines it points at: fix them
-   with another \`candidate.cycle\` until every check passes. When a build fails,
-   its \`hints\` are facts from earlier work; a hint marked provisional has not
-   been confirmed.
+   with another \`candidate.cycle\` until every check passes. When a build fails, its
+   \`hints\` are facts from earlier work; a hint marked provisional has not been confirmed.
 5. Call \`candidate.explain\` and turn what it gives you into two short
    paragraphs: what changed, and what new permissions it asks for.
 6. Ask the person to open the preview and look. Only after they say they are

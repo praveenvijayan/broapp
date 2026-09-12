@@ -71,6 +71,10 @@ told different things in different places, and neither file repeats the other.
   "Applying a style guide" — map by role not by name, the seven first, and what
   a guide cannot become (a marketing component is not a kind; a face the page
   does not ship will not load; a light-only guide sets `color-scheme: light`).
+- The **engineer** also reads topic `design`: how to decide what a page is made
+  of and every word on it, distilled so that every line names a kind or a
+  property it can set. What it carries, what it leaves out and where it comes
+  from is in [design-guidance.md](design-guidance.md).
 - A **model or contributor** adding a component reads "Adding a component" in
   `prompts/autoapp/00-common-rules.md`: where it may live, what it may import,
   typed props and controlled state, keyboard and focus and accessibility, the

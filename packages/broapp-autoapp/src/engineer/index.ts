@@ -43,3 +43,5 @@ export { engineerTools } from './tools.ts';
 export type { EngineerKnowledge, EngineerToolsOptions, TurnRecord } from './tools.ts';
 export { REFERENCE_TOPICS, specReference } from './reference.ts';
 export type { ReferenceTopic } from './reference.ts';
+export { DESIGN_CHECK, DESIGN_RULES, designTopic } from './design.ts';
+export type { DesignRule, DesignSection, DesignSubject } from './design.ts';

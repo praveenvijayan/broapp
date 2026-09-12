@@ -21,7 +21,8 @@
     "dryrun:autoapp": "bun run scripts/autoapp-dry-run.ts",
     "site": "bun run scripts/build-site.ts",
     "smoke": "bun run scripts/smoke-binary.ts",
-    "theme-check": "bun run scripts/theme-check.ts"
+    "theme-check": "bun run scripts/theme-check.ts",
+    "design-detect": "bun run scripts/design-detect.ts"
   },
   "devDependencies": {
     "@ai-sdk/react": "4.0.96",
@@ -41,6 +42,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
+    "impeccable": "4.1.0",
     "lucide-react": "1.42.0",
     "nanoid": "6.0.1",
     "playwright": "1.63.0",

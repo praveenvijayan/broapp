@@ -148,6 +148,7 @@ describe('the starter template', () => {
     expect(paths).toContain('README.md');
     expect(paths).toContain('src/host/db.ts');
     expect(paths).toContain('src/ui/styles.css');
+    expect(paths).toContain('PRODUCT.md');
     // Renamed on the way out: npm rewrites a packaged `.gitignore`.
     expect(paths).toContain('.gitignore');
     expect(paths).not.toContain('_gitignore');
@@ -218,6 +219,27 @@ describe('writeStarter', () => {
     };
     expect(manifest.appId).toBe('recipes');
     expect(manifest.name).toBe('A "difficult" \\ name');
+  });
+
+  test('writes a PRODUCT.md with the three questions and no marker', () => {
+    const where = makeWorld();
+    const target = join(where.directory, 'workspace');
+    writeStarter(STARTER, target, {
+      appId: 'recipes',
+      name: 'Recipes',
+      description: 'One line.',
+      broappVersion: '^0.3.0',
+      autoappVersion: '^0.1.0',
+    });
+
+    const text = readFileSync(join(target, 'PRODUCT.md'), 'utf8');
+    // The three questions, and nothing for the person to delete first: the
+    // engineer may read this file and may not write it, so a placeholder left
+    // in it would be a placeholder for ever.
+    expect(text).toContain('Who uses this, and when?');
+    expect(text).toContain('What do they come to do?');
+    expect(text).toContain('What tone do they expect?');
+    for (const marker of STARTER_MARKERS) expect(text).not.toContain(marker);
   });
 
   test('refuses a target that already exists', () => {

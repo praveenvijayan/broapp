@@ -18,7 +18,9 @@
 
 import { APPLICATION_VARIABLES, AUTOAPP_TOKENS, TOKEN_PREFIX, type ThemeToken, type TokenGroup } from '../react/theme.ts';
 
-export const REFERENCE_TOPICS = ['contract', 'views', 'acceptance', 'workspace', 'theme'] as const;
+import { designTopic } from './design.ts';
+
+export const REFERENCE_TOPICS = ['contract', 'views', 'acceptance', 'workspace', 'theme', 'design'] as const;
 export type ReferenceTopic = (typeof REFERENCE_TOPICS)[number];
 
 const CONTRACT = `# contract — src/shared/contract.ts
@@ -40,7 +42,9 @@ const VIEWS = `# views — src/shared/views.ts
 
 Exports the view specification: \`specVersion\` (always 1), \`pages\`, and \`home\`,
 the id of the page shown first. The pinned renderer draws it; there is no generated browser
-code, so what is not expressible here cannot be drawn.
+code, so what is not expressible here cannot be drawn. This topic is what the
+specification will accept; the \`design\` topic is how to decide well inside it, and
+it is worth reading before writing a page rather than after.
 
 ## Page
 \`id\` (\`[a-z][a-z0-9-]*\`, unique), \`title\` (the page's heading and its name in
@@ -233,6 +237,7 @@ const SECTIONS: Readonly<Record<ReferenceTopic, string>> = {
   acceptance: ACCEPTANCE,
   workspace: WORKSPACE,
   theme: themeReference(AUTOAPP_TOKENS),
+  design: designTopic(),
 };
 
 /** One topic's text, or every topic in order. */

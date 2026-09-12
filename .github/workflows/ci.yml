@@ -137,6 +137,11 @@ jobs:
       - run: bun test tests/autoapp-theme-browser.test.ts
       # The same run again, for the report a person reads when it fails.
       - run: bun run theme-check
+      # The gallery is the page a person looks at, so it is the page the
+      # detector reads: 61 deterministic rules, no model, over every
+      # text-on-background pair the harness was never told about.
+      - run: bun run --cwd packages/broapp-autoapp theme-gallery
+      - run: bun run design-detect
       - name: Upload the measurements
         if: always()
         uses: actions/upload-artifact@v4

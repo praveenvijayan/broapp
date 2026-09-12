@@ -267,6 +267,9 @@ candidate panel shows the size when it moved by more than 2%.
 
 - [components.md](components.md) — the three layers that draw a page, the one
   theme that reaches all three, and the gate anything new passes.
+- [design-guidance.md](design-guidance.md) — the `design` reference topic: what
+  the engineer is told about deciding a page, what was deliberately left out of
+  it, the detector that runs over the gallery in CI, and the attribution.
 - [packaging.md](packaging.md) — the launcher binary, its targets and sizes,
   what is smoke-tested where, Windows, offline evidence, publishing.
 - [security.md](security.md) — the gate, approvals and their windows, the

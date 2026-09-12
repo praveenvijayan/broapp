@@ -46,6 +46,7 @@ import {
   ENGINEER_INSTRUCTIONS,
   INSTRUCTION_SECTIONS,
   applyChange,
+  designTopic,
   applyEdits,
   createCandidateStates,
   diffSummary,
@@ -1261,6 +1262,12 @@ describe('the engineer’s instructions', () => {
     expect(flat).toContain('three to eight lines is right');
   });
 
+  test('send it to the design topic for views.ts, and ask for the check’s count', () => {
+    const flat = ENGINEER_INSTRUCTIONS.replace(/\s+/g, ' ');
+    expect(flat).toContain('`design` topic');
+    expect(flat).toContain("say its check's count when you ask the person to look");
+  });
+
   test('send the engineer to source.edit rather than to whole-file rewrites', () => {
     expect(ENGINEER_INSTRUCTIONS).toContain('source.edit');
     const flat = ENGINEER_INSTRUCTIONS.replace(/\s+/g, ' ');
@@ -1322,6 +1329,42 @@ describe('the specification tools', () => {
     const all = (await callTool(where, 'spec.reference', {})) as { topic: string; text: string };
     expect(all.topic).toBe('all');
     expect(all.text).toMatch(/# acceptance/);
+  });
+
+  test('spec.reference serves the design topic, and the whole reference contains it', async () => {
+    const where = makeWorld();
+    const design = (await callTool(where, 'spec.reference', { topic: 'design' })) as { topic: string; text: string };
+    expect(design.topic).toBe('design');
+    expect(design.text).toBe(designTopic());
+    expect(design.text).toMatch(/emptyText/);
+    const all = (await callTool(where, 'spec.reference', {})) as { text: string };
+    expect(all.text).toContain(design.text);
+  });
+
+  test('PRODUCT.md is read from a workspace and never written', async () => {
+    const where = makeWorld();
+    const source = layout(where.directory).app('items').source;
+    const path = join(source, 'PRODUCT.md');
+
+    await expect(callTool(where, 'source.read', { appId: 'items', path: 'PRODUCT.md' })).rejects.toMatchObject({
+      code: 'not_found',
+    });
+
+    writeFileSync(path, '# Product\n\nA weekly shopping list, used on a phone in a supermarket.\n', 'utf8');
+    const read = (await callTool(where, 'source.read', { appId: 'items', path: 'PRODUCT.md' })) as { content: string };
+    expect(read.content).toContain('supermarket');
+
+    // The person owns the brief: an engineer that can rewrite it can agree with
+    // itself about anything.
+    await expect(
+      callTool(
+        where,
+        'source.change',
+        { appId: 'items', message: 'rewrite the brief', changes: [{ path: 'PRODUCT.md', content: 'mine now' }] },
+        { approve: true },
+      ),
+    ).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(readFileSync(path, 'utf8')).toContain('supermarket');
   });
 
   test('a wrong input names the field, as invalid_input, instead of "the tool failed"', async () => {

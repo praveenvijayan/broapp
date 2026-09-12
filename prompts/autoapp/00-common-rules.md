@@ -125,6 +125,13 @@ this is the checklist.
 - **The reference topic.** If an engineer can ask for it, the engineer is told
   about it: a kind goes in the `views` topic, a token in `theme`, generated from
   the table rather than written beside it.
+- **The design pass, before the gallery.** Run `/impeccable critique` and
+  `/impeccable audit` on the gallery page and act on every finding scored below
+  3, then `/impeccable polish` on the component's own file. The report carries
+  the scores. This is the one place the skill itself is used rather than the
+  distilled `design` topic: a framework author writes React and CSS and can act
+  on all of it, where the engineer can act only on the part that names a kind.
+  `bun run design-detect` then has to stay green.
 - **The gallery.** `bun run --cwd packages/broapp-autoapp theme-gallery` draws
   it, under every preset, in both schemes, and somebody looks at the result.
 - **The harness combination it adds.** `scripts/theme-check.ts` gains the

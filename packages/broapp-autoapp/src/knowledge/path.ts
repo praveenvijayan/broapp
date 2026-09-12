@@ -411,6 +411,38 @@ function where(symbol: IndexedSymbol | undefined): string {
 const CONSTRAINTS =
   'Constraints: every route needs effect and summary · a component keeps its id · autoapp.json and src/ only · spec.reference has the rules of each file';
 
+/** The two context files a person may leave at the root of a workspace. */
+const CONTEXT_FILES: readonly string[] = ['PRODUCT.md', 'DESIGN.md'];
+
+/**
+ * The context line: which brief files exist, and the first thing each says.
+ *
+ * A file nobody wrote is not mentioned at all. The snippet is the first line
+ * that is not a heading, cut short, which is enough for the engineer to know
+ * whether reading the whole thing is worth a turn — and the topic that depends
+ * on it (`design` for `PRODUCT.md`, `theme` for `DESIGN.md`) says what to do
+ * with it once read.
+ */
+function contextLine(sourceDir: string): string | undefined {
+  const parts: string[] = [];
+  for (const name of CONTEXT_FILES) {
+    let text: string;
+    try {
+      const file = within(sourceDir, name);
+      if (!lstatSync(file).isFile()) continue;
+      text = readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    const first = text
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line !== '' && !line.startsWith('#'));
+    parts.push(first === undefined ? name : `${name} (${cut(first, 80)})`);
+  }
+  return parts.length === 0 ? undefined : `Context: ${parts.join(' · ')}`;
+}
+
 /**
  * The evidence for one request's words in one application.
  *
@@ -541,5 +573,10 @@ export function taskEvidence(input: {
   entries.push({ kind: 'constraint', name: 'migrations', confidence: 'declared', note: `next ${nextMigrationId(last)}` });
   lines.push(CONSTRAINTS);
   entries.push({ kind: 'constraint', name: 'rules', confidence: 'declared' });
+  const context = contextLine(layout.app(appId).source);
+  if (context !== undefined) {
+    lines.push(context);
+    entries.push({ kind: 'constraint', name: 'context', confidence: 'declared', note: context });
+  }
   return { appId, text: cut(lines.join('\n'), EVIDENCE_MAX_CHARS), entries };
 }

@@ -35,7 +35,8 @@
     "dist/starter-template.json",
     "presets",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE.md"
   ],
   "exports": {
     ".": "./src/index.ts",

@@ -564,7 +564,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   tools['spec.reference'] = guardedTool(gate, {
     name: 'spec.reference',
     description:
-      'The rules of an application’s specification, one topic at a time: "contract" (routes, effect, summary), "views" (every page and component property, what is required, what the renderer does with it, when an action needs confirmText), "acceptance" (route steps and view steps, what each proves), "workspace" (what may be changed), "theme" (every --autoapp-* token an application sets in src/ui/styles.css, with its default). Read the topic for the file you are about to change.',
+      'The rules of an application’s specification, one topic at a time: "contract" (routes, effect, summary), "views" (every page and component property, what is required, what the renderer does with it, when an action needs confirmText), "acceptance" (route steps and view steps, what each proves), "workspace" (what may be changed), "theme" (every --autoapp-* token an application sets in src/ui/styles.css, with its default), "design" (how to decide what a page is made of and every word on it, and the eight-item check to report before asking the person to look). Read the topic for the file you are about to change; for views.ts read "design" too.',
     inputSchema: referenceInput.toJsonSchema(),
     effect: 'read',
     run: (input) => {

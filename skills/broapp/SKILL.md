@@ -147,6 +147,13 @@ every control that talks to the host. Use semantic HTML, labels, visible
 focus, `role="alert"` for errors, `<progress>` for progress, and respect
 `prefers-reduced-motion`.
 
+For the design itself, use the Impeccable skill if it is installed — this is a
+tool somebody is in a task with, so the **product** register, not the brand one.
+`shape` or `craft` before writing a screen, `critique` and `audit` on it
+afterwards, `polish` last. A `PRODUCT.md` at the project root (who uses this,
+what they come to do, what tone they expect) is what makes any of it specific to
+this application rather than generic; write one if there is none.
+
 ### 7. Add persistence when the app needs it
 
 Data goes in the per-user directory from `ensureDataDir(APP_NAME)`, never
@@ -281,6 +288,15 @@ What it adds:
   the **New application** button, and the engineer's `apps.create` — writes out
   the starter workspace carried inside the launcher's binary. Both then install,
   build and make current through the same code.
+
+**Design work in an application.** If the Impeccable skill is installed, use it
+for anything that draws — product register, never the brand one: `critique` and
+`audit` before shipping a screen, `polish` on the file itself. In an Autoapp
+application the engineer already carries a distilled version as its
+`spec.reference` topic `design`, held to the six renderer kinds; the skill is
+for the React and CSS the engineer does not write. A `PRODUCT.md` at the root of
+a workspace (who uses this, what they come to do, what tone they expect) is read
+by both, and by the engineer as the thing that decides every word.
 
 The one thing to say out loud whenever it comes up: a candidate release's host
 code is **trusted local code** — crash isolated in its own child process, not

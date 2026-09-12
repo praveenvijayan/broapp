@@ -9,12 +9,15 @@
  * engineer would be told nothing about.
  */
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { ChildHandle } from 'broapp-autoapp/launcher';
 import {
   coverage,
+  DESIGN_CHECK,
+  DESIGN_RULES,
+  designTopic,
   divergence,
   REFERENCE_TOPICS,
   runAcceptance,
@@ -137,6 +140,124 @@ describe('the specification reference', () => {
     for (const topic of REFERENCE_TOPICS) expect(whole).toContain(specReference(topic));
     expect(specReference('views')).toMatch(/confirmText.*required on a button/s);
     expect(specReference('views')).toMatch(/submit.*exempt/s);
+  });
+
+  test('the views topic points at the design topic', () => {
+    expect(specReference('views')).toContain('`design` topic');
+    expect(specReference('design')).toBe(designTopic());
+  });
+});
+
+/**
+ * The design topic is guidance, which is exactly why it needs a test: prose
+ * about design drifts into prose the engineer cannot act on, and a rule naming
+ * something the renderer does not have is a rule it will invent a way to
+ * follow.
+ */
+describe('the design topic', () => {
+  const typesText = readFileSync(join(import.meta.dir, '..', 'packages', 'broapp-autoapp', 'src', 'views', 'types.ts'), 'utf8');
+  const declared = new Set([...typesText.matchAll(/^\s+readonly (\w+)\??:/gm)].map((match) => match[1]));
+  const kinds = [...(/kind: ('[a-z]+'(?: \| '[a-z]+')*)/.exec(typesText)?.[1] ?? '').matchAll(/'([a-z]+)'/g)].map(
+    (match) => match[1] as string,
+  );
+
+  test('every rule names a real kind and a property the types declare', () => {
+    expect(kinds.length).toBe(6);
+    const subjects = new Set([...kinds, 'page']);
+    for (const rule of DESIGN_RULES) {
+      expect(rule.kinds.length).toBeGreaterThan(0);
+      for (const kind of rule.kinds) expect(subjects.has(kind)).toBe(true);
+      for (const property of rule.properties ?? []) expect(declared.has(property)).toBe(true);
+    }
+  });
+
+  test('every kind is named by at least one rule', () => {
+    for (const kind of kinds) {
+      expect(DESIGN_RULES.some((rule) => rule.kinds.includes(kind as never))).toBe(true);
+    }
+  });
+
+  test('says nothing the renderer cannot express, and stays short', () => {
+    const text = designTopic();
+    // What a declarative renderer with six kinds has no way to act on. A line
+    // about any of it is a line the engineer would have to invent a way to obey.
+    for (const word of ['font', 'animate', 'motion', 'oklch', 'gradient', 'glass', 'modal', 'hero', 'landing']) {
+      expect(text.toLowerCase()).not.toContain(word);
+    }
+    expect(text.split('\n').length).toBeLessThan(120);
+    expect(text).toMatch(/^# design /);
+  });
+
+  test('carries the eight-item check, and every section, in order', () => {
+    const text = designTopic();
+    expect(DESIGN_CHECK.length).toBe(8);
+    for (const item of DESIGN_CHECK) expect(text).toContain(item);
+    const headings = [...text.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+    expect(headings).toEqual([
+      'What a good page is',
+      'Structure',
+      'Every state',
+      'Copy',
+      'Colour and contrast',
+      'Before you ask the person to look',
+    ]);
+  });
+});
+
+/**
+ * The detector, over the page a person actually looks at.
+ *
+ * `theme-check` measures the pairs it was told about; this reads every
+ * text-on-background pair there is, which is how four contrast failures in the
+ * gallery's own frame survived the harness. It is skipped, loudly, when the CLI
+ * is not installed — an offline checkout should not fail on a missing binary.
+ */
+describe('the design detector', () => {
+  const repo = join(import.meta.dir, '..');
+  const cli = join(repo, 'node_modules', '.bin', 'impeccable');
+  const gallery = join(repo, 'packages', 'broapp-autoapp', '.broapp-tmp', 'theme-gallery.html');
+  const available = existsSync(cli);
+
+  test.skipIf(!available)('finds nothing primary in the theme gallery', () => {
+    // The gallery is generated, not committed, so the test draws it first.
+    const drawn = Bun.spawnSync(['bun', 'run', '--cwd', join(repo, 'packages', 'broapp-autoapp'), 'theme-gallery'], {
+      cwd: repo,
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    expect(drawn.exitCode).toBe(0);
+    expect(existsSync(gallery)).toBe(true);
+
+    const run = Bun.spawnSync([cli, 'detect', '--no-config', '--no-advisory', '--json', gallery], {
+      cwd: repo,
+      stdout: 'pipe',
+      stderr: 'ignore',
+    });
+    const text = run.stdout.toString().trim();
+    const findings = text === '' ? [] : (JSON.parse(text) as { antipattern: string; snippet: string }[]);
+    expect(findings.map((finding) => `${finding.antipattern}: ${finding.snippet}`)).toEqual([]);
+    // 0 is "no primary findings"; 2 is "at least one".
+    expect(run.exitCode).toBe(0);
+  }, 60_000);
+});
+
+/** The attribution the package carries, because the topic is somebody else's work. */
+describe('the package notice', () => {
+  const packageDir = join(import.meta.dir, '..', 'packages', 'broapp-autoapp');
+
+  test('ships, and names Impeccable, its author, its licence and the modification', () => {
+    const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as {
+      files: readonly string[];
+    };
+    expect(manifest.files).toContain('NOTICE.md');
+
+    const notice = readFileSync(join(packageDir, 'NOTICE.md'), 'utf8');
+    expect(notice).toContain('Impeccable');
+    expect(notice).toContain('Paul Bakaus');
+    expect(notice).toContain('Apache License, Version 2.0');
+    expect(notice).toContain('This is a modification.');
+    // The file the notice is about, named so a reader can check the claim.
+    expect(notice).toContain('src/engineer/design.ts');
   });
 });
 

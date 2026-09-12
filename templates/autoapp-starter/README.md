@@ -40,6 +40,13 @@ palette property it follows, is in the engineer's `spec.reference` topic
 `broapp-autoapp/presets/` — `quiet.css` and `dense.css` — and using one means
 copying it to the end of `styles.css`.
 
+`PRODUCT.md` is yours to answer: who uses this and when, what they come to do,
+and what tone they expect in three or four words. The engineer reads it before it
+writes a word of your interface, and it cannot change it — every label, heading,
+empty table and question follows what you put there. A `DESIGN.md` beside it, if
+you write one, is read the same way for colour and type. Neither file is part of
+the build; leaving `PRODUCT.md` blank costs you nothing but specificity.
+
 Your data is not here. It lives in the launcher's own directory, under
 `apps/__APP_ID__/data/`, and this workspace is only the source it is built
 from. A preview runs against a copy of that data, never against the original.
