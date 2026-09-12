@@ -97,8 +97,11 @@ import 'broapp/ai/react/ai.css';
 **`BroappChat`, from `broapp-ai-elements`.** The AI SDK's `useChat` over the
 same bridge, drawn with Vercel AI Elements: markdown, pasted and picked images,
 a conversation that sticks to the bottom, a Stop button, tool cards, and the
-approval card with its countdown. It brings the AI SDK, Radix and a generated
-stylesheet with it.
+approval card with its countdown. A running mark stays for the whole turn,
+between tool cards too: the tool whose result has not come back, the elapsed
+time and the call count, and between calls one of a few phrases changed every
+four seconds (`statusLines` replaces them). It brings the AI SDK, Radix and a
+generated stylesheet with it.
 
 ```tsx
 import { BroappChat } from 'broapp-ai-elements/ui';

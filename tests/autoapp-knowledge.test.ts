@@ -1500,7 +1500,7 @@ describe('the knowledge path: seeds and instructions', () => {
     expect(flat).toContain(first);
     expect(flat.indexOf(first)).toBeLessThan(flat.indexOf('1. Find the application'));
     expect(flat).toContain(
-      'When a build fails, its `hints` are facts from earlier work; a hint marked provisional has not been confirmed.',
+      'When a build fails, its `hints` are facts from earlier work (provisional: unconfirmed); there is no list of lessons to walk.',
     );
   });
 });
@@ -2417,6 +2417,37 @@ describe('12d: a carry-over the real distillation found', () => {
 });
 
 describe('12d step 0: hints and credit', () => {
+  test('knowledge.show counts the lessons a turn reads in full, and a guessed id is told there is no list', async () => {
+    const where = makeWorld({ serve: true });
+    const first = storeLesson(where.knowledge, {
+      applies: { stage: 'contract' },
+      summary: 'A new route needs its effect before the contract stage exports it.',
+      trigger: 'effect route declare',
+      status: 'confirmed',
+    });
+    const second = storeLesson(where.knowledge, {
+      applies: { stage: 'views' },
+      summary: 'A table needs a source before the views stage accepts it.',
+      trigger: 'table source views',
+      status: 'confirmed',
+    });
+    const one = (await callTool(where, 'knowledge.show', { lessonId: first }, { id: 'run-show:c1' })) as Record<string, unknown>;
+    expect(one.id).toBe(first);
+    expect(one.repeated).toBeUndefined();
+    const two = (await callTool(where, 'knowledge.show', { lessonId: second }, { id: 'run-show:c2' })) as {
+      repeated?: { read: number; note: string };
+    };
+    expect(two.repeated?.read).toBe(2);
+    expect(two.repeated?.note).toMatch(/whole of what is written down/);
+    // Another turn starts its own count.
+    const again = (await callTool(where, 'knowledge.show', { lessonId: first }, { id: 'run-other:c1' })) as Record<string, unknown>;
+    expect(again.repeated).toBeUndefined();
+    await expect(callTool(where, 'knowledge.show', { lessonId: 9_999 }, { id: 'run-show:c3' })).rejects.toMatchObject({
+      code: 'not_found',
+      message: expect.stringMatching(/no list to walk/),
+    });
+  });
+
   test('a lesson with no stage is never a hint; one of the failure’s stage is', () => {
     const where = makeWorld({ serve: true });
     const stageless = storeLesson(where.knowledge, {

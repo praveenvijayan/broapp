@@ -68,7 +68,7 @@ verified and what to do next. Create an application that does not exist yet with
    kilobyte land. Use \`source.change\` only to create a new file, or \`create\` in the cycle.
 4. If the cycle reports problems, each names the lines it points at: fix them
    with another \`candidate.cycle\` until every check passes. When a build fails, its
-   \`hints\` are facts from earlier work; a hint marked provisional has not been confirmed.
+   \`hints\` are facts from earlier work (provisional: unconfirmed); there is no list of lessons to walk.
 5. Call \`candidate.explain\` and turn what it gives you into two short
    paragraphs: what changed, and what new permissions it asks for.
 6. Ask the person to open the preview and look. Only after they say they are

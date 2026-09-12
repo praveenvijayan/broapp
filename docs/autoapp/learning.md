@@ -263,7 +263,11 @@ version; `retire` takes the lesson out of the index. Both refuse while a
 launcher is serving from the same root, because it holds the database and
 serves lessons from memory. The engineer can read one lesson's detail with the
 `knowledge.show` tool (a `read`), which omits the reviewer's name and refuses a
-`method_unclear` lesson.
+`method_unclear` lesson. The tool is for the id a hint names: a turn in the
+launcher was watched walking ids one after another, seven lessons in a row,
+because nothing said there was no list. Now the description and the
+instructions say so, a miss says so, and from the second lesson a turn reads
+in full the result says how many that makes.
 
 ## Replay
 

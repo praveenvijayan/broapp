@@ -1293,13 +1293,24 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   });
 
   const lessonInput = s.object({ lessonId: s.number({ int: true, min: 1 }) });
+  /**
+   * How many lessons each turn has read in full, so the result can say so.
+   *
+   * A turn in the launcher was watched calling this eight times in a row, one
+   * id after another, with seven lessons in the store: the model was walking
+   * the ids because nothing told it there was no list to walk. The summaries
+   * in its documents are the whole of what is written down; the detail is for
+   * the one lesson a hint names. From the second read in a turn the result
+   * says how many that makes, the way a repeated read does.
+   */
+  const lessonsRead = new Map<string, number>();
   tools['knowledge.show'] = guardedTool(gate, {
     name: 'knowledge.show',
     description:
-      'The whole of one lesson from earlier work: its summary and detail, where it applies, the case it came from, and what happened each time it was served. Use it to read the detail behind a hint or a lesson in your documents.',
+      'The detail behind one lesson a build failure\'s hint named by lessonId: where it applies, the case it came from, and what happened each time it was served. There is no list of lessons to walk: every lesson that matters to the request is already summarised in your documents, and an id you were not given is not a lesson. Read at most the one hint you are acting on.',
     inputSchema: lessonInput.toJsonSchema(),
     effect: 'read',
-    run: (input) => {
+    run: (input, _signal, envelope) => {
       const { lessonId } = parsed(lessonInput, input);
       const store = knowledge?.store;
       if (store === undefined) throw publicError.unavailable('Nothing is written down in this launcher.');
@@ -1307,11 +1318,32 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       // A `method_unclear` lesson is a note about the instructions for a person
       // to read, and never enters a prompt — this tool's result included.
       if (record === null || record.diagnosis === 'method_unclear') {
-        throw publicError.notFound(`There is no lesson ${String(lessonId)}.`);
+        throw publicError.notFound(
+          `There is no lesson ${String(lessonId)}. Lessons are read by the id a hint gives; there is no list to walk.`,
+        );
+      }
+      const runId = runIdOf(envelope);
+      let note: { readonly read: number; readonly note: string } | undefined;
+      if (runId !== null) {
+        const read = (lessonsRead.get(runId) ?? 0) + 1;
+        lessonsRead.set(runId, read);
+        if (lessonsRead.size > REPEAT_TURNS) {
+          const oldest = lessonsRead.keys().next().value;
+          if (oldest !== undefined) lessonsRead.delete(oldest);
+        }
+        if (read >= 2) {
+          note = {
+            read,
+            note: `That is lesson ${String(read)} you have read in full this turn. The summaries in your documents are the whole of what is written down; act on what you have.`,
+          };
+        }
       }
       // Without the reviewer's name: who confirmed a lesson is the person's
       // business, not something the model needs to act on.
-      return Promise.resolve(Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'reviewedBy')));
+      return Promise.resolve({
+        ...Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'reviewedBy')),
+        ...(note === undefined ? {} : { repeated: note }),
+      });
     },
   });
 

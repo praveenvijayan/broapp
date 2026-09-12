@@ -51,6 +51,8 @@ export interface BroappChatProps {
   readonly suggestionTip?: string;
   /** Characters allowed in one message. Default 20,000 — the contract's cap. */
   readonly maxLength?: number;
+  /** Phrases the running mark rotates between tool calls. See `Loader.tsx`. */
+  readonly statusLines?: readonly string[];
   /**
    * Drawn above the conversation, inside the panel: a model picker, a menu,
    * whatever the surrounding application puts there. Shown in every settings
@@ -127,6 +129,7 @@ export function BroappChat({
   modelId,
   frame = 'card',
   controlsRef,
+  statusLines,
 }: BroappChatProps): React.ReactElement {
   const { settings } = useAiContext();
   const chat = useBroappChat({
@@ -151,7 +154,10 @@ export function BroappChat({
     clear,
   } = chat;
 
-  const now = useTick(awaiting > 0);
+  // Once a second while a countdown runs, and while a turn runs: the running
+  // mark shows the turn's elapsed time and changes its phrase on the tick.
+  const busy = status === 'submitted' || status === 'streaming';
+  const now = useTick(awaiting > 0 || busy);
 
   // Assigned during render, the way `useBroappChat` keeps its own callbacks
   // current: an effect would leave the first paint's buttons pointing at
@@ -207,6 +213,7 @@ export function BroappChat({
         {...(suggestions === undefined ? {} : { suggestions })}
         {...(suggestionTip === undefined ? {} : { suggestionTip })}
         {...(maxLength === undefined ? {} : { maxLength })}
+        {...(statusLines === undefined ? {} : { statusLines })}
       />
     </Frame>
   );

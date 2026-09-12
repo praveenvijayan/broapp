@@ -21,6 +21,9 @@ import {
   BroappModelPicker,
   BroappSchemeToggle,
   BroappThreadList,
+  STATUS_LINE_MS,
+  formatElapsed,
+  statusLine,
   transcriptOf,
 } from 'broapp-ai-elements/ui';
 import type { BroappModel, Thread } from 'broapp/ai';
@@ -104,6 +107,106 @@ describe('markdown', () => {
     expect(html).toContain('<pre');
     expect(html).not.toContain('<strong>');
     expect(html).toContain('&lt;script&gt;');
+  });
+});
+
+describe('the running mark', () => {
+  const call = (state: ToolUIPart['state']): ToolUIPart =>
+    ({
+      type: 'tool-source.read',
+      toolCallId: 'call-1',
+      state,
+      input: { path: 'src/shared/views.ts' },
+      ...(state === 'output-available' ? { output: { text: '…' } } : {}),
+    }) as ToolUIPart;
+
+  test('shows before anything has arrived', () => {
+    const html = render({
+      messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Add tags' }] }],
+      status: 'submitted',
+    });
+
+    expect(html).toContain('broapp-chat__loader');
+    expect(html).toContain('Still working.');
+    expect(html).toContain('Thinking…');
+  });
+
+  test('stays between tool calls, counting them, once text has arrived', () => {
+    const html = render({
+      messages: [
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'Reading first.', state: 'done' }, call('output-available'), call('output-available')],
+        },
+      ],
+      status: 'streaming',
+    });
+
+    expect(html).toContain('broapp-chat__loader');
+    expect(html).toContain('2 tool calls');
+    expect(html).not.toContain('Running ');
+  });
+
+  test('names the tool whose result has not come back', () => {
+    const html = render({
+      messages: [{ id: 'm1', role: 'assistant', parts: [call('output-available'), call('input-available')] }],
+      status: 'streaming',
+    });
+
+    expect(html).toContain('Running source.read…');
+    expect(html).toContain('2 tool calls');
+  });
+
+  test('is gone while words are streaming, while a call waits on the person, and at rest', () => {
+    const streaming = render({
+      messages: [{ id: 'm1', role: 'assistant', parts: [call('output-available'), { type: 'text', text: 'Done', state: 'streaming' }] }],
+      status: 'streaming',
+    });
+    expect(streaming).not.toContain('broapp-chat__loader');
+
+    const waiting = render({
+      messages: [
+        toolMessage({
+          type: 'tool-notes.create',
+          toolCallId: 'call-2',
+          state: 'approval-requested',
+          input: {},
+          approval: { id: 'req-1', descriptor: { tool: 'notes.create', expiresAt: NOW + 60_000 } },
+        }),
+      ],
+      status: 'streaming',
+    });
+    expect(waiting).not.toContain('broapp-chat__loader');
+    expect(waiting).toContain('Allow this?');
+
+    expect(render({ messages: [assistant('Done.')], status: 'ready' })).not.toContain('broapp-chat__loader');
+  });
+
+  test('takes the phrases it is given', () => {
+    const html = render({
+      messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Go' }] }],
+      status: 'submitted',
+      statusLines: ['Mocking…', 'Surviving…'],
+    });
+
+    expect(html).toContain('Mocking…');
+    expect(html).not.toContain('Thinking…');
+  });
+});
+
+describe('the mark’s helpers', () => {
+  test('format the elapsed time and walk the phrases on a four-second tick', () => {
+    expect(formatElapsed(12_400)).toBe('12s');
+    expect(formatElapsed(65_000)).toBe('1m 05s');
+    const lines = ['a', 'b', 'c'];
+    // Start offset from the start time, then one step every STATUS_LINE_MS.
+    const start = 7_000; // 7 % 3 = 1
+    expect(statusLine(lines, 0, start)).toBe('b');
+    expect(statusLine(lines, STATUS_LINE_MS, start)).toBe('c');
+    expect(statusLine(lines, 2 * STATUS_LINE_MS, start)).toBe('a');
+    expect(statusLine(lines, null, null)).toBe('a');
+    expect(statusLine([], 0, null)).toBe('');
   });
 });
 

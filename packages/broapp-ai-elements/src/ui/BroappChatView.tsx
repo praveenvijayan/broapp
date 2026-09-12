@@ -74,6 +74,12 @@ export interface BroappChatViewProps {
   readonly suggestionTip?: string;
   /** Characters allowed in one message. Default {@link MESSAGE_MAX_LENGTH}. */
   readonly maxLength?: number;
+  /**
+   * Phrases the running mark rotates between tool calls, while the model is
+   * deciding. Decoration for the wait, not status; the default set is in
+   * `Loader.tsx`.
+   */
+  readonly statusLines?: readonly string[];
   onSend(message: { text: string; files: FileUIPart[] }): void;
   onStop(): void;
   onConfirm(callId: string, approve: boolean): void;
@@ -146,6 +152,48 @@ export function ToolApproval({
 }
 
 /** One message's parts, in the order the model produced them. */
+/**
+ * Whether the running mark shows, and what it says.
+ *
+ * The mark stands in for whatever has not arrived yet, for the whole turn:
+ * before the first word, and between tool cards while the model reads a
+ * result and decides. It goes when text is streaming (the words are the sign
+ * of life) and when a call waits on the person (the approval card is what
+ * they should look at). `activity` names the tool whose result has not come
+ * back; `steps` counts the turn's tool calls so far.
+ */
+function runningOf(
+  messages: readonly BroappUIMessage[],
+  busy: boolean,
+): { activity: string | null; steps: number } | null {
+  if (!busy) return null;
+  const last = messages.at(-1);
+  if (last === undefined || last.role !== 'assistant') return { activity: null, steps: 0 };
+  const part = last.parts.at(-1);
+  if (part?.type === 'text' && part.state === 'streaming') return null;
+  const steps = last.parts.filter((each) => isToolUIPart(each) || isDynamicToolUIPart(each)).length;
+  if (part === undefined || (!isToolUIPart(part) && !isDynamicToolUIPart(part))) {
+    return { activity: null, steps };
+  }
+  if (part.state === 'approval-requested') return null;
+  const pending = part.state === 'input-streaming' || part.state === 'input-available';
+  return { activity: pending ? toolNameOf(part) : null, steps };
+}
+
+/**
+ * When the current turn began, for the elapsed time and the phrase.
+ *
+ * Read from the tick the wiring already sends: the first render that sees the
+ * turn busy keeps that moment until the turn ends. Not an effect, so the first
+ * paint of the mark already knows it — and nothing to run on the server.
+ */
+function useTurnStart(busy: boolean, now: number): number | null {
+  const started = React.useRef<number | null>(null);
+  if (!busy) started.current = null;
+  else started.current ??= now;
+  return started.current;
+}
+
 function Parts({
   message,
   markdown,
@@ -299,6 +347,7 @@ export function BroappChatView({
   suggestions,
   suggestionTip,
   maxLength = MESSAGE_MAX_LENGTH,
+  statusLines,
   onSend,
   onStop,
   onConfirm,
@@ -308,8 +357,8 @@ export function BroappChatView({
   // the count is kept beside it rather than derived from a value in state.
   const [typed, setTyped] = React.useState(0);
   const busy = status === 'submitted' || status === 'streaming';
-  // The loader stands in for the reply until the first word of it arrives.
-  const writing = messages.at(-1)?.parts.some((part) => part.type === 'text') === true;
+  const running = runningOf(messages, busy);
+  const startedAt = useTurnStart(busy, now);
   // The attachment complaint wins: it is about what the person just did, and a
   // turn's error is about something they have already read.
   const shown = attachmentError ?? error;
@@ -361,7 +410,15 @@ export function BroappChatView({
               </MessageContent>
             </Message>
           ))}
-          {busy && !writing ? <Loader /> : null}
+          {running === null ? null : (
+            <Loader
+              activity={running.activity}
+              elapsedMs={startedAt === null ? null : Math.max(0, now - startedAt)}
+              startedAt={startedAt}
+              steps={running.steps}
+              {...(statusLines === undefined ? {} : { lines: statusLines })}
+            />
+          )}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>

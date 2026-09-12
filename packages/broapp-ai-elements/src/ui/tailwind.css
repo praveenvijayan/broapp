@@ -294,6 +294,34 @@
     font-size: 0.85rem;
   }
 
+  /* The running mark: spinner, one line, and the turn's numbers after it. */
+  .broapp-chat__loader {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.25rem 0;
+    color: var(--muted-foreground);
+    font-size: 0.9rem;
+  }
+
+  .broapp-chat__loader-line {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .broapp-chat__loader-meta {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+
+  .broapp-chat__loader-meta::before {
+    content: '·';
+    margin-right: 0.5rem;
+  }
+
   .broapp-chat__counter {
     margin-left: auto;
     padding: 0 0.4rem;

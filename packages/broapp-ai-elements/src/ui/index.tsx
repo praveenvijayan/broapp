@@ -32,7 +32,8 @@ export { transcriptOf } from './transcript.ts';
 export { BroappChatView, MESSAGE_MAX_LENGTH, Response, ToolApproval } from './BroappChatView.tsx';
 export type { BroappChatViewProps, ToolApprovalProps } from './BroappChatView.tsx';
 
-export { Loader } from './Loader.tsx';
+export { DEFAULT_STATUS_LINES, Loader, STATUS_LINE_MS, formatElapsed, statusLine } from './Loader.tsx';
+export type { LoaderProps } from './Loader.tsx';
 
 export {
   Conversation,

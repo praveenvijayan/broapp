@@ -53,6 +53,25 @@ const ACTIVE_THREAD = 'broapp-autoapp:thread';
  * `engineer/instructions.ts`. The first is left unfinished on purpose: the
  * person completes the sentence, and what they write is the description.
  */
+/**
+ * What the running mark says between tool calls, while the engineer decides.
+ *
+ * Decoration for a wait that can run to minutes, changed every few seconds so
+ * the panel is visibly alive; the tool that is running, the elapsed time and
+ * the call count beside it are the status. Nothing here claims a stage the
+ * turn has not reached.
+ */
+const ENGINEER_STATUS_LINES: readonly string[] = [
+  'Thinking…',
+  'Reading the workspace…',
+  'Weighing the options…',
+  'Mocking up a change…',
+  'Working through it…',
+  'Surviving the details…',
+  'Putting it together…',
+  'Still at it…',
+];
+
 const ENGINEER_SUGGESTIONS = [
   'Create a new application for…',
   'What applications do I have?',
@@ -348,6 +367,7 @@ export function App(): React.ReactElement {
       <section aria-label="Engineer" className="launcher__chat">
         <BroappChat
           controlsRef={controls}
+          statusLines={ENGINEER_STATUS_LINES}
           emptyText={`Ask for a change to ${selected ?? 'an application'}. It will propose one, build it, and show you a preview running on a copy of your data before anything is replaced.`}
           frame="plain"
           modelId={active?.modelId ?? null}
