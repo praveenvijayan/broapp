@@ -18,7 +18,12 @@ One SQLite file, `<root>/launcher/knowledge.sqlite`, beside the launcher's own
 `runs.sqlite`. It is opened by the launcher's long-running commands (`serve`,
 `open`, and the bare command) before anything else starts, so the first line a
 child prints is recorded. One-shot commands such as `build` and `activate`
-print to the terminal and write nothing here.
+print to the terminal and write nothing here. The launcher's tab shows the
+`events` table as a log: the scroll icon on the rail opens it, newest first,
+filtered by level and application, refreshed every five seconds while it
+follows, with a copy of the shown lines for a bug report. The route behind
+it is `launcher.eventsList`, a read; a launcher started without the store
+answers that it keeps no log.
 
 | Table | What it holds |
 |---|---|

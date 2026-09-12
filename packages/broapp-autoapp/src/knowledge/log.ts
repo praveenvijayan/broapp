@@ -60,7 +60,43 @@ export interface EventLog extends HostLogger {
   /** A logger for one child's stderr: source `child:<appId>`, kind `stderr`. */
   child(appId: string, pid?: number): HostLogger;
   stats(): { written: number; dropped: number };
+  /**
+   * The newest events, newest first, for a person looking at what happened.
+   *
+   * `before` pages backwards by event id; `level` keeps only warnings, or only
+   * errors; `appId` keeps one application's rows. What comes back is what was
+   * written, already sanitised at write.
+   */
+  recent(filter?: EventFilter): readonly EventRow[];
 }
+
+/** What {@link EventLog.recent} narrows by. */
+export interface EventFilter {
+  /** At most this many rows; 1 to 500, default 200. */
+  readonly limit?: number;
+  /** `warn` is warnings and errors; `error` is errors alone. */
+  readonly level?: 'warn' | 'error';
+  readonly appId?: string;
+  /** Rows with an id below this one, for the next page. */
+  readonly before?: number;
+}
+
+/** One event as it is read back. */
+export interface EventRow {
+  readonly id: number;
+  readonly at: number;
+  readonly level: string;
+  readonly source: string;
+  readonly kind: string;
+  readonly appId: string | null;
+  readonly runId: string | null;
+  readonly message: string;
+  /** The event's structured data, parsed; `null` when there was none. */
+  readonly data: Record<string, unknown> | null;
+}
+
+/** The most rows one `recent` call returns. */
+export const RECENT_MAX = 500;
 
 /** Options for {@link createEventLog}. */
 export interface EventLogOptions {
@@ -348,6 +384,43 @@ export function createEventLog(knowledge: Knowledge, options: EventLogOptions): 
       };
     },
     stats: () => ({ written, dropped }),
+    recent(filter = {}) {
+      const limit = Math.max(1, Math.min(RECENT_MAX, Math.floor(filter.limit ?? 200)));
+      const clauses: string[] = [];
+      const params: (string | number)[] = [];
+      if (filter.level === 'error') {
+        clauses.push("level = 'error'");
+      } else if (filter.level === 'warn') {
+        clauses.push("level IN ('warn', 'error')");
+      }
+      if (filter.appId !== undefined) {
+        clauses.push('app_id = ?');
+        params.push(filter.appId);
+      }
+      if (filter.before !== undefined) {
+        clauses.push('id < ?');
+        params.push(Math.floor(filter.before));
+      }
+      const where = clauses.length === 0 ? '' : ` WHERE ${clauses.join(' AND ')}`;
+      const rows = knowledge.db
+        .query<
+          { id: number; at: number; level: string; source: string; kind: string; app_id: string | null; run_id: string | null; message: string; data: string | null },
+          (string | number)[]
+        >(`SELECT id, at, level, source, kind, app_id, run_id, message, data FROM events${where} ORDER BY id DESC LIMIT ?`)
+        .all(...params, limit);
+      return rows.map((row) => {
+        let data: Record<string, unknown> | null = null;
+        if (row.data !== null) {
+          try {
+            const parsed: unknown = JSON.parse(row.data);
+            if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) data = parsed as Record<string, unknown>;
+          } catch {
+            // A row this process could not have written; shown without its data.
+          }
+        }
+        return { id: row.id, at: row.at, level: row.level, source: row.source, kind: row.kind, appId: row.app_id, runId: row.run_id, message: row.message, data };
+      });
+    },
   };
   return log;
 }

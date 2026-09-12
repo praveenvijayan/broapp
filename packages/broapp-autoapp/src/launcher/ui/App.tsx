@@ -31,12 +31,13 @@ import {
 import type { BroappChatControls, BroappScheme } from 'broapp-ai-elements/ui';
 import { useConnection, useOperation } from 'broapp/react';
 import { announcePending, browserSurface } from 'broapp-autoapp/react';
-import { History, PanelRight, Plus, SlidersHorizontal } from 'lucide-react';
+import { History, PanelRight, Plus, ScrollText, SlidersHorizontal } from 'lucide-react';
 
 import type { LauncherContract } from '../contract.ts';
 
 import { AppsTable } from './AppsTable.tsx';
 import { CandidatePanel } from './CandidatePanel.tsx';
+import { LogsPanel } from './LogsPanel.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
 import { readScheme, applyScheme, SCHEME_KEY } from './scheme.ts';
 
@@ -108,6 +109,7 @@ export function App(): React.ReactElement {
 
   const [selected, setSelected] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(() => remembered(HISTORY_OPEN, true));
   const [appsOpen, setAppsOpen] = useState(() => remembered(APPS_OPEN, true));
   const [scheme, setScheme] = useState<BroappScheme>(() => readScheme());
@@ -342,6 +344,16 @@ export function App(): React.ReactElement {
         >
           <PanelRight aria-hidden="true" size={17} />
         </button>
+        <button
+          aria-expanded={showLogs}
+          aria-label="Log"
+          className="launcher__rail-button"
+          onClick={() => setShowLogs((open) => !open)}
+          title="Log"
+          type="button"
+        >
+          <ScrollText aria-hidden="true" size={17} />
+        </button>
         <div className="launcher__rail-spacer" />
         {/*
           The switch is a component of the panel's, drawn outside the panel:
@@ -497,6 +509,13 @@ export function App(): React.ReactElement {
             </>
           )}
         </section>
+      ) : null}
+
+      {showLogs ? (
+        <>
+          <button aria-label="Close log" className="launcher__scrim" onClick={() => setShowLogs(false)} type="button" />
+          <LogsPanel apps={rows.map((row) => row.appId)} onClose={() => setShowLogs(false)} />
+        </>
       ) : null}
 
       {showSettings ? (

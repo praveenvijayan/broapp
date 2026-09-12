@@ -211,6 +211,20 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
     );
   });
 
+  host.operation('launcher.eventsList', (filter) => {
+    const log = options.log;
+    if (log === undefined) throw publicError.unavailable('This launcher keeps no log.');
+    return {
+      events: [...log.recent({
+        ...(filter.limit === undefined ? {} : { limit: filter.limit }),
+        ...(filter.level === undefined ? {} : { level: filter.level }),
+        ...(filter.appId === undefined ? {} : { appId: filter.appId }),
+        ...(filter.before === undefined ? {} : { before: filter.before }),
+      })],
+      dropped: log.stats().dropped,
+    };
+  });
+
   host.operation('launcher.appSelect', ({ appId }) => {
     if (!appIds(root).includes(appId)) throw publicError.notFound(`There is no application called ${appId}.`);
     options.session?.select(appId);

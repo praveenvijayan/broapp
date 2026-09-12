@@ -435,6 +435,28 @@ describe('the store', () => {
     memory.close();
   });
 
+  test('recent reads the newest events back, newest first, by level, application and page', () => {
+    const directory = tempDir();
+    const knowledge = openKnowledge(directory);
+    const log = createEventLog(knowledge, { source: 'test', tee: quiet });
+    log.event('build', 'built one', { releaseId: 'a'.repeat(32) }, { appId: 'items' });
+    log.warn('something odd');
+    log.error('something broke');
+    log.child('other', 42).error('child said no');
+    const all = log.recent();
+    expect(all.map((row) => row.message)).toEqual(['child said no', 'something broke', 'something odd', 'built one']);
+    expect(all[3]).toMatchObject({ level: 'info', kind: 'build', appId: 'items', data: { releaseId: 'a'.repeat(32) } });
+    expect(all[2]?.data).toBeNull();
+    expect(log.recent({ level: 'warn' }).map((row) => row.level)).toEqual(['error', 'error', 'warn']);
+    expect(log.recent({ level: 'error' }).map((row) => row.message)).toEqual(['child said no', 'something broke']);
+    expect(log.recent({ appId: 'other' }).map((row) => row.source)).toEqual(['child:other']);
+    const [newest] = all;
+    if (newest === undefined) throw new Error('no rows');
+    expect(log.recent({ before: newest.id, limit: 1 }).map((row) => row.message)).toEqual(['something broke']);
+    expect(log.recent({ limit: 0 }).length).toBe(1);
+    knowledge.close();
+  });
+
   test('the sanitiser and the allow-lists; a write that fails is counted and nothing else', () => {
     const directory = tempDir();
     const knowledge = openKnowledge(directory);
@@ -911,6 +933,12 @@ describe('the launcher tab', () => {
     live = await harness((bridge) => tab.mount(bridge));
     const client = await live.connect(mergeContracts(launcherContract, aiContract));
     await client.call('ai.settingsUpdate', { provider: 'fake', modelId: 'fake-1' });
+    // The log the tab shows: the launcher's own rows, newest first, through the route.
+    where.log.event('build', 'a build before the turn', {}, { appId: 'items' });
+    const shown = await client.call('launcher.eventsList', { limit: 5, appId: 'items' });
+    expect(shown.events[0]).toMatchObject({ kind: 'build', appId: 'items', message: 'a build before the turn' });
+    expect(shown.dropped).toBe(0);
+    await expect(client.call('launcher.eventsList', { level: 'error', limit: 1 })).resolves.toMatchObject({ events: [] });
 
     const runId = 'run-ctxtest1';
     const seen: { type: string; callId?: string; inputTokens?: number; outputTokens?: number }[] = [];

@@ -34,6 +34,19 @@ const capability = s.object({
   reason: s.string({ max: 400 }),
 }) as unknown as Schema<Capability>;
 
+/** One row of the launcher's log, as `launcher.eventsList` returns it. */
+const eventRow = s.object({
+  id: s.number({ int: true, min: 1 }),
+  at: s.number({ int: true, min: 0 }),
+  level: s.string({ max: 16 }),
+  source: s.string({ max: 200 }),
+  kind: s.string({ max: 40 }),
+  appId: s.nullable(s.string({ max: 40 })),
+  runId: s.nullable(s.string({ max: 64 })),
+  message: s.string({ max: 4_000 }),
+  data: s.nullable(s.unknown()),
+});
+
 const appSummary = s.object({
   appId: s.string({ max: 40 }),
   name: s.string({ max: 200 }),
@@ -175,6 +188,21 @@ export const launcherContract = defineContract({
       input: appIdInput,
       output: s.object({ activations: s.array(activationRow, { max: 200 }) }),
       summary: 'What has been activated for one application, and how it went.',
+    },
+    'launcher.eventsList': {
+      effect: 'read',
+      input: s.object({
+        limit: s.optional(s.number({ int: true, min: 1, max: 500 })),
+        level: s.optional(s.enum(['warn', 'error'])),
+        appId: s.optional(s.string({ max: 40 })),
+        before: s.optional(s.number({ int: true, min: 1 })),
+      }),
+      output: s.object({
+        events: s.array(eventRow, { max: 500 }),
+        /** Events the log could not write since the launcher started. */
+        dropped: s.number({ int: true, min: 0 }),
+      }),
+      summary: "The launcher's own log, newest first: what it did, warned about and failed at.",
     },
     'launcher.grantsGet': {
       effect: 'read',
