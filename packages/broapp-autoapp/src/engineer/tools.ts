@@ -17,7 +17,7 @@ import { guardedTool } from 'broapp/ai/host';
 import type { GuardedTool } from 'broapp/ai/host';
 import { canonicalJson, publicError } from 'broapp/host';
 import type { Envelope, Gate, HostLogger } from 'broapp/host';
-import { isPublicError, s } from 'broapp/shared';
+import { isPublicError, isValidationError, s, type Schema } from 'broapp/shared';
 
 import { showLesson } from '../knowledge/cli.ts';
 import { exampleHash, type Evidence, type OpenEpisode } from '../knowledge/evidence.ts';
@@ -225,6 +225,27 @@ function currentRelease(root: Layout, appId: string): { releaseId: string; spec:
     throw publicError.notFound(`${appId} has no current release yet.`);
   }
   return { releaseId, spec: readRelease(root, appId, releaseId) };
+}
+
+/**
+ * Parse a tool's input, and when it is wrong say which field.
+ *
+ * A schema throws `ValidationError`, which is not a `PublicError`, so the run
+ * loop reported it to the model as "The tool failed." and nothing more. The
+ * clean evaluation after 0.4.2 watched a turn lose its steps to exactly that:
+ * a cycle with a malformed hunk and a `knowledge.show` with `lessonId: 0`,
+ * each answered with a sentence that named no field. The validator's message
+ * already carries the path; this hands it on as `invalid_input`.
+ */
+function parsed<T>(schema: Schema<T>, input: unknown): T {
+  try {
+    return schema.parse(input);
+  } catch (cause) {
+    if (isValidationError(cause)) {
+      throw publicError.invalidInput(`the input is not what this tool takes: ${cause.message}`);
+    }
+    throw cause;
+  }
 }
 
 /** The most of a trial's output the engineer is shown. */
@@ -461,7 +482,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     // computer, as they are for every write.
     effect: 'external',
     run: async (input) => {
-      const { appId, name, description } = createInput.parse(input);
+      const { appId, name, description } = parsed(createInput, input);
       const created = await createApplication({
         layout: root,
         template: options.template,
@@ -502,7 +523,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: specReadInput.toJsonSchema(),
     effect: 'read',
     run: (input, _signal, envelope) => {
-      const { appId, from: wanted } = specReadInput.parse(input);
+      const { appId, from: wanted } = parsed(specReadInput, input);
       select(appId);
       // The candidate is what the engineer is changing; the current release is
       // what the person is using. Reading the wrong one and editing against it
@@ -547,7 +568,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: referenceInput.toJsonSchema(),
     effect: 'read',
     run: (input) => {
-      const { topic } = referenceInput.parse(input);
+      const { topic } = parsed(referenceInput, input);
       return Promise.resolve({ topic: topic ?? 'all', text: specReference(topic) });
     },
   });
@@ -558,7 +579,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: appIdInput.toJsonSchema(),
     effect: 'read',
     run: (input, _signal, envelope) => {
-      const { appId } = appIdInput.parse(input);
+      const { appId } = parsed(appIdInput, input);
       select(appId);
       return Promise.resolve({
         rev: sourceRevision(root.app(appId).source),
@@ -578,7 +599,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: readInput.toJsonSchema(),
     effect: 'read',
     run: (input, _signal, envelope) => {
-      const { appId, path } = readInput.parse(input);
+      const { appId, path } = parsed(readInput, input);
       select(appId);
       return Promise.resolve({
         path,
@@ -604,7 +625,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: searchInput.toJsonSchema(),
     effect: 'read',
     run: (input, _signal, envelope) => {
-      const { appId, pattern, literal, files } = searchInput.parse(input);
+      const { appId, pattern, literal, files } = parsed(searchInput, input);
       select(appId);
       return Promise.resolve({
         ...searchWorkspace(root.app(appId).source, pattern, {
@@ -635,7 +656,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: changeInput.toJsonSchema(),
     effect: 'write',
     run: (input, _signal, envelope) => {
-      const { appId, message, changes } = changeInput.parse(input);
+      const { appId, message, changes } = parsed(changeInput, input);
       select(appId);
       const sourceDir = root.app(appId).source;
       const before = snapshot(sourceDir);
@@ -710,7 +731,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: editInput.toJsonSchema(),
     effect: 'write',
     run: (input, _signal, envelope) => {
-      const { appId, message, hunks } = editInput.parse(input);
+      const { appId, message, hunks } = parsed(editInput, input);
       return Promise.resolve(editHunks(appId, message, hunks, envelope));
     },
   });
@@ -722,7 +743,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: appIdInput.toJsonSchema(),
     effect: 'write',
     run: async (input, _signal, envelope) => {
-      const { appId } = appIdInput.parse(input);
+      const { appId } = parsed(appIdInput, input);
       select(appId);
       // Taken before the build, so the revision is the one that was built and
       // the release is the one that was running when it was.
@@ -797,7 +818,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: releaseInput.toJsonSchema(),
     effect: 'write',
     run: async (input, _signal, envelope) => {
-      const { appId, releaseId } = releaseInput.parse(input);
+      const { appId, releaseId } = parsed(releaseInput, input);
       select(appId);
       // What is about to be replaced, so the receipt can say so. A preview
       // that stops takes its checks with it: they were about that child.
@@ -853,7 +874,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: tryInput.toJsonSchema(),
     effect: 'read',
     run: async (input) => {
-      const { appId, steps } = tryInput.parse(input);
+      const { appId, steps } = parsed(tryInput, input);
       select(appId);
       const preview = states.get(appId).preview;
       if (preview === null) {
@@ -916,7 +937,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: releaseInput.toJsonSchema(),
     effect: 'read',
     run: async (input, _signal, envelope) => {
-      const { appId, releaseId } = releaseInput.parse(input);
+      const { appId, releaseId } = parsed(releaseInput, input);
       select(appId);
       const preview = states.get(appId).preview;
       if (preview === null) {
@@ -1028,7 +1049,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: cycleInput.toJsonSchema(),
     effect: 'write',
     run: async (input, signal, envelope) => {
-      const { appId, message, hunks, create } = cycleInput.parse(input);
+      const { appId, message, hunks, create } = parsed(cycleInput, input);
       const files = create ?? [];
       if (envelope === undefined) {
         // Each step asks through the turn's approver; without one nobody could.
@@ -1219,7 +1240,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: releaseInput.toJsonSchema(),
     effect: 'read',
     run: (input) => {
-      const { appId, releaseId } = releaseInput.parse(input);
+      const { appId, releaseId } = parsed(releaseInput, input);
       select(appId);
       const candidate = readRelease(root, appId, releaseId);
       const currentId = readCurrent(root, appId);
@@ -1244,7 +1265,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: releaseInput.toJsonSchema(),
     effect: 'external',
     run: async (input, _signal, envelope) => {
-      const { appId, releaseId } = releaseInput.parse(input);
+      const { appId, releaseId } = parsed(releaseInput, input);
       select(appId);
       const preview = states.get(appId).preview;
       // The preview holds a copy of the data open; the switch is cleaner
@@ -1277,7 +1298,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: lessonInput.toJsonSchema(),
     effect: 'read',
     run: (input) => {
-      const { lessonId } = lessonInput.parse(input);
+      const { lessonId } = parsed(lessonInput, input);
       const store = knowledge?.store;
       if (store === undefined) throw publicError.unavailable('Nothing is written down in this launcher.');
       const record = showLesson(store, lessonId);
@@ -1298,7 +1319,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     inputSchema: appIdInput.toJsonSchema(),
     effect: 'write',
     run: async (input) => {
-      const { appId } = appIdInput.parse(input);
+      const { appId } = parsed(appIdInput, input);
       select(appId);
       const state = states.get(appId);
       if (state.preview !== null) await state.preview.shutdown(STOP_DEADLINE_MS);

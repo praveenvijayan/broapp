@@ -1324,6 +1324,19 @@ describe('the specification tools', () => {
     expect(all.text).toMatch(/# acceptance/);
   });
 
+  test('a wrong input names the field, as invalid_input, instead of "the tool failed"', async () => {
+    const where = makeWorld();
+    await expect(callTool(where, 'knowledge.show', { lessonId: 0 })).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringMatching(/lessonId/),
+    });
+    // A write tool asks the gate before it parses, by design; a read tool parses at once.
+    await expect(callTool(where, 'spec.read', { appId: 'items', from: 'nope' })).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringMatching(/from/),
+    });
+  });
+
   test('a check with no preview says how to get one', async () => {
     const where = makeWorld();
     const built = await buildCandidate({ layout: where.root, appId: 'items' });

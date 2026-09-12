@@ -275,14 +275,77 @@ interface RunMeasure {
 }
 
 /** The 1-based position of the first call to one of these tools, or `null`. */
-function firstCall(calls: readonly ToolCall[], tools: readonly string[]): number | null {
-  const at = calls.findIndex((call) => tools.includes(call.tool));
+function firstWhere(calls: readonly ToolCall[], where: (call: ToolCall) => boolean): number | null {
+  const at = calls.findIndex(where);
   return at < 0 ? null : at + 1;
+}
+
+/**
+ * A build a call performed, from `candidate.build` or from a `candidate.cycle`
+ * that got as far as building.
+ *
+ * Since 12c the instructions route every change through the cycle, and an
+ * evaluation that only saw `candidate.build` reported no builds at all for
+ * runs that had built and checked — the clean run after 0.4.2 read `–` in
+ * five columns. Every column that is about a build or an edit goes through
+ * these three functions, so a new tool that builds has one place to be added.
+ */
+export function buildOf(
+  call: ToolCall,
+): { ok: true; releaseId: string } | { ok: false; problems: readonly { stage?: unknown; message?: unknown }[] } | null {
+  const output = call.output as Record<string, unknown> | undefined;
+  if (output === undefined) return null;
+  const candidate = call.tool === 'candidate.build' ? output : call.tool === 'candidate.cycle' ? output['build'] : undefined;
+  if (typeof candidate !== 'object' || candidate === null) return null;
+  const build = candidate as { ok?: unknown; releaseId?: unknown; problems?: unknown; declined?: unknown };
+  if (build.declined === true) return null;
+  if (build.ok === true && typeof build.releaseId === 'string') return { ok: true, releaseId: build.releaseId };
+  if (build.ok === false) return { ok: false, problems: Array.isArray(build.problems) ? (build.problems as { stage?: unknown; message?: unknown }[]) : [] };
+  return null;
+}
+
+/** Whether a call applied an edit: `source.edit`, `source.change`, or a cycle with hunks or files. */
+export function editedBy(call: ToolCall): boolean {
+  if (call.tool === 'source.edit' || call.tool === 'source.change') return true;
+  if (call.tool !== 'candidate.cycle') return false;
+  const input = call.input as { hunks?: unknown; create?: unknown } | undefined;
+  return (Array.isArray(input?.hunks) && input.hunks.length > 0) || (Array.isArray(input?.create) && input.create.length > 0);
+}
+
+/**
+ * A check a call ran on a release: `candidate.check`, with every result, or a
+ * cycle that reached its check, which reports only counts and the failures.
+ */
+export function checkOf(
+  call: ToolCall,
+): { releaseId: string; allPassed: boolean; ids: readonly string[] | null } | null {
+  if (call.tool === 'candidate.check') {
+    const releaseId = (call.input as { releaseId?: unknown } | undefined)?.releaseId;
+    const results = (call.output as { results?: unknown } | undefined)?.results;
+    if (typeof releaseId !== 'string' || !Array.isArray(results)) return null;
+    const rows = results as { id?: unknown; passed?: unknown }[];
+    return {
+      releaseId,
+      allPassed: rows.length > 0 && rows.every((row) => row.passed === true),
+      ids: rows.map((row) => (typeof row.id === 'string' ? row.id : '')),
+    };
+  }
+  if (call.tool === 'candidate.cycle') {
+    const built = buildOf(call);
+    const check = (call.output as { check?: unknown } | undefined)?.check as { of?: unknown; failed?: unknown } | undefined;
+    if (built === null || !built.ok || check === undefined) return null;
+    const of = typeof check.of === 'number' ? check.of : 0;
+    const failed = Array.isArray(check.failed) ? check.failed.length : 0;
+    // The cycle names only the failures; a clean check of every example is
+    // `of > 0` and nothing failed, and which examples ran is the release's list.
+    return { releaseId: built.releaseId, allPassed: of > 0 && failed === 0, ids: null };
+  }
+  return null;
 }
 
 /** Paths a call read or edited. */
 function pathsOf(call: ToolCall): { read: string[]; edited: string[] } {
-  const input = (call.input ?? {}) as { path?: unknown; hunks?: unknown; changes?: unknown };
+  const input = (call.input ?? {}) as { path?: unknown; hunks?: unknown; changes?: unknown; create?: unknown };
   const list = (value: unknown): string[] =>
     Array.isArray(value)
       ? value
@@ -293,13 +356,13 @@ function pathsOf(call: ToolCall): { read: string[]; edited: string[] } {
   if (call.tool === 'source.read' && typeof input.path === 'string') return { read: [normal(input.path)], edited: [] };
   if (call.tool === 'source.edit') return { read: [], edited: list(input.hunks).map(normal) };
   if (call.tool === 'source.change') return { read: [], edited: list(input.changes).map(normal) };
+  if (call.tool === 'candidate.cycle') return { read: [], edited: [...list(input.hunks), ...list(input.create)].map(normal) };
   return { read: [], edited: [] };
 }
 
 /** How many of a turn's builds failed. */
 function failedBuildsOf(calls: readonly ToolCall[]): number {
-  return calls.filter((call) => call.tool === 'candidate.build' && (call.output as { ok?: unknown } | undefined)?.ok === false)
-    .length;
+  return calls.filter((call) => buildOf(call)?.ok === false).length;
 }
 
 /**
@@ -314,9 +377,9 @@ function workflowCompletedBy(calls: readonly ToolCall[], runLayout: Layout, appI
   let releaseId: string | null = null;
   let builtAt = -1;
   for (const [index, call] of calls.entries()) {
-    const output = call.output as { ok?: unknown; releaseId?: unknown } | undefined;
-    if (call.tool === 'candidate.build' && output?.ok === true && typeof output.releaseId === 'string') {
-      releaseId = output.releaseId;
+    const built = buildOf(call);
+    if (built !== null && built.ok) {
+      releaseId = built.releaseId;
       builtAt = index;
     }
   }
@@ -329,14 +392,13 @@ function workflowCompletedBy(calls: readonly ToolCall[], runLayout: Layout, appI
     return false;
   }
   if (exampleId === null) return false;
-  return calls.slice(builtAt + 1).some((call) => {
-    if (call.tool !== 'candidate.check' || (call.input as { releaseId?: unknown } | undefined)?.releaseId !== releaseId) return false;
-    const results = (call.output as { results?: unknown } | undefined)?.results;
-    return (
-      Array.isArray(results) &&
-      results.every((result) => (result as { passed?: unknown }).passed === true) &&
-      results.some((result) => (result as { id?: unknown }).id === exampleId)
-    );
+  // The cycle that built may be the call that checked, so it is included.
+  return calls.slice(builtAt).some((call) => {
+    const check = checkOf(call);
+    if (check === null || check.releaseId !== releaseId || !check.allPassed) return false;
+    // A cycle reports no ids; the release carries the example (checked above),
+    // and the cycle ran every example the release has.
+    return check.ids === null || check.ids.includes(exampleId);
   });
 }
 
@@ -344,10 +406,9 @@ function workflowCompletedBy(calls: readonly ToolCall[], runLayout: Layout, appI
 function buildSignatures(calls: readonly ToolCall[]): string[] {
   const out: string[] = [];
   for (const call of calls) {
-    if (call.tool !== 'candidate.build') continue;
-    const problems = (call.output as { problems?: unknown } | undefined)?.problems;
-    if (!Array.isArray(problems)) continue;
-    for (const problem of problems as { stage?: unknown; message?: unknown }[]) {
+    const built = buildOf(call);
+    if (built === null || built.ok) continue;
+    for (const problem of built.problems) {
       if (typeof problem.stage === 'string' && typeof problem.message === 'string') {
         out.push(problemSignature(problem.stage, problem.message));
       }
@@ -458,9 +519,9 @@ export async function evaluate(
           const measure: RunMeasure = {
             workingCode,
             workflowCompleted,
-            firstEdit: firstCall(turn.calls, ['source.edit', 'source.change']),
-            firstBuild: firstCall(turn.calls, ['candidate.build']),
-            reachedBuild: turn.calls.some((call) => call.tool === 'candidate.build'),
+            firstEdit: firstWhere(turn.calls, editedBy),
+            firstBuild: firstWhere(turn.calls, (call) => buildOf(call) !== null),
+            reachedBuild: turn.calls.some((call) => buildOf(call) !== null),
             failedBuilds: failedBuildsOf(turn.calls),
             ms: turn.ms,
             toolMs: turn.toolMs,
