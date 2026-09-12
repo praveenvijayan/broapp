@@ -18,7 +18,7 @@
  * package has, and a wrong claim costs the engineer more than a missing one —
  * it reads the wrong file with confidence.
  */
-import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { MAX_REPAIR_ATTEMPTS, type CandidateStates } from '../engineer/state.ts';
@@ -423,14 +423,27 @@ const CONTEXT_FILES: readonly string[] = ['PRODUCT.md', 'DESIGN.md'];
  * on it (`design` for `PRODUCT.md`, `theme` for `DESIGN.md`) says what to do
  * with it once read.
  */
+/** How much of a context file the evidence reads: enough for its first line. */
+const CONTEXT_HEAD_BYTES = 4_096;
+
 function contextLine(sourceDir: string): string | undefined {
   const parts: string[] = [];
   for (const name of CONTEXT_FILES) {
     let text: string;
     try {
       const file = within(sourceDir, name);
-      if (!lstatSync(file).isFile()) continue;
-      text = readFileSync(file, 'utf8');
+      const stat = lstatSync(file);
+      if (!stat.isFile()) continue;
+      // A person's file, of any size; only its first prose line is wanted, so
+      // read only the head rather than the whole of whatever they wrote.
+      const head = new Uint8Array(Math.min(stat.size, CONTEXT_HEAD_BYTES));
+      const fd = openSync(file, 'r');
+      try {
+        readSync(fd, head, 0, head.length, 0);
+      } finally {
+        closeSync(fd);
+      }
+      text = new TextDecoder().decode(head);
     } catch {
       continue;
     }

@@ -84,6 +84,39 @@ What the valid columns say, one run per cell:
 
 `notes-tags`, the task that touches the contract, a migration, the views and an example, produced working code under no condition. `learned` was the only condition with no timeout, and the fastest on the starter task. Two tool failures in the log reached the model as a bare "the tool failed": `candidate.cycle` with `hunks[21].replace` failing the input schema, and `knowledge.show` called with `lessonId: 0`. Both are the open question below about validation errors, now seen costing turns in a measured run.
 
+**The three-run evaluation** (2026-09-12 08:37 to 17:57 local, launcher built at `6d2293a` with the cycle-aware counting, `--runs 3`, `qwen3.8:27b-mlx`, 40 steps and 20 minutes a turn, one process on the demo root):
+
+Model ollama.chat/qwen3.8:27b-mlx; 3 run(s) per cell; 40 steps a turn; 20m00s a turn.
+Working code: the evaluation built and previewed what the turn left, and the task example passed. Workflow completed: the engineer itself checked the release it last built and every example passed. The harness answers every question at once, so tool time holds no person’s wait; activation is never part of a run.
+
+| condition | task | runs | working code | workflow completed | calls to first edit | calls to first build | reached a build | failed builds | timed out | mean model time | mean tool time | approvals | mean tokens | recurring signatures | included refs used | included refs ignored | reads not offered | unrelated hint credit |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| baseline | notes-archive | 3 | 1 | 0 | 17.7 | 27.5 (2/3) | 2 | 2 | 1 | 18m44s | 2s | 53 | 1,011,153 | 1 | 0 | 0 | 26 | 0 |
+| baseline | starter-done-filter | 3 | 3 | 3 | 12.7 | 13.0 | 3 | 1 | 0 | 6m24s | 1s | 27 | 177,391 | 0 | 0 | 0 | 17 | 0 |
+| baseline | notes-tags | 3 | 2 | 2 | 15.0 | 15.0 | 3 | 1 | 1 | 18m09s | 1s | 19 | 106,859 | 0 | 0 | 0 | 22 | 0 |
+| orientation | notes-archive | 3 | 1 | 0 | 16.0 (2/3) | – | 0 | 0 | 3 | 19m59s | 1s | 9 | 0 | 1 | 0 | 0 | 25 | 0 |
+| orientation | starter-done-filter | 3 | 0 | 0 | 12.0 (2/3) | 12.0 (2/3) | 2 | 5 | 1 | 11m06s | 1s | 18 | 139,990 | 2 | 0 | 0 | 18 | 0 |
+| orientation | notes-tags | 3 | 2 | 2 | 17.5 (2/3) | 22.5 (2/3) | 2 | 2 | 2 | 17m44s | 1s | 30 | 213,040 | 0 | 0 | 0 | 26 | 0 |
+| orientation+facts | notes-archive | 3 | 0 | 0 | 15.0 (2/3) | 14.0 (1/3) | 1 | 0 | 3 | 19m59s | 1s | 4 | 0 | 1 | 14 | 1 | 8 | 0 |
+| orientation+facts | starter-done-filter | 3 | 3 | 3 | 13.3 | 13.3 | 3 | 1 | 0 | 8m47s | 1s | 23 | 162,143 | 0 | 9 | 0 | 8 | 0 |
+| orientation+facts | notes-tags | 3 | 2 | 2 | 16.5 (2/3) | 22.5 (2/3) | 2 | 0 | 1 | 15m41s | 1s | 16 | 225,469 | 0 | 14 | 1 | 12 | 0 |
+| learned | notes-archive | 3 | 3 | 1 | 11.7 | 11.7 | 3 | 1 | 2 | 17m57s | 2s | 19 | 79,886 | 0 | 12 | 3 | 6 | 0 |
+| learned | starter-done-filter | 3 | 2 | 2 | 12.0 | 12.0 | 3 | 3 | 1 | 11m41s | 1s | 24 | 85,024 | 0 | 9 | 0 | 9 | 0 |
+| learned | notes-tags | 3 | 0 | 0 | 10.0 (1/3) | 10.0 (1/3) | 1 | 0 | 3 | 19m59s | 1s | 3 | 0 | 0 | 13 | 2 | 14 | 0 |
+
+**Contamination, marked.** Two sessions ran on the machine during the run against the note to wait: prompt 12g from about 11:45 to 13:07, which overlapped runs 17 to 22 (the second notes-archive run under orientation, facts and learned, and the second starter run under baseline, orientation and facts), and prompt 12h from about 13:30 to 14:17, which overlapped runs 25 to 27 (the second notes-tags run under orientation, facts and learned). Two releases in between ran their gates on CI and loaded nothing here. Outcomes stand for every run; model time, tool time and timeouts for the overlapped runs are not comparable, and the 12g overlap included a launcher rebuild the running process survived by keeping the old binary mapped.
+
+**What the table says, nine runs a condition:**
+
+| condition | working code | workflow completed | timed out | reads not offered (mean of cells) |
+|---|---|---|---|---|
+| baseline | 6 of 9 | 5 | 2 | 22 |
+| orientation | 3 of 9 | 2 | 6 | 23 |
+| orientation + facts | 5 of 9 | 5 | 4 | 9 |
+| learned | 5 of 9 | 3 | 6 | 10 |
+
+No condition beats baseline on working code at three runs a cell, and orientation alone is worse: fewer completions, six timeouts. The knowledge path does what it was built to do on discovery: reads the engineer made that no document offered fall from about 22 to about 10, calls to the first edit on the notes-archive task fall from 17.7 to 11.7, and tokens per finished run fall, on notes-archive from a million to eighty thousand. It does not, on this model, turn that saving into more working code, and the learned lessons that helped notes-archive to three of three left notes-tags at none of three with three timeouts. The honest reading: orientation and evidence cut the cost of a turn; they do not yet change whether a twenty-minute turn on a 27B model finishes the hardest task, and a lesson that helps one task can be noise on another. "Unrelated hint credit" stayed at zero across all thirty-six runs after the stage rule.
+
 ## Commands run
 
 ```
