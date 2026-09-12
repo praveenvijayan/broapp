@@ -16,19 +16,24 @@
  *
  *   bun x playwright install chromium
  */
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 
 import type { CheckReport } from '../scripts/theme-check.ts';
 import { chromiumRuns, themeCheck } from '../scripts/theme-check.ts';
 
 const available = await chromiumRuns();
-const nothing: CheckReport = { combinations: [], failures: [], pageBytes: {}, seconds: 0 };
 // One run, many assertions: building three pages and driving nine combinations
 // takes seconds, and doing it once per rule would take minutes. Where Chromium
-// is missing the run is skipped and the report below is never looked at.
-const report = available ? await themeCheck() : nothing;
+// is missing the run is skipped and the report below is never looked at. The
+// run is a `beforeAll`, not a module-level await, so a failure in it is a
+// failed test with the stack, not an "unhandled error between tests".
+let report: CheckReport = { combinations: [], failures: [], pageBytes: {}, seconds: 0 };
 
 describe.skipIf(!available)('the theme in a compiled page', () => {
+  beforeAll(async () => {
+    report = await themeCheck();
+  }, 120_000);
+
 
   test('every rule the harness checks passes in every combination', () => {
     expect(report.failures).toEqual([]);

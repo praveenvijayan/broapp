@@ -25,7 +25,7 @@
  * Playwright is a root devDependency and nothing else: never a dependency of a
  * package, never in a binary, and not needed to build or run an application.
  */
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { buildPage } from 'broapp/build';
@@ -538,6 +538,17 @@ function expectations(theme: Theme, scheme: Scheme): { expected: Record<string, 
   return { expected, literals };
 }
 
+/**
+ * The committed content of the fixture's `theme.css`, put back after a run.
+ *
+ * The file is committed rather than created per run: the bundler keeps a
+ * directory's listing for the life of the process, and a file written after
+ * the listing was taken failed to resolve twice in CI, once in a fresh
+ * checkout. A file that is always there is always found; only its content
+ * changes, and that is read on every build.
+ */
+const PLACEHOLDER = readFileSync(join(fixtureDir, 'theme.css'), 'utf8');
+
 /** Build the page for one theme and return where it was written. */
 async function build(theme: Theme): Promise<{ file: string; bytes: number }> {
   writeFileSync(join(fixtureDir, 'theme.css'), `/* ${theme.title} — written by scripts/theme-check.ts */\n${theme.css}`, 'utf8');
@@ -623,7 +634,7 @@ export async function themeCheck(): Promise<CheckReport> {
     }
   } finally {
     await browser.close();
-    rmSync(join(fixtureDir, 'theme.css'), { force: true });
+    writeFileSync(join(fixtureDir, 'theme.css'), PLACEHOLDER, 'utf8');
   }
   return { combinations, failures, pageBytes, seconds: Math.round((Date.now() - started) / 100) / 10 };
 }

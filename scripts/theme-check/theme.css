@@ -1,0 +1,8 @@
+/*
+ * The theme under test. scripts/theme-check.ts writes one theme's stylesheet
+ * here before each build and puts this comment back afterwards. Committed, so
+ * that `import './theme.css'` in main.tsx resolves whether or not a build is
+ * running: the bundler remembers a directory's listing for the life of the
+ * process, and a file that appeared after the listing was "Could not resolve"
+ * twice in CI.
+ */
