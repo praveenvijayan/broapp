@@ -85,6 +85,8 @@ export type ChatMessage =
       readonly content: string;
       readonly toolCalls: ToolCallState[];
       readonly pending: boolean;
+      /** The run that wrote it, sent back in `history` so the host can use its transcript. */
+      readonly runId: string;
     };
 
 /** What {@link useAiChat} returns. */
@@ -107,12 +109,16 @@ function newRunId(): string {
   return crypto.randomUUID().replace(/-/g, '');
 }
 
-/** Every completed turn, as the model should see it. */
-function toHistory(messages: readonly ChatMessage[]): ChatTurn[] {
+/** Every completed turn, as the model should see it. Exported for its test; not part of `broapp/ai/react`. */
+export function toHistory(messages: readonly ChatMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = [];
   for (const message of messages) {
     if (message.role === 'assistant' && (message.pending || message.content === '')) continue;
-    turns.push({ role: message.role, content: message.content });
+    turns.push(
+      message.role === 'assistant'
+        ? { role: 'assistant', content: message.content, runId: message.runId }
+        : { role: 'user', content: message.content },
+    );
   }
   return turns.slice(-MAX_HISTORY);
 }
@@ -267,7 +273,7 @@ export function useAiChat(options: AiChatOptions = {}): AiChatHook {
       setMessages((current) => [
         ...current,
         { id: `${id}-user`, role: 'user', content: trimmed },
-        { id: `${id}-assistant`, role: 'assistant', content: '', toolCalls: [], pending: true },
+        { id: `${id}-assistant`, role: 'assistant', content: '', toolCalls: [], pending: true, runId: id },
       ]);
 
       try {

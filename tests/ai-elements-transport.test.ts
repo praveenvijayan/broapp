@@ -247,10 +247,13 @@ describe('a plain reply', () => {
     // `usage` reaches the browser before `done`, and the text part is closed
     // by `done` — so the metadata chunk lands before `text-end`. The SDK
     // attaches metadata to the message, not to the open part, so the order is
-    // harmless and asserting it keeps the mapping honest.
+    // harmless and asserting it keeps the mapping honest. The first metadata
+    // chunk names the run as soon as the message has text (12j), so a turn
+    // stopped before `usage` still carries it.
     expect(seen.map((chunk) => chunk.type)).toEqual([
       'start',
       'text-start',
+      'message-metadata',
       'text-delta',
       'text-delta',
       'message-metadata',

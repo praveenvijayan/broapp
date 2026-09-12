@@ -2834,10 +2834,14 @@ describe.skipIf(!available)('12d: replay with children, and the evaluation', () 
       markdown: string;
       runs: string[];
     };
-    expect(runs).toHaveLength(CONDITIONS.length * EVALUATION_TASKS.length);
-    expect(rows).toHaveLength(CONDITIONS.length * EVALUATION_TASKS.length);
+    // The child runs the single-turn tasks; the two-turn ones have their own
+    // test in `autoapp-evaluate.test.ts` (12j).
+    const singleTurn = EVALUATION_TASKS.filter((task) => task.turns !== 2);
+    expect(singleTurn.length).toBeGreaterThan(0);
+    expect(runs).toHaveLength(CONDITIONS.length * singleTurn.length);
+    expect(rows).toHaveLength(CONDITIONS.length * singleTurn.length);
     for (const condition of CONDITIONS) {
-      for (const task of EVALUATION_TASKS) {
+      for (const task of singleTurn) {
         const row = rows.find((entry) => entry.condition === condition && entry.task === task.id);
         expect(row).toMatchObject({
           runs: 1,
@@ -2869,13 +2873,13 @@ describe.skipIf(!available)('12d: replay with children, and the evaluation', () 
     ]) {
       expect(header).toContain(` ${column} |`);
     }
-    expect(markdown.split('\n').filter((line) => /^\| (baseline|orientation|learned)/.test(line))).toHaveLength(12);
+    expect(markdown.split('\n').filter((line) => /^\| (baseline|orientation|learned)/.test(line))).toHaveLength(CONDITIONS.length * singleTurn.length);
 
     // Only the learned condition carried the distilled lesson.
     const stamp = readdirSync(join(directory, 'evaluate'))[0] ?? '';
     // And every run was written down as it ended, not only at the end.
     const saved = readFileSync(join(directory, 'evaluate', stamp, 'runs.jsonl'), 'utf8').trim().split('\n');
-    expect(saved).toHaveLength(CONDITIONS.length * EVALUATION_TASKS.length);
+    expect(saved).toHaveLength(CONDITIONS.length * singleTurn.length);
     expect(JSON.parse(saved[0] ?? '{}')).toMatchObject({ condition: 'baseline', task: 'notes-archive', n: 1, workingCode: false });
     const lessonsIn = (condition: string): number[] => {
       const store = new Database(join(directory, 'evaluate', stamp, condition, 'starter-done-filter', '1', KNOWLEDGE_FILE), { readonly: true });

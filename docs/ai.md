@@ -235,6 +235,29 @@ it and must still be able to read and delete it. "Clear all conversations" is
 `clearAll()`, and an application that offers a settings panel should offer it
 there.
 
+### What the host keeps per run
+
+The browser keeps the conversation; the host keeps what the model itself did.
+When a turn ends — before `done`, and also when it is stopped or fails — the
+host writes the turn's own messages (its tool calls and their results, as the
+AI SDK gave them) to a `transcripts` table in the same `threads.sqlite`, under
+the turn's run id. A tool call that never got its result is dropped, provider
+metadata is dropped, and a transcript over 200,000 characters is not kept.
+
+Each assistant turn a client sends back in `history` may carry `runId`. Both
+clients set it: `useAiChat` from the run that wrote the message, and the AI
+Elements transport from `metadata.runId`, which survives a save and a reload.
+The host replaces the newest six such turns whose transcripts it holds with
+those transcripts — each tool input cut to 1,000 characters and each output to
+2,000, with the head kept and `<omitted N chars>` in place of the rest, errors
+whole — up to 60,000 characters in all; every other turn is its text, as
+before. So a "continue" gets the previous turn's reads and edits rather than
+its summary of them. A run id the host does not hold is text; nothing a browser
+saved is ever read into a prompt. Transcripts older than 30 days, or beyond the
+newest 2,000, are deleted when the store opens and on every write. Deleting a
+conversation does not delete its transcripts, because the host does not know
+which conversation a run belonged to; the age and count caps are the bound.
+
 Call `ai.close()` from the application's shutdown, beside `ai.abortAll(...)`:
 it checkpoints the database's write-ahead log, so what is left on disk is one
 complete file rather than one that needs its sidecars.
@@ -381,7 +404,7 @@ intercept. A test asserts this layer never does it.
 | Provider | What is sent |
 |---|---|
 | Local (Ollama, LM Studio, a loopback address) | Nothing leaves the computer. |
-| Remote (Anthropic, OpenAI, any other address) | The message, the conversation history, the full text of every resolved document, search snippets, the tool descriptions, and each tool call's input and output. |
+| Remote (Anthropic, OpenAI, any other address) | The message, the conversation history and the tool calls and results of the last six turns, the full text of every resolved document, search snippets, the tool descriptions, and each tool call's input and output. |
 
 An image pasted onto or attached to a message is sent to the provider with that
 message, once: it travels with the turn it arrives on, and later turns carry a

@@ -59,6 +59,12 @@ export type ToolPermission = 'read' | 'confirm';
 export interface ChatTurn {
   role: 'user' | 'assistant';
   content: string;
+  /**
+   * On an assistant turn: the run that produced it. The host expands a turn
+   * whose run it holds a transcript for into that turn's own tool calls and
+   * results; any other turn, and any run it does not hold, is `content`.
+   */
+  runId?: string;
 }
 
 /**

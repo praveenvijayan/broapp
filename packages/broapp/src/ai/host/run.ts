@@ -22,6 +22,7 @@ import type { ApprovalQuestion, Approver } from '../../host/gate.ts';
 import type { Effect } from '../../shared/contract.ts';
 import { fromTransportError, isPublicError, publicError } from '../../shared/errors.ts';
 import type { ToolPermission } from '../shared/types.ts';
+import type { ChatTurn } from '../shared/types.ts';
 import type { ChatEvent, StreamChatParams } from './run-types.ts';
 
 import { AdapterError } from './adapter.ts';
@@ -29,6 +30,18 @@ import type { AdapterConfig, ProviderAdapter } from './adapter.ts';
 import type { Registry } from './registry.ts';
 import type { AiContextProviders, AiTool, ContextDocument } from './tool.ts';
 import type { DeliveredContext, RunEndDetail } from './create-ai.ts';
+import type { ResponseMessage } from './threads.ts';
+
+/**
+ * Where a turn's own transcript is kept and read back.
+ *
+ * Both sides are the host's: `save` is handed what the AI SDK produced, and
+ * `read` returns only what `save` wrote. A browser never supplies either.
+ */
+export interface RunTranscripts {
+  save(runId: string, messages: readonly ResponseMessage[]): void;
+  read(runId: string): readonly ResponseMessage[] | null;
+}
 
 /** What the run loop needs from the `Ai` that owns it. */
 export interface RunDeps {
@@ -62,6 +75,11 @@ export interface RunDeps {
   ) => void;
   /** Called once per turn with what the model is about to be given. */
   readonly onContext?: (runId: string, delivered: DeliveredContext) => void;
+  /**
+   * The turn transcripts. Absent, every history turn is text and nothing is
+   * written, which is exactly the layer before transcripts existed.
+   */
+  readonly transcripts?: RunTranscripts;
 }
 
 /** What a turn counts as it goes, for {@link RunEndDetail}. */
@@ -217,6 +235,120 @@ async function assembleContext(
   return fitToBudget(documents, deps.contextBudgetChars);
 }
 
+/** The bounds on history expanded from transcripts. */
+export interface HistoryLimits {
+  /** Assistant turns expanded, newest first. */
+  readonly turns: number;
+  /** Characters of one tool call's input, as JSON. */
+  readonly inputChars: number;
+  /** Characters of one tool result's output, as JSON. */
+  readonly outputChars: number;
+  /** Characters of every expanded message together, as JSON. */
+  readonly totalChars: number;
+}
+
+/** The bounds a turn uses. */
+export const HISTORY_LIMITS: HistoryLimits = {
+  turns: 6,
+  inputChars: 1_000,
+  outputChars: 2_000,
+  totalChars: 60_000,
+};
+
+/** The head of a long string, and how much was left out. Never a summary. */
+function cut(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}<omitted ${String(text.length - max)} chars>`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A tool result's output, bounded.
+ *
+ * An `error` is kept whole wherever it is — an error-typed output, or the
+ * `{ error }` a failed tool returns — because it is the one thing a model
+ * needs verbatim to avoid repeating the call that caused it.
+ */
+function boundOutput(output: unknown, max: number): unknown {
+  if (!isRecord(output)) return output;
+  const type = output['type'];
+  if (type === 'error-text' || type === 'error-json' || type === 'execution-denied') return output;
+  if (type === 'text' && typeof output['value'] === 'string') {
+    return { type: 'text', value: cut(output['value'], max) };
+  }
+  const json = JSON.stringify(type === 'json' ? output['value'] : output) ?? '';
+  if (json.length <= max) return output;
+  const value = type === 'json' ? output['value'] : undefined;
+  if (isRecord(value) && 'error' in value) {
+    const { error, ...rest } = value;
+    return { type: 'json', value: { error, rest: cut(JSON.stringify(rest), max) } };
+  }
+  return { type: 'text', value: cut(json, max) };
+}
+
+/** One transcript message with every tool input and output bounded. */
+function boundMessage(message: ResponseMessage, limits: HistoryLimits): ModelMessage {
+  if (!Array.isArray(message.content)) return message;
+  const content = (message.content as readonly unknown[]).map((part) => {
+    if (!isRecord(part)) return part;
+    if (part['type'] === 'tool-call') {
+      const json = JSON.stringify(part['input']) ?? '';
+      return json.length <= limits.inputChars ? part : { ...part, input: cut(json, limits.inputChars) };
+    }
+    if (part['type'] === 'tool-result') return { ...part, output: boundOutput(part['output'], limits.outputChars) };
+    return part;
+  });
+  return { ...message, content } as ModelMessage;
+}
+
+/**
+ * History as the model is given it.
+ *
+ * Walking from the newest turn back, an assistant turn whose `runId` names a
+ * transcript the host holds is replaced by that transcript — its own tool calls
+ * and results, bounded — while fewer than `limits.turns` have been and the total
+ * stays under `limits.totalChars`. The first turn that would cross the total
+ * stays text, and so does every turn older than it. Every other turn is its text,
+ * exactly as before. User turns keep their place.
+ */
+export function expandHistory(
+  history: readonly ChatTurn[],
+  read: (runId: string) => readonly ResponseMessage[] | null,
+  limits: HistoryLimits = HISTORY_LIMITS,
+): ModelMessage[] {
+  const segments: ModelMessage[][] = [];
+  let expanded = 0;
+  let total = 0;
+  let full = false;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const turn = history[index];
+    if (turn === undefined) continue;
+    const text: ModelMessage[] = [{ role: turn.role, content: turn.content }];
+    if (turn.role !== 'assistant' || turn.runId === undefined || full || expanded >= limits.turns) {
+      segments.push(text);
+      continue;
+    }
+    const transcript = read(turn.runId);
+    if (transcript === null || transcript.length === 0) {
+      segments.push(text);
+      continue;
+    }
+    const bounded = transcript.map((message) => boundMessage(message, limits));
+    const chars = JSON.stringify(bounded).length;
+    if (total + chars > limits.totalChars) {
+      full = true;
+      segments.push(text);
+      continue;
+    }
+    total += chars;
+    expanded += 1;
+    segments.push(bounded);
+  }
+  return segments.reverse().flat();
+}
+
 /**
  * A message the model may see, without whatever a caller invented.
  *
@@ -224,13 +356,21 @@ async function assembleContext(
  * are strings by contract, so an earlier turn's picture is already a
  * `[image: name]` line the browser put there — the alternative, resending
  * every image on every turn, would cost the user the same upload again on each
- * question.
+ * question. An assistant turn that names its run is expanded from the host's
+ * own transcript by {@link expandHistory}.
  */
-function toModelMessages(params: StreamChatParams): ModelMessage[] {
-  const messages: ModelMessage[] = params.history.map((turn) => ({
-    role: turn.role,
-    content: turn.content,
-  }));
+function toModelMessages(params: StreamChatParams, transcripts: RunTranscripts | undefined, logger: HostLogger): ModelMessage[] {
+  const read = (runId: string): readonly ResponseMessage[] | null => {
+    if (transcripts === undefined) return null;
+    try {
+      return transcripts.read(runId);
+    } catch (cause) {
+      // A store that cannot be read has no transcript to give; the turn is text.
+      logger.error(`[broapp] ai could not read the transcript of run ${runId}: ${String(cause instanceof Error ? cause.message : cause)}`);
+      return null;
+    }
+  };
+  const messages: ModelMessage[] = expandHistory(params.history, read);
   const files = params.files ?? [];
   if (files.length === 0) {
     messages.push({ role: 'user', content: params.message });
@@ -366,6 +506,7 @@ function buildTools(
   deps: RunDeps,
   sink: StreamSink<ChatEvent>,
   approver: Approver,
+  recorder: TranscriptRecorder,
 ): ToolSet {
   const tools: ToolSet = {};
   for (const [name, definition] of Object.entries(deps.tools)) {
@@ -374,6 +515,7 @@ function buildTools(
       inputSchema: jsonSchema(definition.inputSchema),
       execute: async (input: unknown, options: { toolCallId: string }): Promise<unknown> => {
         const callId = options.toolCallId;
+        recorder.called(callId, name, input);
         await sink.emit({
           type: 'tool-call',
           callId,
@@ -409,12 +551,14 @@ function buildTools(
               output: DECLINED,
               denied: true,
             });
+            recorder.answered(callId, DECLINED);
             return DECLINED;
           }
           // One tool failing is not the turn failing. The model gets the
           // reason and can carry on or explain.
           output = { error: safeToolMessage(cause, name, deps.logger) };
         }
+        recorder.answered(callId, output);
         await sink.emit({ type: 'tool-result', callId, tool: name, output });
         return output;
       },
@@ -442,6 +586,59 @@ function safeToolMessage(cause: unknown, name: string, logger: HostLogger): stri
   return 'The tool failed.';
 }
 
+/**
+ * What a turn has produced so far, for a turn that does not reach `finish`.
+ *
+ * A finished turn's transcript is the AI SDK's own `responseMessages`. A turn
+ * that is stopped never gets one, and a stopped turn is exactly the one whose
+ * "continue" needs it most; so the steps the SDK finished are kept as it gave
+ * them, and the step in flight is kept from its text and from the calls this
+ * layer ran. Storage removes a call that never got its result.
+ */
+class TranscriptRecorder {
+  /** Set once the model has been asked; before that there is nothing to keep. */
+  started = false;
+  private readonly finished: ResponseMessage[] = [];
+  private text = '';
+  private calls = new Map<string, { name: string; input: unknown; output?: { value: unknown } }>();
+
+  stepEnded(messages: readonly ResponseMessage[]): void {
+    this.finished.push(...messages);
+    this.text = '';
+    this.calls = new Map();
+  }
+
+  wrote(text: string): void {
+    this.text += text;
+  }
+
+  called(callId: string, name: string, input: unknown): void {
+    this.calls.set(callId, { name, input });
+  }
+
+  answered(callId: string, output: unknown): void {
+    const call = this.calls.get(callId);
+    if (call !== undefined) call.output = { value: output };
+  }
+
+  /** Every finished step, then the step in flight. */
+  sofar(): ResponseMessage[] {
+    const assistant: Array<{ type: 'text'; text: string } | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }> = [];
+    if (this.text !== '') assistant.push({ type: 'text', text: this.text });
+    const results: Array<{ type: 'tool-result'; toolCallId: string; toolName: string; output: { type: 'json'; value: never } }> = [];
+    for (const [toolCallId, call] of this.calls) {
+      assistant.push({ type: 'tool-call', toolCallId, toolName: call.name, input: call.input });
+      if (call.output !== undefined) {
+        results.push({ type: 'tool-result', toolCallId, toolName: call.name, output: { type: 'json', value: call.output.value as never } });
+      }
+    }
+    const out = [...this.finished];
+    if (assistant.length > 0) out.push({ role: 'assistant', content: assistant });
+    if (results.length > 0) out.push({ role: 'tool', content: results });
+    return out;
+  }
+}
+
 /** How much of the person's message stands in for the whole turn. */
 const SUMMARY_CHARS = 200;
 
@@ -457,6 +654,18 @@ export async function runChat(
   let ended = false;
   const started = Date.now();
   const tally: TurnTally = { steps: 0 };
+  const recorder = new TranscriptRecorder();
+  const transcript = new TranscriptWriter(params.runId, deps);
+  // A turn that never reaches `finish` — stopped, failed, or cut off by the
+  // provider — still leaves what it did. A stop is written the moment it
+  // happens rather than when the loop notices: the AI SDK waits for a running
+  // tool before it ends the stream, and what the turn did is what had come back
+  // when the person stopped it, which is also what the browser was shown.
+  // Written once: a finished turn has already written the SDK's own messages.
+  const keepSoFar = (): void => {
+    if (recorder.started) transcript.write(recorder.sofar());
+  };
+  sink.signal.addEventListener('abort', keepSoFar, { once: true });
   const end = (status: 'succeeded' | 'failed' | 'cancelled'): void => {
     if (ended) return;
     ended = true;
@@ -472,11 +681,43 @@ export async function runChat(
     );
   };
   try {
-    await runTurn(params, sink, deps, end, tally);
+    await runTurn(params, sink, deps, end, tally, recorder, transcript);
     end(sink.signal.aborted ? 'cancelled' : 'succeeded');
   } catch (cause) {
     end(sink.signal.aborted ? 'cancelled' : 'failed');
     throw cause;
+  } finally {
+    sink.signal.removeEventListener('abort', keepSoFar);
+    keepSoFar();
+  }
+}
+
+/**
+ * Writes one turn's transcript, once, without ever failing the turn.
+ *
+ * A store that cannot write loses the transcript, not the turn: the error is
+ * logged, `done` still goes out, and the next turn's history for this run is
+ * its text.
+ */
+class TranscriptWriter {
+  private written = false;
+
+  constructor(
+    private readonly runId: string,
+    private readonly deps: RunDeps,
+  ) {}
+
+  write(messages: readonly ResponseMessage[]): void {
+    const transcripts = this.deps.transcripts;
+    if (this.written || transcripts === undefined) return;
+    this.written = true;
+    try {
+      transcripts.save(this.runId, messages);
+    } catch (cause) {
+      this.deps.logger.error(
+        `[broapp] ai could not keep the transcript of run ${this.runId}: ${String(cause instanceof Error ? cause.message : cause)}`,
+      );
+    }
   }
 }
 
@@ -487,6 +728,8 @@ async function runTurn(
   deps: RunDeps,
   end: (status: 'succeeded' | 'failed' | 'cancelled') => void,
   tally: TurnTally,
+  recorder: TranscriptRecorder,
+  transcript: TranscriptWriter,
 ): Promise<void> {
   // Throws a PublicError when nothing is configured. `runStream` in host/app.ts
   // turns that into the right thing on the wire, so it is not caught here.
@@ -535,19 +778,29 @@ async function runTurn(
     );
   }
 
+  // From here the model has been asked, so there is a transcript to keep
+  // however the turn ends. A turn refused before this point has none.
+  recorder.started = true;
   const result = streamText({
     // Always a model *instance*. A string here would be resolved by the AI
     // SDK's gateway, over the global fetch, to a Vercel host — see
     // reports/01-spike.md. Nothing in this layer may pass one.
     model: resolved.adapter.model(resolved.config, resolved.modelId),
     system,
-    messages: toModelMessages(params),
-    tools: buildTools(params, deps, sink, approver),
+    messages: toModelMessages(params, deps.transcripts, deps.logger),
+    tools: buildTools(params, deps, sink, approver, recorder),
     stopWhen: stepCountIs(deps.maxSteps),
     abortSignal: sink.signal,
     // The default handler prints the error; this layer reports it as an event
     // and decides for itself what is safe to say.
     onError: () => undefined,
+    // Both from the SDK's own pipeline rather than from the loop below, so a
+    // step's text and the step's end are seen in the order they happened even
+    // when the loop is behind, waiting on a slow socket.
+    onChunk: ({ chunk }) => {
+      if (chunk.type === 'text-delta') recorder.wrote(chunk.text);
+    },
+    onStepEnd: (step) => recorder.stepEnded(step.response.messages),
   });
 
   for await (const part of result.fullStream) {
@@ -569,6 +822,9 @@ async function runTurn(
           outputTokens: part.totalUsage.outputTokens ?? 0,
         };
         tally.usage = usage;
+        // Before `done`: a client that saves the conversation on `done` and
+        // sends it back at once must find the run's transcript already there.
+        transcript.write(await result.responseMessages);
         await sink.emit({ type: 'usage', ...usage });
         await sink.emit({ type: 'done' });
         break;

@@ -419,6 +419,7 @@ describe('conversations', () => {
     const version = db.query<{ user_version: number }, []>('PRAGMA user_version').get();
     db.close();
     expect(columns).toContain('seq');
-    expect(version?.user_version).toBe(2);
+    // 3 since 12j appended the transcripts table after the sequence.
+    expect(version?.user_version).toBe(3);
   });
 });

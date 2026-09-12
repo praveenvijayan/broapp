@@ -1,7 +1,7 @@
 /**
  * The evaluation: did the knowledge path move the measured blocker?
  *
- * Three tasks, four conditions, `n` runs each, on the configured model, every
+ * Four tasks, four conditions, `n` runs each, on the configured model, every
  * run in a fresh checkout with a knowledge store of its own. Verified
  * completion is the task's acceptance example passing on a preview of what the
  * turn left: the example is added to the workspace before any run, by hash,
@@ -12,12 +12,20 @@
  * `orientation+facts` 12b as shipped (digest, evidence, curated facts), and
  * `learned` that plus every provisional and confirmed distilled lesson from the
  * launcher's own store.
+ *
+ * Two tasks are two turns (12j): the first turn stops at its first edit, as a
+ * person pressing stop would, and a second turn says `continue`. Each of those
+ * runs twice per condition, once with the first turn in history as text and
+ * once naming its run, so the host gives the model the first turn's own tool
+ * calls and results. What is measured is whether the second turn rediscovers
+ * what the first already found.
  */
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createAi } from 'broapp/ai/host';
 import type { LanguageModel } from 'ai';
+import type { ChatTurn } from 'broapp/ai';
 import type { HostLogger } from 'broapp/host';
 
 import { LAUNCHER_MAX_STEPS } from '../launcher/app.ts';
@@ -27,7 +35,17 @@ import { adopt, prepareWorkspace, type PrepareOptions } from '../launcher/worksp
 import { layout as layoutOf, readCurrent, readRelease, type AcceptanceExample, type Layout } from '../spec/index.ts';
 
 import { createEvidence, exampleHash } from './evidence.ts';
-import { git, identityOf, openRun, prepareRun, providersFor, type ProvidersFor, type ToolCall } from './harness.ts';
+import {
+  git,
+  identityOf,
+  openRun,
+  prepareRun,
+  providersFor,
+  type ProvidersFor,
+  type RunHandle,
+  type ToolCall,
+  type TurnOutcome,
+} from './harness.ts';
 import { createEventLog } from './log.ts';
 import { copyLessons, DEFAULT_TURN_TIMEOUT_MS } from './replay.ts';
 import { problemSignature, unrelatedHintCredit } from './scoring.ts';
@@ -39,6 +57,28 @@ import { duration } from './verdict.ts';
 export const CONDITIONS = ['baseline', 'orientation', 'orientation+facts', 'learned'] as const;
 export type Condition = (typeof CONDITIONS)[number];
 
+/**
+ * How a two-turn task's second turn is given the first: its text alone, or its
+ * text naming the run, which the host expands into that run's tool calls and
+ * results. A single-turn task has no history, and runs under `text` only.
+ */
+export const HISTORY_MODES = ['text', 'structured'] as const;
+export type HistoryMode = (typeof HISTORY_MODES)[number];
+
+/**
+ * The one condition whose structured two-turn cell also runs with the launcher
+ * restarted between the turns: turn two on a fresh harness over the same root
+ * and the same AI data directory. `orientation+facts` is 12b as shipped, with
+ * nothing distilled in it to vary between runs.
+ */
+export const RESTART_CONDITION: Condition = 'orientation+facts';
+
+/** The file a `touch-file` task changes between the turns. */
+export const TOUCHED_FILE = 'src/shared/contract.ts';
+
+/** What the second turn of a two-turn task says. */
+export const CONTINUE_MESSAGE = 'continue';
+
 /** One task: a starting workspace, a request, and the example that decides it. */
 export interface EvaluationTask {
   readonly id: string;
@@ -46,10 +86,14 @@ export interface EvaluationTask {
   readonly appId: string;
   readonly request: string;
   readonly example: AcceptanceExample;
+  /** Two turns: the request stopped at its first edit, then `continue`. */
+  readonly turns?: 2;
+  /** What happens between the turns. `touch-file` commits a comment line to {@link TOUCHED_FILE}. */
+  readonly between?: 'none' | 'touch-file';
 }
 
 /**
- * The three tasks.
+ * The four tasks. The last two are two turns (12j).
  *
  * Each example states the interface the request implies — a route and an input
  * a person would reasonably expect — and says both what must be there and what
@@ -103,6 +147,8 @@ export const EVALUATION_TASKS: readonly EvaluationTask[] = [
     id: 'notes-tags',
     base: 'notes',
     appId: 'notes',
+    turns: 2,
+    between: 'none',
     request: 'add tags to notes and a filter by tag',
     example: {
       id: 'eval-tag-filter',
@@ -115,12 +161,60 @@ export const EVALUATION_TASKS: readonly EvaluationTask[] = [
       ],
     },
   },
+  {
+    id: 'starter-priority',
+    base: 'starter',
+    appId: 'items',
+    turns: 2,
+    between: 'touch-file',
+    request: 'add a priority to items — low, normal or high, normal when not given — and let me filter the items table by priority',
+    example: {
+      id: 'eval-priority-filter',
+      title: 'Filtering by a priority finds the items that have it and nothing else',
+      steps: [
+        { route: 'items.add', input: { label: 'Routine' } },
+        { route: 'items.add', input: { label: 'Urgent', priority: 'high' } },
+        { route: 'items.list', input: { priority: 'high' }, match: { items: [{ label: 'Urgent', priority: 'high' }] } },
+        { route: 'items.list', input: { priority: 'normal' }, match: { items: [{ label: 'Routine', priority: 'normal' }] } },
+        { route: 'items.list', input: { priority: 'low' }, match: { count: 0 } },
+      ],
+    },
+  },
 ];
+
+/** The measures a two-turn run adds, all about its second turn. */
+export interface TwoTurnColumns {
+  /** Reads (`source.read`, `source.list`, `source.search`, `spec.read`, `spec.reference`) before its first edit; all of them when it made none. */
+  readonly readsBeforeEdit: number;
+  /** Reads of a path, application or topic the first turn had already read. */
+  readonly repeatedReads: number;
+  /** Hunks whose `find` the first turn already applied, and creations of something that already existed. */
+  readonly repeatedActions: number;
+  readonly tokens: number;
+  /** Calls the first turn made before it was stopped. */
+  readonly turnOneCalls: number;
+  /** For a `touch-file` task: it read the changed file before it edited it. Null otherwise. */
+  readonly readChangedFirst: boolean | null;
+}
 
 /** One line of the table. */
 export interface EvaluationRow {
   readonly condition: Condition;
   readonly task: string;
+  /** `text` for every single-turn task. */
+  readonly history: HistoryMode;
+  /** Turn two ran on a fresh harness (two-turn tasks only). */
+  readonly restart: boolean;
+  /** Null for a single-turn task. */
+  readonly twoTurn: {
+    readonly meanReadsBeforeEdit: number;
+    readonly meanRepeatedReads: number;
+    readonly meanRepeatedActions: number;
+    readonly meanTokens: number;
+    readonly meanTurnOneCalls: number;
+    /** Runs that read the changed file before editing it; null when nothing changed between the turns. */
+    readonly readChangedFirst: number | null;
+  } | null;
   readonly runs: number;
   /** Runs whose workspace, built and previewed by the evaluation afterwards, passed the task's example. */
   readonly workingCode: number;
@@ -170,6 +264,10 @@ export interface EvaluateOptions {
   readonly fetch?: typeof fetch;
   /** One line per run, as it finishes. */
   readonly onRun?: (line: string) => void;
+  /** The tasks to run. Default {@link EVALUATION_TASKS}; a test narrows it. */
+  readonly tasks?: readonly EvaluationTask[];
+  /** The conditions to run. Default {@link CONDITIONS}. */
+  readonly conditions?: readonly Condition[];
 }
 
 /** What each condition serves. */
@@ -272,6 +370,7 @@ interface RunMeasure {
   notOffered: number;
   unrelated: number;
   timedOut: boolean;
+  twoTurn: TwoTurnColumns | null;
 }
 
 /** The 1-based position of the first call to one of these tools, or `null`. */
@@ -434,163 +533,365 @@ function slug(text: string): string {
   return text.replace(/[^A-Za-z0-9_-]/g, '-');
 }
 
+/** One cell of the table: a condition, a task and, for two turns, how history is given. */
+interface Cell {
+  readonly condition: Condition;
+  readonly task: EvaluationTask;
+  readonly history: HistoryMode;
+  readonly restart: boolean;
+}
+
+/** The cells of one run of the evaluation, in the order they run. */
+function cellsOf(tasks: readonly EvaluationTask[], conditions: readonly Condition[]): Cell[] {
+  const cells: Cell[] = [];
+  for (const task of tasks) {
+    for (const condition of conditions) {
+      if (task.turns !== 2) {
+        cells.push({ condition, task, history: 'text', restart: false });
+        continue;
+      }
+      for (const history of HISTORY_MODES) cells.push({ condition, task, history, restart: false });
+      if (condition === RESTART_CONDITION) cells.push({ condition, task, history: 'structured', restart: true });
+    }
+  }
+  return cells;
+}
+
+/** The same cells, in the order the table lists them: condition, then task. */
+function orderedCells(tasks: readonly EvaluationTask[], conditions: readonly Condition[]): Cell[] {
+  const cells = cellsOf(tasks, conditions);
+  return conditions.flatMap((condition) => cells.filter((cell) => cell.condition === condition));
+}
+
+/** The reads a turn can repeat, by what they read. */
+const READ_TOOLS: ReadonlySet<string> = new Set(['source.read', 'source.list', 'source.search', 'spec.read', 'spec.reference']);
+
+/** What a read call read, so two can be compared; null for anything that is not one of the three reads that name a thing. */
+function readKey(call: ToolCall): string | null {
+  const input = (call.input ?? {}) as { appId?: unknown; path?: unknown; from?: unknown; topic?: unknown };
+  if (call.tool === 'source.read' && typeof input.path === 'string') return `source.read ${input.path.split('\\').join('/')}`;
+  if (call.tool === 'spec.read') return `spec.read ${String(input.appId)} ${typeof input.from === 'string' ? input.from : ''}`;
+  if (call.tool === 'spec.reference') return `spec.reference ${typeof input.topic === 'string' ? input.topic : 'all'}`;
+  return null;
+}
+
+/** The hunks a call carried, as `path` and `find`. */
+function hunksOf(call: ToolCall): { path: string; find: string }[] {
+  if (call.tool !== 'source.edit' && call.tool !== 'candidate.cycle') return [];
+  const hunks = (call.input as { hunks?: unknown } | undefined)?.hunks;
+  if (!Array.isArray(hunks)) return [];
+  return (hunks as { path?: unknown; find?: unknown }[])
+    .filter((hunk): hunk is { path: string; find: string } => typeof hunk.path === 'string' && typeof hunk.find === 'string')
+    .map((hunk) => ({ path: hunk.path.split('\\').join('/'), find: hunk.find }));
+}
+
+/** Whether a call's result says it did what it was asked, rather than failing or being declined. */
+function succeeded(call: ToolCall): boolean {
+  const output = call.output as { error?: unknown; denied?: unknown } | undefined;
+  return output !== undefined && output !== null && output.error === undefined && output.denied !== true;
+}
+
+/**
+ * What a second turn repeated of the first.
+ *
+ * `existing` is every workspace file when the second turn began. Exported for
+ * its test: the counters are the claim the two-turn table exists to check.
+ */
+export function twoTurnColumns(
+  one: readonly ToolCall[],
+  two: readonly ToolCall[],
+  context: { readonly appId: string; readonly existing: ReadonlySet<string>; readonly changed: string | null; readonly tokens: number },
+): TwoTurnColumns {
+  const firstEdit = two.findIndex(editedBy);
+  const readsBeforeEdit = (firstEdit < 0 ? two : two.slice(0, firstEdit)).filter((call) => READ_TOOLS.has(call.tool)).length;
+
+  const readInOne = new Set(one.map(readKey).filter((value): value is string => value !== null));
+  const repeatedReads = two.filter((call) => {
+    const readKeyOf = readKey(call);
+    return readKeyOf !== null && readInOne.has(readKeyOf);
+  }).length;
+
+  const appliedInOne = new Set(one.filter((call) => editedBy(call) && succeeded(call)).flatMap(hunksOf).map((hunk) => `${hunk.path}\n${hunk.find}`));
+  let repeatedActions = 0;
+  for (const call of two) {
+    repeatedActions += hunksOf(call).filter((hunk) => appliedInOne.has(`${hunk.path}\n${hunk.find}`)).length;
+    if (call.tool === 'candidate.cycle') {
+      const create = (call.input as { create?: unknown } | undefined)?.create;
+      if (Array.isArray(create)) {
+        repeatedActions += (create as { path?: unknown }[]).filter(
+          (file) => typeof file.path === 'string' && context.existing.has(file.path.split('\\').join('/')),
+        ).length;
+      }
+    }
+    if (call.tool === 'apps.create' && (call.input as { appId?: unknown } | undefined)?.appId === context.appId) repeatedActions += 1;
+  }
+
+  let readChangedFirst: boolean | null = null;
+  if (context.changed !== null) {
+    const changed = context.changed;
+    const read = two.findIndex((call) => readKey(call) === `source.read ${changed}`);
+    const edited = two.findIndex((call) => pathsOf(call).edited.includes(changed));
+    readChangedFirst = read >= 0 && (edited < 0 || read < edited);
+  }
+  return { readsBeforeEdit, repeatedReads, repeatedActions, tokens: context.tokens, turnOneCalls: one.length, readChangedFirst };
+}
+
+/** Every file in a workspace, tracked or not, as git lists them. */
+function workspaceFiles(sourceDir: string): Set<string> {
+  return new Set(
+    git(sourceDir, ['ls-files', '--cached', '--others', '--exclude-standard'])
+      .split('\n')
+      .filter((line) => line !== ''),
+  );
+}
+
+/**
+ * Append one comment line to the touched file and commit it, so the second
+ * turn's `source.read` reports a revision the first turn never saw.
+ */
+function touchFile(sourceDir: string): void {
+  const path = join(sourceDir, TOUCHED_FILE);
+  appendFileSync(path, `\n// Changed between the turns by the evaluation, ${new Date().toISOString()}.\n`);
+  git(sourceDir, ['add', '--', TOUCHED_FILE]);
+  git(sourceDir, ['commit', '--quiet', '--no-gpg-sign', '-m', 'The evaluation changed this file between the turns']);
+}
+
+/** Run one cell once: prepare the run, take its turn or turns, verify, measure. */
+async function runCell(
+  cell: Cell,
+  n: number,
+  start: Start,
+  base: string,
+  timeout: number,
+  options: EvaluateOptions,
+): Promise<RunMeasure> {
+  const { condition, task } = cell;
+  const variant = task.turns === 2 ? `${cell.history}${cell.restart ? '-restart' : ''}` : null;
+  const runDir = join(base, condition, variant === null ? task.id : `${task.id}-${variant}`, String(n));
+  const live = start.layout.app(task.appId);
+  const runLayout = prepareRun(runDir, task.appId, {
+    sourceDir: live.source,
+    rev: start.rev,
+    release: { dir: live.release(start.releaseId), id: start.releaseId },
+    grants: live.grants,
+    data: null,
+  });
+  const store = openKnowledge(runDir);
+  if (condition === 'learned') {
+    copyLessons(
+      options.knowledge,
+      store,
+      "origin = 'distilled' AND status IN ('provisional', 'confirmed') AND (diagnosis IS NULL OR diagnosis <> 'method_unclear')",
+    );
+  }
+  const log = createEventLog(store, { source: 'evaluate', tee: options.logger });
+  const open = (turn: 1 | 2 | undefined): RunHandle =>
+    openRun({
+      layout: runLayout,
+      appId: task.appId,
+      knowledge: { store, log, evidence: createEvidence(store, log) },
+      serving: servingFor(condition),
+      providers: providersFor(options.providers, {
+        label: condition,
+        appId: task.appId,
+        n,
+        ...(turn === undefined ? {} : { turn, history: cell.history, restart: cell.restart }),
+      }),
+      aiDataDir: options.aiDataDir,
+      logger: options.logger,
+      ...(options.execPath === undefined ? {} : { execPath: options.execPath }),
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    });
+  // A run id is unique across evaluations as well as within one: the two-turn
+  // transcripts are kept in the launcher's AI data directory, which every
+  // evaluation shares, and a second run naming the first's id must find its own.
+  // Short, because the contract bounds a run id at 64 characters.
+  const short = variant === null ? '' : `-${cell.history === 'structured' ? 's' : 't'}${cell.restart ? 'r' : ''}`;
+  const runId = `eval-${slug(condition)}-${task.id}${short}-${String(n)}-${Bun.hash(base).toString(36).slice(0, 6)}`;
+  let handle = open(task.turns === 2 ? 1 : undefined);
+  try {
+    let one: TurnOutcome | null = null;
+    let turn: TurnOutcome;
+    let existing = new Set<string>();
+    if (task.turns === 2) {
+      one = await handle.turn(`${runId}-1`, task.request, timeout, undefined, { stopAfter: editedBy });
+      if (task.between === 'touch-file') touchFile(runLayout.app(task.appId).source);
+      existing = workspaceFiles(runLayout.app(task.appId).source);
+      if (cell.restart) {
+        // The launcher restarted between the turns: everything the first
+        // harness held is gone except what it left on disk.
+        await handle.close();
+        handle = open(2);
+      }
+      const history: ChatTurn[] = [
+        { role: 'user', content: task.request },
+        {
+          role: 'assistant',
+          content: one.text.slice(0, 20_000),
+          ...(cell.history === 'structured' ? { runId: `${runId}-1` } : {}),
+        },
+      ];
+      turn = await handle.turn(`${runId}-2`, CONTINUE_MESSAGE, timeout, history);
+    } else {
+      turn = await handle.turn(runId, task.request, timeout);
+    }
+    const calls = one === null ? turn.calls : [...one.calls, ...turn.calls];
+    const signatures = new Set(buildSignatures(calls));
+    // Before the evaluation's own build, which would add a release the
+    // engineer never built.
+    const workflowCompleted = workflowCompletedBy(calls, runLayout, task.appId, task);
+    let workingCode = false;
+    try {
+      const built = await handle.build();
+      if (built.ok) {
+        const checked = await handle.check(built.releaseId, [task.example]);
+        workingCode = !checked.childDied && checked.results[0]?.passed === true;
+      } else {
+        for (const problem of built.problems) signatures.add(problemSignature(problem.stage, problem.message));
+      }
+    } catch (cause) {
+      options.logger.error(`[autoapp] ${runId}: the verification did not run: ${String(cause instanceof Error ? cause.message : cause)}`);
+    }
+    const offered = offeredFiles(store, one === null ? runId : `${runId}-1`);
+    for (const path of one === null ? [] : offeredFiles(store, `${runId}-2`)) offered.add(path);
+    const read = new Set<string>();
+    const touched = new Set<string>();
+    for (const call of calls) {
+      const paths = pathsOf(call);
+      for (const path of paths.read) {
+        read.add(path);
+        touched.add(path);
+      }
+      for (const path of paths.edited) touched.add(path);
+    }
+    const tokensOf = (outcome: TurnOutcome): number => outcome.tokens.input + outcome.tokens.output;
+    const measure: RunMeasure = {
+      workingCode,
+      workflowCompleted,
+      firstEdit: firstWhere(calls, editedBy),
+      firstBuild: firstWhere(calls, (call) => buildOf(call) !== null),
+      reachedBuild: calls.some((call) => buildOf(call) !== null),
+      failedBuilds: failedBuildsOf(calls),
+      ms: turn.ms + (one?.ms ?? 0),
+      toolMs: turn.toolMs + (one?.toolMs ?? 0),
+      approvals: turn.approvals + (one?.approvals ?? 0),
+      tokens: tokensOf(turn) + (one === null ? 0 : tokensOf(one)),
+      signatures,
+      used: [...offered].filter((path) => touched.has(path)).length,
+      ignored: [...offered].filter((path) => !touched.has(path)).length,
+      notOffered: [...read].filter((path) => !offered.has(path)).length,
+      unrelated: unrelatedHintCredit(store).byStageOrRoutes,
+      // For two turns, the second: the first is stopped on purpose.
+      timedOut: turn.timedOut,
+      twoTurn:
+        one === null
+          ? null
+          : twoTurnColumns(one.calls, turn.calls, {
+              appId: task.appId,
+              existing,
+              changed: task.between === 'touch-file' ? TOUCHED_FILE : null,
+              tokens: tokensOf(turn),
+            }),
+    };
+    // Written as each run ends, so a stopped evaluation still leaves every
+    // run it finished, and the table can be rebuilt from them.
+    appendFileSync(
+      join(base, 'runs.jsonl'),
+      `${JSON.stringify({ condition, task: task.id, history: cell.history, restart: cell.restart, n, ...measure, signatures: [...measure.signatures] })}\n`,
+    );
+    const two = measure.twoTurn;
+    options.onRun?.(
+      `${condition} ${task.id}${variant === null ? '' : ` ${variant}`} ${String(n)}: ${workingCode ? 'working code' : 'not working'}, ${workflowCompleted ? 'workflow completed' : 'workflow not completed'}, ${String(calls.length)} calls, first edit ${String(measure.firstEdit ?? '–')}, first build ${String(measure.firstBuild ?? '–')}${two === null ? '' : `, turn two: ${String(two.readsBeforeEdit)} reads before its edit, ${String(two.repeatedReads)} repeated reads, ${String(two.repeatedActions)} repeated actions`}, ${duration(measure.ms)}${turn.timedOut ? ', timed out' : ''}`,
+    );
+    return measure;
+  } finally {
+    await handle.close();
+    store.close();
+  }
+}
+
 /** Run the evaluation. */
 export async function evaluate(
   options: EvaluateOptions,
 ): Promise<{ readonly model: { provider: string; id: string }; readonly rows: readonly EvaluationRow[]; readonly markdown: string }> {
   const model = identityOf(await options.model());
+  const tasks = options.tasks ?? EVALUATION_TASKS;
+  const conditions = options.conditions ?? CONDITIONS;
   const runs = Math.max(1, Math.floor(options.runs ?? 1));
   const timeout = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const base = join(options.layout.root, 'evaluate', stamp);
 
   const starts = new Map<string, Start>();
-  for (const task of EVALUATION_TASKS) starts.set(task.id, await prepareTask(join(base, 'base', task.id), task, options));
+  for (const task of tasks) starts.set(task.id, await prepareTask(join(base, 'base', task.id), task, options));
 
   const measured = new Map<string, RunMeasure[]>();
-  const key = (condition: Condition, task: string): string => `${condition}\n${task}`;
+  const key = (cell: Cell): string => `${cell.condition}\n${cell.task.id}\n${cell.history}\n${String(cell.restart)}`;
 
   // Run by run, task by task, condition by condition: whatever drifts in the
   // model over hours touches every condition alike.
   for (let n = 1; n <= runs; n += 1) {
-    for (const task of EVALUATION_TASKS) {
-      const start = starts.get(task.id);
+    for (const cell of cellsOf(tasks, conditions)) {
+      const start = starts.get(cell.task.id);
       if (start === undefined) continue;
-      for (const condition of CONDITIONS) {
-        const runDir = join(base, condition, task.id, String(n));
-        const live = start.layout.app(task.appId);
-        const runLayout = prepareRun(runDir, task.appId, {
-          sourceDir: live.source,
-          rev: start.rev,
-          release: { dir: live.release(start.releaseId), id: start.releaseId },
-          grants: live.grants,
-          data: null,
-        });
-        const store = openKnowledge(runDir);
-        if (condition === 'learned') {
-          copyLessons(
-            options.knowledge,
-            store,
-            "origin = 'distilled' AND status IN ('provisional', 'confirmed') AND (diagnosis IS NULL OR diagnosis <> 'method_unclear')",
-          );
-        }
-        const log = createEventLog(store, { source: 'evaluate', tee: options.logger });
-        const handle = openRun({
-          layout: runLayout,
-          appId: task.appId,
-          knowledge: { store, log, evidence: createEvidence(store, log) },
-          serving: servingFor(condition),
-          providers: providersFor(options.providers, { label: condition, appId: task.appId, n }),
-          aiDataDir: options.aiDataDir,
-          logger: options.logger,
-          ...(options.execPath === undefined ? {} : { execPath: options.execPath }),
-          ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-        });
-        const runId = `eval-${slug(condition)}-${task.id}-${String(n)}`;
-        try {
-          const turn = await handle.turn(runId, task.request, timeout);
-          const signatures = new Set(buildSignatures(turn.calls));
-          // Before the evaluation's own build, which would add a release the
-          // engineer never built.
-          const workflowCompleted = workflowCompletedBy(turn.calls, runLayout, task.appId, task);
-          let workingCode = false;
-          try {
-            const built = await handle.build();
-            if (built.ok) {
-              const checked = await handle.check(built.releaseId, [task.example]);
-              workingCode = !checked.childDied && checked.results[0]?.passed === true;
-            } else {
-              for (const problem of built.problems) signatures.add(problemSignature(problem.stage, problem.message));
-            }
-          } catch (cause) {
-            options.logger.error(`[autoapp] ${runId}: the verification did not run: ${String(cause instanceof Error ? cause.message : cause)}`);
-          }
-          const offered = offeredFiles(store, runId);
-          const read = new Set<string>();
-          const touched = new Set<string>();
-          for (const call of turn.calls) {
-            const paths = pathsOf(call);
-            for (const path of paths.read) {
-              read.add(path);
-              touched.add(path);
-            }
-            for (const path of paths.edited) touched.add(path);
-          }
-          const measure: RunMeasure = {
-            workingCode,
-            workflowCompleted,
-            firstEdit: firstWhere(turn.calls, editedBy),
-            firstBuild: firstWhere(turn.calls, (call) => buildOf(call) !== null),
-            reachedBuild: turn.calls.some((call) => buildOf(call) !== null),
-            failedBuilds: failedBuildsOf(turn.calls),
-            ms: turn.ms,
-            toolMs: turn.toolMs,
-            approvals: turn.approvals,
-            tokens: turn.tokens.input + turn.tokens.output,
-            signatures,
-            used: [...offered].filter((path) => touched.has(path)).length,
-            ignored: [...offered].filter((path) => !touched.has(path)).length,
-            notOffered: [...read].filter((path) => !offered.has(path)).length,
-            unrelated: unrelatedHintCredit(store).byStageOrRoutes,
-            timedOut: turn.timedOut,
-          };
-          const list = measured.get(key(condition, task.id)) ?? [];
-          list.push(measure);
-          measured.set(key(condition, task.id), list);
-          // Written as each run ends, so a stopped evaluation still leaves every
-          // run it finished, and the table can be rebuilt from them.
-          appendFileSync(
-            join(base, 'runs.jsonl'),
-            `${JSON.stringify({ condition, task: task.id, n, ...measure, signatures: [...measure.signatures] })}\n`,
-          );
-          options.onRun?.(
-            `${condition} ${task.id} ${String(n)}: ${workingCode ? 'working code' : 'not working'}, ${workflowCompleted ? 'workflow completed' : 'workflow not completed'}, ${String(turn.calls.length)} calls, first edit ${String(measure.firstEdit ?? '–')}, first build ${String(measure.firstBuild ?? '–')}, ${duration(turn.ms)}${turn.timedOut ? ', timed out' : ''}`,
-          );
-        } finally {
-          await handle.close();
-          store.close();
-        }
-      }
+      const measure = await runCell(cell, n, start, base, timeout, options);
+      const list = measured.get(key(cell)) ?? [];
+      list.push(measure);
+      measured.set(key(cell), list);
     }
   }
 
   const rows: EvaluationRow[] = [];
-  for (const condition of CONDITIONS) {
-    for (const task of EVALUATION_TASKS) {
-      const list = measured.get(key(condition, task.id)) ?? [];
-      const seen = new Set<string>();
-      let recurring = 0;
-      for (const measure of list) {
-        for (const signature of measure.signatures) if (seen.has(signature)) recurring += 1;
-        for (const signature of measure.signatures) seen.add(signature);
-      }
-      const meanOf = (values: readonly number[]): number | null =>
-        values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
-      const edits = list.map((measure) => measure.firstEdit).filter((value): value is number => value !== null);
-      const builds = list.map((measure) => measure.firstBuild).filter((value): value is number => value !== null);
-      const sum = (pick: (measure: RunMeasure) => number): number => list.reduce((total, measure) => total + pick(measure), 0);
-      rows.push({
-        condition,
-        task: task.id,
-        runs: list.length,
-        workingCode: list.filter((measure) => measure.workingCode).length,
-        workflowCompleted: list.filter((measure) => measure.workflowCompleted).length,
-        callsToFirstEdit: { mean: meanOf(edits), of: edits.length },
-        callsToFirstBuild: { mean: meanOf(builds), of: builds.length },
-        reachedBuild: list.filter((measure) => measure.reachedBuild).length,
-        failedBuilds: sum((measure) => measure.failedBuilds),
-        meanModelMs: meanOf(list.map((measure) => measure.ms - measure.toolMs)) ?? 0,
-        meanToolMs: meanOf(list.map((measure) => measure.toolMs)) ?? 0,
-        approvals: sum((measure) => measure.approvals),
-        meanTokens: meanOf(list.map((measure) => measure.tokens)) ?? 0,
-        recurringSignatures: recurring,
-        includedUsed: sum((measure) => measure.used),
-        includedIgnored: sum((measure) => measure.ignored),
-        readsNotOffered: sum((measure) => measure.notOffered),
-        unrelatedCredit: sum((measure) => measure.unrelated),
-        timedOut: list.filter((measure) => measure.timedOut).length,
-      });
+  for (const cell of orderedCells(tasks, conditions)) {
+    const { condition, task } = cell;
+    const list = measured.get(key(cell)) ?? [];
+    const seen = new Set<string>();
+    let recurring = 0;
+    for (const measure of list) {
+      for (const signature of measure.signatures) if (seen.has(signature)) recurring += 1;
+      for (const signature of measure.signatures) seen.add(signature);
     }
+    const meanOf = (values: readonly number[]): number | null =>
+      values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
+    const edits = list.map((measure) => measure.firstEdit).filter((value): value is number => value !== null);
+    const builds = list.map((measure) => measure.firstBuild).filter((value): value is number => value !== null);
+    const sum = (pick: (measure: RunMeasure) => number): number => list.reduce((total, measure) => total + pick(measure), 0);
+    const twoTurns = list.map((measure) => measure.twoTurn).filter((value): value is TwoTurnColumns => value !== null);
+    const meanTwo = (pick: (value: TwoTurnColumns) => number): number => meanOf(twoTurns.map(pick)) ?? 0;
+    rows.push({
+      condition,
+      task: task.id,
+      history: cell.history,
+      restart: cell.restart,
+      twoTurn:
+        task.turns === 2
+          ? {
+              meanReadsBeforeEdit: meanTwo((value) => value.readsBeforeEdit),
+              meanRepeatedReads: meanTwo((value) => value.repeatedReads),
+              meanRepeatedActions: meanTwo((value) => value.repeatedActions),
+              meanTokens: meanTwo((value) => value.tokens),
+              meanTurnOneCalls: meanTwo((value) => value.turnOneCalls),
+              readChangedFirst: task.between === 'touch-file' ? twoTurns.filter((value) => value.readChangedFirst === true).length : null,
+            }
+          : null,
+      runs: list.length,
+      workingCode: list.filter((measure) => measure.workingCode).length,
+      workflowCompleted: list.filter((measure) => measure.workflowCompleted).length,
+      callsToFirstEdit: { mean: meanOf(edits), of: edits.length },
+      callsToFirstBuild: { mean: meanOf(builds), of: builds.length },
+      reachedBuild: list.filter((measure) => measure.reachedBuild).length,
+      failedBuilds: sum((measure) => measure.failedBuilds),
+      meanModelMs: meanOf(list.map((measure) => measure.ms - measure.toolMs)) ?? 0,
+      meanToolMs: meanOf(list.map((measure) => measure.toolMs)) ?? 0,
+      approvals: sum((measure) => measure.approvals),
+      meanTokens: meanOf(list.map((measure) => measure.tokens)) ?? 0,
+      recurringSignatures: recurring,
+      includedUsed: sum((measure) => measure.used),
+      includedIgnored: sum((measure) => measure.ignored),
+      readsNotOffered: sum((measure) => measure.notOffered),
+      unrelatedCredit: sum((measure) => measure.unrelated),
+      timedOut: list.filter((measure) => measure.timedOut).length,
+    });
   }
   return { model, rows, markdown: evaluationTable(rows, { model, runs, timeout }) };
 }
@@ -606,10 +907,15 @@ export function evaluationTable(
     `Model ${about.model.provider}/${about.model.id}; ${String(about.runs)} run(s) per cell; ${String(LAUNCHER_MAX_STEPS)} steps a turn; ${duration(about.timeout)} a turn.`,
     'Working code: the evaluation built and previewed what the turn left, and the task example passed. Workflow completed: the engineer itself checked the release it last built and every example passed. The harness answers every question at once, so tool time holds no person’s wait; activation is never part of a run.',
     '',
-    '| condition | task | runs | working code | workflow completed | calls to first edit | calls to first build | reached a build | failed builds | timed out | mean model time | mean tool time | approvals | mean tokens | recurring signatures | included refs used | included refs ignored | reads not offered | unrelated hint credit |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ];
+  if (rows.some((row) => row.twoTurn === null)) {
+    lines.push(
+      '| condition | task | runs | working code | workflow completed | calls to first edit | calls to first build | reached a build | failed builds | timed out | mean model time | mean tool time | approvals | mean tokens | recurring signatures | included refs used | included refs ignored | reads not offered | unrelated hint credit |',
+      '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    );
+  }
   for (const row of rows) {
+    if (row.twoTurn !== null) continue;
     lines.push(
       `| ${[
         row.condition,
@@ -633,6 +939,37 @@ export function evaluationTable(
         String(row.unrelatedCredit),
       ].join(' | ')} |`,
     );
+  }
+  const twoTurnRows = rows.filter((row) => row.twoTurn !== null);
+  if (twoTurnRows.length > 0) {
+    lines.push(
+      '',
+      `Two turns: the request, stopped at its first edit; then "${CONTINUE_MESSAGE}". Under text, turn two's history is turn one's words; under structured, it names turn one's run and the host gives the model that run's tool calls and results. "restart" ran turn two on a fresh harness over the same root. Every column but working code and workflow completed is about turn two. Reads before first edit: source.read, source.list, source.search, spec.read and spec.reference before its first edit. Repeated reads: a path, application or topic turn one had read. Repeated actions: a hunk whose find turn one applied, or a creation of something that existed. Read changed file first: touch-file tasks only, turn two read ${TOUCHED_FILE} before it edited it.`,
+      '',
+      '| condition | history | task | runs | working code | workflow completed | timed out | turn-one calls | reads before first edit | repeated reads | repeated actions | turn-two tokens | read changed file first |',
+      '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    );
+    for (const row of twoTurnRows) {
+      const two = row.twoTurn;
+      if (two === null) continue;
+      lines.push(
+        `| ${[
+          row.condition,
+          `${row.history}${row.restart ? ', restart' : ''}`,
+          row.task,
+          String(row.runs),
+          String(row.workingCode),
+          String(row.workflowCompleted),
+          String(row.timedOut),
+          two.meanTurnOneCalls.toFixed(1),
+          two.meanReadsBeforeEdit.toFixed(1),
+          two.meanRepeatedReads.toFixed(1),
+          two.meanRepeatedActions.toFixed(1),
+          Math.round(two.meanTokens).toLocaleString('en'),
+          two.readChangedFirst === null ? '–' : `${String(two.readChangedFirst)}/${String(row.runs)}`,
+        ].join(' | ')} |`,
+      );
+    }
   }
   return `${lines.join('\n')}\n`;
 }

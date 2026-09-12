@@ -346,9 +346,10 @@ have other evidence. No number here promotes anything.
 broapp-autoapp knowledge evaluate [--runs n] [--out <path>] [--notes <dir>]
 ```
 
-The same harness, measuring the knowledge path itself: three tasks (the 07/08c
+The same harness, measuring the knowledge path itself: four tasks (the 07/08c
 Notes request; "add a `done` filter to the items table" on the starter; "add
-tags to notes and a filter by tag" on Notes), each under four conditions —
+tags to notes and a filter by tag" on Notes; and a priority with a filter by it
+on the starter), each under four conditions —
 `baseline` (no documents and no hints, the launcher before 12b),
 `orientation` (the digest alone), `orientation+facts` (12b as shipped) and
 `learned` (that, plus every provisional and confirmed distilled lesson in the
@@ -368,6 +369,25 @@ turn's documents named that it then read or edited (and ignored), the files it
 read that nothing named, and the unrelated hint credit above. It installs
 nothing, so it is run from a checkout, where the workspaces resolve their
 dependencies from the repository.
+
+The last two tasks are **two turns**. Turn one is the request, stopped the
+moment a call that edits has its result, as a person pressing stop would. Turn
+two says `continue`, with the request and turn one's words as history, under two
+history modes: `text`, where that is all it gets, and `structured`, where the
+assistant turn names turn one's run and the host gives the model that run's tool
+calls and results (see "What the host keeps per run" in the AI guide). Every
+condition runs both. The priority task is `touch-file`: between the turns the
+evaluation commits a comment line to `src/shared/contract.ts`, so turn two's
+`source.read` sees a revision turn one never saw. For `orientation+facts` a
+third cell runs turn two with the launcher restarted — a fresh harness over the
+same root and AI data directory — and the table marks it `restart`. Two-turn
+cells have their own table: working code and workflow completed as above, and
+for turn two the reads (`source.read`, `source.list`, `source.search`,
+`spec.read`, `spec.reference`) before its first edit, the repeated reads (a
+path, application or topic turn one had read), the repeated actions (a hunk
+whose `find` turn one applied, or a creation of something that existed), its
+tokens, turn one's calls, and for `touch-file` whether it read the changed file
+before editing it.
 
 ## Retention
 

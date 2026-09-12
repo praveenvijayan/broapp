@@ -22,7 +22,7 @@ import { createPendingApprovals, createReservedHostApp } from '../../host/index.
 import type { HostApp, HostLogger, StreamSink } from '../../host/app.ts';
 import { publicError } from '../../shared/errors.ts';
 import { aiContract, type AiContract } from '../shared/contract.ts';
-import type { ProviderInfo } from '../shared/types.ts';
+import type { ChatTurn, ProviderInfo } from '../shared/types.ts';
 
 import { AdapterError, toPublicError, type AdapterConfig, type ProviderAdapter } from './adapter.ts';
 import { createRegistry, type Registry } from './registry.ts';
@@ -64,6 +64,11 @@ export interface InProcessTurn {
   readonly message: string;
   /** The model for this turn, within the configured provider. */
   readonly modelId?: string;
+  /**
+   * Earlier turns, as a browser would send them. An assistant turn naming a
+   * run this layer kept a transcript for is expanded exactly as on `ai.chat`.
+   */
+  readonly history?: readonly ChatTurn[];
 }
 
 /** How {@link Ai.turn} is answered and stopped. */
@@ -291,6 +296,14 @@ export function createAi(options: CreateAiOptions): Ai {
     }
   });
 
+  // Opened on the first conversation route and not before: an application
+  // whose user never opens the panel should not find a database in its data
+  // directory, and `createAi` is built unconditionally by every application
+  // that offers AI at all. A turn opens it too, to keep its transcript.
+  let threads: ThreadStore | null = null;
+  const threadStore = (): ThreadStore =>
+    (threads ??= openThreads(options.dataDir, options.logger === undefined ? {} : { logger: options.logger }));
+
   const approvals = createPendingApprovals(options.logger);
   const runDeps: RunDeps = {
     registry,
@@ -303,6 +316,12 @@ export function createAi(options: CreateAiOptions): Ai {
     approvals,
     ...(options.onRunEnd === undefined ? {} : { onRunEnd: options.onRunEnd }),
     ...(options.onContext === undefined ? {} : { onContext: options.onContext }),
+    transcripts: {
+      save: (runId, messages) => {
+        threadStore().saveTranscript(runId, messages);
+      },
+      read: (runId) => threadStore().transcript(runId),
+    },
     logger: options.logger ?? console,
   };
 
@@ -314,13 +333,6 @@ export function createAi(options: CreateAiOptions): Ai {
     accepted:
       approvals.answer({ requestId: `${runId}:${callId}`, approved: approve }) === 'accepted',
   }));
-
-  // Opened on the first conversation route and not before: an application
-  // whose user never opens the panel should not find a database in its data
-  // directory, and `createAi` is built unconditionally by every application
-  // that offers AI at all.
-  let threads: ThreadStore | null = null;
-  const threadStore = (): ThreadStore => (threads ??= openThreads(options.dataDir));
 
   host.operation('ai.threadsList', () => ({ threads: threadStore().list() }));
   host.operation('ai.threadsCreate', (input) => threadStore().create(input));
@@ -400,7 +412,7 @@ export function createAi(options: CreateAiOptions): Ai {
             runId: turn.runId,
             message: turn.message,
             refs: [],
-            history: [],
+            history: turn.history === undefined ? [] : [...turn.history],
             ...(turn.modelId === undefined ? {} : { modelId: turn.modelId }),
           },
           sink,

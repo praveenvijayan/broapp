@@ -22,6 +22,13 @@ import { IMAGE_LIMITS, prepareImage } from './images.ts';
 /** Per-message metadata this transport writes. */
 export interface BroappMessageMetadata {
   readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
+  /**
+   * The run that wrote this message. Sent back on the assistant turn in
+   * `history`, so the host can give the model that run's own tool calls and
+   * results instead of the text alone. It names a transcript the host wrote;
+   * nothing this browser stored is ever read into a prompt.
+   */
+  readonly runId?: string;
 }
 
 export type BroappUIMessage = UIMessage<BroappMessageMetadata>;
@@ -93,7 +100,8 @@ function filesOf(message: BroappUIMessage): FileUIPart[] {
  * turn's attachments with that turn, and a transcript of base64 would blow the
  * contract's 20,000-character bound apart. Tool, reasoning and data parts are
  * left out for the same reason `toHistory` in `use-ai-chat.ts` leaves them
- * out: the host rebuilds its own tool transcript from the run.
+ * out: the host keeps its own transcript of the run, and an assistant turn
+ * names that run so the host can use it.
  */
 function toHistory(messages: readonly BroappUIMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = [];
@@ -112,7 +120,8 @@ function toHistory(messages: readonly BroappUIMessage[]): ChatTurn[] {
     // An assistant message with nothing in it is a turn that never happened —
     // one that errored, or was cancelled before its first token.
     if (message.role === 'assistant' && content === '') continue;
-    turns.push({ role: message.role, content });
+    const runId = message.role === 'assistant' ? message.metadata?.runId : undefined;
+    turns.push(runId === undefined ? { role: message.role, content } : { role: message.role, content, runId });
   }
   return turns.slice(-MAX_HISTORY);
 }
@@ -189,6 +198,7 @@ export function createBroappChatTransport(
       running = turn;
 
       let texts = 0;
+      let named = false;
       let openText: string | null = null;
       let sink: ReadableStreamDefaultController<UIMessageChunk> | null = null;
       let subscription: { cancel(): void } | null = null;
@@ -208,6 +218,18 @@ export function createBroappChatTransport(
           // The reader let go first. Nothing to say to a stream nobody reads.
           closed = true;
         }
+      };
+      /**
+       * Put the run id on the message as soon as it has something in it.
+       *
+       * Also written with `usage`; this earlier copy is for a turn that is
+       * stopped before `usage` arrives, which is the turn a "continue" follows.
+       * The SDK merges metadata chunks, so writing it twice is harmless.
+       */
+      const nameRun = (): void => {
+        if (named) return;
+        named = true;
+        emit({ type: 'message-metadata', messageMetadata: { runId: id } });
       };
       const endText = (): void => {
         if (openText === null) return;
@@ -254,6 +276,7 @@ export function createBroappChatTransport(
               openText = `${id}-t${String(texts)}`;
               texts += 1;
               emit({ type: 'text-start', id: openText });
+              nameRun();
             }
             emit({ type: 'text-delta', id: openText, delta: event.text ?? '' });
             break;
@@ -267,6 +290,7 @@ export function createBroappChatTransport(
             const tool = event.tool ?? '';
             calls.set(callId, { callId, tool, input: event.input });
             emit({ type: 'tool-input-start', toolCallId: callId, toolName: tool });
+            nameRun();
             emit({
               type: 'tool-input-available',
               toolCallId: callId,
@@ -344,6 +368,7 @@ export function createBroappChatTransport(
             emit({
               type: 'message-metadata',
               messageMetadata: {
+                runId: id,
                 usage: {
                   inputTokens: event.inputTokens ?? 0,
                   outputTokens: event.outputTokens ?? 0,

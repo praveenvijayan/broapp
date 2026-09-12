@@ -53,6 +53,9 @@ const settings = s.object({
 const chatTurn = s.object({
   role: s.enum(['user', 'assistant']),
   content: s.string({ max: 20_000 }),
+  // Names a run whose transcript the host wrote. It only ever selects
+  // something the host already holds; an id it does not hold is ignored.
+  runId: s.optional(runId),
 });
 
 /**

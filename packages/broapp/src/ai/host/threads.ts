@@ -14,6 +14,10 @@ import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+import type { AssistantModelMessage, ToolModelMessage } from 'ai';
+
+import type { HostLogger } from '../../host/app.ts';
+import { canonicalJson } from '../../host/gate.ts';
 import { publicError } from '../../shared/errors.ts';
 import type { StoredMessage, Thread } from '../shared/types.ts';
 
@@ -58,7 +62,39 @@ const MIGRATIONS: readonly string[] = [
         OR (earlier.updated_at = threads.updated_at AND earlier.rowid <= threads.rowid)
    );
    CREATE INDEX threads_seq ON threads (seq DESC);`,
+  /*
+   * What the model itself saw and did on each turn, by run id.
+   *
+   * Written by the host from the AI SDK's own response messages, never from
+   * anything a browser saved: a history turn that names a run gets these back
+   * in place of its text. Not tied to a thread, because the host does not know
+   * which conversation a run belongs to; the age and count caps are the bound.
+   */
+  `CREATE TABLE transcripts (
+     run_id     TEXT    PRIMARY KEY,
+     messages   TEXT    NOT NULL,
+     chars      INTEGER NOT NULL,
+     created_at INTEGER NOT NULL
+   );
+   CREATE INDEX transcripts_created_at ON transcripts (created_at);`,
 ];
+
+/**
+ * One message a turn produced: what `StreamTextResult.responseMessages` holds.
+ *
+ * `ai` declares `ResponseMessage` as exactly this union but does not export the
+ * name, so it is spelled out here from the two types it does export.
+ */
+export type ResponseMessage = AssistantModelMessage | ToolModelMessage;
+
+/** The most characters one transcript may be; a longer turn stays text. */
+export const MAX_TRANSCRIPT_CHARS = 200_000;
+
+/** How long a transcript is kept. */
+const TRANSCRIPT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** How many transcripts are kept, newest first. */
+const TRANSCRIPT_MAX_COUNT = 2_000;
 
 /** What a conversation is called until it has been named. */
 export const DEFAULT_THREAD_TITLE = 'New conversation';
@@ -100,7 +136,102 @@ export interface ThreadStore {
   remove(id: string): boolean;
   /** Every conversation. Returns how many were deleted. */
   clear(): number;
+  /**
+   * Keep one turn's response messages under its run id.
+   *
+   * Unpaired tool calls are removed first, provider metadata is dropped, and a
+   * transcript over {@link MAX_TRANSCRIPT_CHARS} is not written. Returns whether
+   * a row was written. Throws when the store cannot write.
+   */
+  saveTranscript(runId: string, messages: readonly ResponseMessage[]): boolean;
+  /** A transcript this store wrote, or null when it holds none that reads back whole. */
+  transcript(runId: string): readonly ResponseMessage[] | null;
+  /** Delete transcripts older than 30 days or beyond the newest 2,000. Returns how many went. */
+  retainTranscripts(): number;
   close(): void;
+}
+
+/** Options for {@link openThreads}. */
+export interface OpenThreadsOptions {
+  /** Where an oversized or unreadable transcript is reported. Default `console`. */
+  readonly logger?: HostLogger;
+}
+
+/** A plain object, for reading a stored or SDK-given value without trusting its type. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** A copy of an object without the provider's own fields, which no later prompt needs. */
+function withoutProviderFields(value: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, member] of Object.entries(value)) {
+    if (key === 'providerOptions' || key === 'providerMetadata' || key === 'providerExecuted') continue;
+    out[key] = member;
+  }
+  return out;
+}
+
+/**
+ * A turn's response messages as they are kept.
+ *
+ * Two edits and nothing else. A tool call with no result — a turn stopped while
+ * the tool ran — is removed, because a provider refuses a prompt that has a call
+ * without its answer; a message that edit leaves empty goes with it. Provider
+ * metadata is dropped at the message, part and output level: it belongs to the
+ * request it came from, and tool inputs and outputs are left exactly as given.
+ */
+export function transcriptForStorage(messages: readonly ResponseMessage[]): ResponseMessage[] {
+  const answered = new Set<string>();
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content as readonly unknown[]) {
+      if (isRecord(part) && part['type'] === 'tool-result' && typeof part['toolCallId'] === 'string') {
+        answered.add(part['toolCallId']);
+      }
+    }
+  }
+  const out: ResponseMessage[] = [];
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) {
+      out.push(withoutProviderFields(message as unknown as Record<string, unknown>) as unknown as ResponseMessage);
+      continue;
+    }
+    const content: unknown[] = [];
+    for (const part of message.content as readonly unknown[]) {
+      if (!isRecord(part)) continue;
+      if (part['type'] === 'tool-call' && !answered.has(String(part['toolCallId']))) continue;
+      const kept = withoutProviderFields(part);
+      if (isRecord(kept['output'])) kept['output'] = withoutProviderFields(kept['output']);
+      content.push(kept);
+    }
+    if (content.length === 0) continue;
+    out.push({ ...withoutProviderFields(message as unknown as Record<string, unknown>), content } as unknown as ResponseMessage);
+  }
+  return out;
+}
+
+/**
+ * Whether a stored value reads back as response messages.
+ *
+ * The row was written by this process, but a file can be edited or damaged, and
+ * what comes back goes into a prompt. Only an assistant or tool message with a
+ * string or an array of typed parts passes; a `system` role never does.
+ */
+function isTranscript(value: unknown): value is ResponseMessage[] {
+  if (!Array.isArray(value)) return false;
+  return value.every((message) => {
+    if (!isRecord(message)) return false;
+    const role = message['role'];
+    const content = message['content'];
+    if (role === 'assistant') {
+      return typeof content === 'string' || (Array.isArray(content) && content.every((part) => isRecord(part) && typeof part['type'] === 'string'));
+    }
+    if (role === 'tool') {
+      return Array.isArray(content) && content.every((part) => isRecord(part) && typeof part['type'] === 'string');
+    }
+    return false;
+  });
 }
 
 /** A row of `threads`, joined with its message count. */
@@ -181,7 +312,8 @@ function derivedTitle(messages: readonly StoredMessage[]): string | null {
 }
 
 /** Open the conversation store for one data directory, migrating it as needed. */
-export function openThreads(dataDir: string): ThreadStore {
+export function openThreads(dataDir: string, options: OpenThreadsOptions = {}): ThreadStore {
+  const logger = options.logger ?? console;
   const directory = join(dataDir, 'ai');
   // The same mode the settings store uses: this directory holds what somebody
   // wrote to their assistant, which is nobody else's business.
@@ -235,7 +367,31 @@ export function openThreads(dataDir: string): ThreadStore {
     remove: db.query<{ id: string }, [string]>('DELETE FROM threads WHERE id = ? RETURNING id'),
     count: db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM threads'),
     clear: db.query<unknown, []>('DELETE FROM threads'),
+    saveTranscript: db.query<unknown, [string, string, number, number]>(
+      `INSERT INTO transcripts (run_id, messages, chars, created_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (run_id) DO UPDATE SET messages = excluded.messages, chars = excluded.chars,
+         created_at = excluded.created_at`,
+    ),
+    transcript: db.query<{ messages: string }, [string]>('SELECT messages FROM transcripts WHERE run_id = ?'),
+    expireTranscripts: db.query<{ run_id: string }, [number]>(
+      'DELETE FROM transcripts WHERE created_at < ? RETURNING run_id',
+    ),
+    capTranscripts: db.query<{ run_id: string }, [number]>(
+      `DELETE FROM transcripts WHERE rowid NOT IN (
+         SELECT rowid FROM transcripts ORDER BY created_at DESC, rowid DESC LIMIT ?
+       ) RETURNING run_id`,
+    ),
   };
+
+  /** One unreadable transcript is reported once, not on every turn that names it. */
+  const reported = new Set<string>();
+
+  /** Both caps, in one transaction, so a crash never leaves one applied without the other. */
+  const retain = (): number =>
+    db.transaction(() => {
+      const expired = statements.expireTranscripts.all(Date.now() - TRANSCRIPT_MAX_AGE_MS).length;
+      return expired + statements.capTranscripts.all(TRANSCRIPT_MAX_COUNT).length;
+    })();
 
   /** The row, or the sentence a browser shows when a conversation is gone. */
   function mustGet(id: string): ThreadRow {
@@ -243,6 +399,10 @@ export function openThreads(dataDir: string): ThreadStore {
     if (row === null) throw publicError.notFound('That conversation is gone.');
     return row;
   }
+
+  // Retention runs on open as well as on every save, so a store that is only
+  // read still sheds what has aged out.
+  retain();
 
   const store: ThreadStore = {
     path,
@@ -317,6 +477,43 @@ export function openThreads(dataDir: string): ThreadStore {
       statements.clear.run();
       return before;
     },
+
+    saveTranscript(runId, messages) {
+      const kept = transcriptForStorage(messages);
+      const json = canonicalJson(kept);
+      if (json.length > MAX_TRANSCRIPT_CHARS) {
+        logger.warn(
+          `[broapp] ai transcript for run ${runId} is ${String(json.length)} characters, over ${String(MAX_TRANSCRIPT_CHARS)}; the turn stays text`,
+        );
+        return false;
+      }
+      db.transaction(() => {
+        statements.saveTranscript.run(runId, json, json.length, Date.now());
+        retain();
+      })();
+      return true;
+    },
+
+    transcript(runId) {
+      const row = statements.transcript.get(runId);
+      if (row === null) return null;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(row.messages);
+      } catch {
+        parsed = undefined;
+      }
+      if (!isTranscript(parsed) || row.messages.length > MAX_TRANSCRIPT_CHARS) {
+        if (!reported.has(runId)) {
+          reported.add(runId);
+          logger.warn(`[broapp] ai transcript for run ${runId} does not read back as messages; the turn stays text`);
+        }
+        return null;
+      }
+      return parsed;
+    },
+
+    retainTranscripts: retain,
 
     close() {
       // Checkpointing folds the WAL back into the main file, so what is left

@@ -51,8 +51,27 @@ export {
 } from './replay.ts';
 export type { ReplayCommandOptions, ReplayManifest, ReplayOptions, ReplayResult } from './replay.ts';
 
-export { CONDITIONS, EVALUATION_TASKS, evaluate, evaluationTable, runEvaluateCommand } from './evaluate.ts';
-export type { Condition, EvaluateCommandOptions, EvaluateOptions, EvaluationRow, EvaluationTask } from './evaluate.ts';
+export {
+  CONDITIONS,
+  CONTINUE_MESSAGE,
+  EVALUATION_TASKS,
+  evaluate,
+  evaluationTable,
+  HISTORY_MODES,
+  RESTART_CONDITION,
+  runEvaluateCommand,
+  TOUCHED_FILE,
+  twoTurnColumns,
+} from './evaluate.ts';
+export type {
+  Condition,
+  EvaluateCommandOptions,
+  EvaluateOptions,
+  EvaluationRow,
+  EvaluationTask,
+  HistoryMode,
+  TwoTurnColumns,
+} from './evaluate.ts';
 
 export { duration, replayTable, verdictOf } from './verdict.ts';
 export type { ReplayRow, Verdict } from './verdict.ts';

@@ -21,6 +21,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, symlinkSync } from 'node
 import { join } from 'node:path';
 
 import type { LanguageModel } from 'ai';
+import type { ChatTurn } from 'broapp/ai';
 import type { ChatEvent, ProviderAdapter } from 'broapp/ai/host';
 import type { HostLogger } from 'broapp/host';
 
@@ -48,6 +49,10 @@ export interface RunLabel {
   readonly label: string;
   readonly appId: string;
   readonly n: number;
+  /** In a two-turn evaluation run: which turn the tab is opened for (a restart opens one per turn), and how history is given. */
+  readonly turn?: 1 | 2;
+  readonly history?: 'text' | 'structured';
+  readonly restart?: boolean;
 }
 
 /** The providers a run's tab is built with: the same for every run, or chosen per run. */
@@ -155,6 +160,20 @@ export interface TurnOutcome {
   readonly approvals: number;
   readonly calls: readonly ToolCall[];
   readonly tokens: { readonly input: number; readonly output: number };
+  /** Everything the model said, in order: what a browser would put in history. */
+  readonly text: string;
+  /** `stopAfter` ended it. */
+  readonly stopped: boolean;
+}
+
+/** How one turn is shaped beyond its message. */
+export interface TurnOptions {
+  /**
+   * Stop the turn as soon as a call that satisfies this has its result, as a
+   * person pressing stop would. The evaluation's two-turn tasks use it to end
+   * the first turn at its first edit.
+   */
+  readonly stopAfter?: (call: ToolCall) => boolean;
 }
 
 /** What {@link openRun} needs. */
@@ -179,8 +198,19 @@ export interface OpenRunOptions {
 export interface RunHandle {
   readonly layout: Layout;
   readonly appId: string;
-  /** One turn, ended by its own finish or by `timeoutMs`. */
-  turn(runId: string, message: string, timeoutMs: number): Promise<TurnOutcome>;
+  /**
+   * One turn, ended by its own finish, by `timeoutMs`, or by `options.stopAfter`.
+   *
+   * `history` goes to the model as a browser's would; an assistant turn naming
+   * a run this launcher's AI layer kept a transcript for is expanded the same way.
+   */
+  turn(
+    runId: string,
+    message: string,
+    timeoutMs: number,
+    history?: readonly ChatTurn[],
+    options?: TurnOptions,
+  ): Promise<TurnOutcome>;
   build(): Promise<BuildCandidateResult>;
   /** Start a release on the run's data and run examples; `childDied` when the preview did not survive them. */
   check(
@@ -249,23 +279,31 @@ export function openRun(options: OpenRunOptions): RunHandle {
     layout,
     appId,
 
-    async turn(runId, message, timeoutMs) {
+    async turn(runId, message, timeoutMs, history, turnOptions) {
       const started = Date.now();
       const limit = AbortSignal.timeout(timeoutMs);
-      const callStarted = new Map<string, number>();
+      const stop = new AbortController();
+      const callStarted = new Map<string, { tool: string; input: unknown; at: number }>();
       let toolMs = 0;
       let approvals = 0;
+      const stopAfter = turnOptions?.stopAfter;
       const result = await tab.ai.turn(
-        { runId, message },
+        { runId, message, ...(history === undefined ? {} : { history }) },
         {
           answer: ({ tool }) => RUN_APPROVES.has(tool),
-          signal: limit,
+          signal: AbortSignal.any([limit, stop.signal]),
           onEvent: (event) => {
-            if (event.type === 'tool-call') callStarted.set(event.callId ?? '', Date.now());
-            else if (event.type === 'confirm') approvals += 1;
+            if (event.type === 'tool-call') {
+              callStarted.set(event.callId ?? '', { tool: event.tool ?? '', input: event.input, at: Date.now() });
+            } else if (event.type === 'confirm') approvals += 1;
             else if (event.type === 'tool-result') {
-              const at = callStarted.get(event.callId ?? '');
-              if (at !== undefined) toolMs += Date.now() - at;
+              const call = callStarted.get(event.callId ?? '');
+              if (call !== undefined) toolMs += Date.now() - call.at;
+              // The result is in, so the transcript has the call whole: stopping
+              // here is stopping after it, never in the middle of it.
+              if (call !== undefined && stopAfter?.({ tool: call.tool, input: call.input, output: event.output }) === true) {
+                stop.abort(new Error('the turn reached the point it was to stop at'));
+              }
             }
           },
         },
@@ -279,6 +317,8 @@ export function openRun(options: OpenRunOptions): RunHandle {
         approvals,
         calls: callsOf(result.events),
         tokens: tokensOf(result.events),
+        text: result.events.map((event) => (event.type === 'text' ? (event.text ?? '') : '')).join(''),
+        stopped: stop.signal.aborted && !limit.aborted,
       };
     },
 
