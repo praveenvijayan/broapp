@@ -22,6 +22,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 
@@ -343,6 +344,28 @@ describe('createApplication', () => {
     const rows = listApps(where.root, where.supervisor, where.journal);
     expect(rows.map((row) => [row.appId, row.name])).toEqual([['recipes', 'Recipe tracker']]);
     expect(rows[0]?.currentRelease).toBe(created.releaseId);
+  }, 120_000);
+
+  test('lists only directories named like applications, so a stray .DS_Store changes nothing', async () => {
+    const where = makeWorld();
+    const created = await createApplication({
+      layout: where.root,
+      templates: TEMPLATES,
+      versions: STARTER_VERSIONS,
+      appId: 'recipes',
+      name: 'Recipe tracker',
+      description: 'What to cook',
+      install: installedOk,
+      initGit: noGit,
+      logger: quiet,
+    });
+    expect(created.ok).toBe(true);
+    // Finder writes one into any directory a person opens; it once made every
+    // apps.list fail and took the engineer's orientation documents with it.
+    writeFileSync(join(where.root.root, 'apps', '.DS_Store'), 'finder was here');
+    mkdirSync(join(where.root.root, 'apps', 'Not An Id'), { recursive: true });
+    const rows = listApps(where.root, where.supervisor, where.journal);
+    expect(rows.map((row) => row.appId)).toEqual(['recipes']);
   }, 120_000);
 
   test('refuses a bad id without making anything', async () => {

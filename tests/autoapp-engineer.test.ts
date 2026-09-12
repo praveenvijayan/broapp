@@ -138,6 +138,9 @@ function makeWorld(options: { mode?: 'live' | 'preview' } = {}): World {
     logger: quiet,
     templates: TEMPLATES,
     versions: STARTER_VERSIONS,
+    // The same window the gate above has, so a question nobody answers is
+    // reported as expired rather than declined.
+    confirmTimeoutMs: 5_000,
     // Nothing in this file creates an application, and nothing in it may reach
     // a registry or somebody's git configuration.
     install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
@@ -595,6 +598,17 @@ describe.skipIf(!available)('the tools', () => {
         { approve: false },
       ),
     ).rejects.toThrow(/rejected|not approved/);
+    expect(readFileSync(join(app.source, 'autoapp.json'), 'utf8')).toBe(before);
+
+    // A question nobody answers expires, and the engineer is told that,
+    // not that the person declined.
+    await expect(
+      callTool(where, 'source.change', {
+        appId: 'items',
+        message: 'break it later',
+        changes: [{ path: 'autoapp.json', content: '{}' }],
+      }),
+    ).rejects.toThrow(/was not answered within 5 seconds; nobody declined it/);
     expect(readFileSync(join(app.source, 'autoapp.json'), 'utf8')).toBe(before);
 
     // Approved, it goes through.

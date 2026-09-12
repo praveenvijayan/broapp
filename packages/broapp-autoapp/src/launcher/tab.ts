@@ -230,6 +230,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       logger,
       templates: options.templates,
       versions: options.versions,
+      confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
       ...(options.install === undefined ? {} : { install: options.install }),
       ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
       session,

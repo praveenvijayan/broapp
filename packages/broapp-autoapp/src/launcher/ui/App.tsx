@@ -126,11 +126,20 @@ export function App(): React.ReactElement {
   // renames itself while any are, because a question that arrives after ten
   // minutes of a model thinking arrives at a tab nobody is looking at.
   const waiting = useRef(0);
+  // The same count as state, for the strip above the conversation. A renamed
+  // tab reaches somebody who is elsewhere; the strip reaches somebody who is
+  // here and has scrolled away from the card. On 2026-09-12 a card waited the
+  // whole ten minutes unseen and the work of a forty-minute turn went with it.
+  const [pending, setPending] = useState(0);
   const onAwaiting = useCallback((pending: number): void => {
+    setPending(pending);
     const surface = browserSurface();
     if (surface === null) return;
     announcePending(surface, pending, waiting.current);
     waiting.current = pending;
+  }, []);
+  const showQuestion = useCallback((): void => {
+    document.querySelector('.broapp-chat__confirm')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, []);
   // What the chat's own header reaches the conversation through.
   const controls = useRef<BroappChatControls | null>(null);
@@ -404,6 +413,11 @@ export function App(): React.ReactElement {
                 value={active?.modelId ?? null}
               />
               <span className="launcher__spacer" />
+              {pending > 0 ? (
+                <button className="launcher__waiting" onClick={showQuestion} type="button">
+                  {pending === 1 ? 'Waiting for your answer' : `${String(pending)} questions waiting`} · show
+                </button>
+              ) : null}
               <span
                 className={`launcher__status launcher__status--${connection.phase}`}
                 role="status"

@@ -79,6 +79,11 @@ export interface EngineerToolsOptions {
   readonly knowledge?: EngineerKnowledge;
   /** Where the application the engineer is working on is remembered for the next turn. */
   readonly session?: Session;
+  /**
+   * The gate's confirm window. A gated call that fails as `rejected` after at
+   * least this long was not declined: nobody answered, and the result says so.
+   */
+  readonly confirmTimeoutMs?: number;
 }
 
 /** What the tab knows about one live turn, for the case a failure in it opens. */
@@ -184,6 +189,50 @@ export function locateProblem(sourceDir: string, problem: BuildProblem): Problem
 /** Whether a gated call failed because nobody allowed it. */
 function wasDeclined(cause: unknown): boolean {
   return isPublicError(cause) && cause.code === 'rejected';
+}
+
+/** The marker {@link unanswered} puts in its message, and the cycle reads back. */
+const UNANSWERED = 'was not answered within';
+
+/** Whether a gated call failed because the question expired, not because somebody said no. */
+function wasUnanswered(cause: unknown): boolean {
+  return isPublicError(cause) && cause.code === 'rejected' && cause.message.includes(UNANSWERED);
+}
+
+/** What a tool says when its question expired. */
+function unanswered(tool: string, confirmTimeoutMs: number): string {
+  const minutes = Math.round(confirmTimeoutMs / 60_000);
+  const window = minutes >= 1 ? `${String(minutes)} minute${minutes === 1 ? '' : 's'}` : `${String(Math.round(confirmTimeoutMs / 1_000))} seconds`;
+  return `${tool} ${UNANSWERED} ${window}; nobody declined it. Say that the question expired, and offer to run the same step again.`;
+}
+
+/**
+ * Tell an expired question from a declined one.
+ *
+ * The gate reports both as "was not approved": to it, silence is a no. To the
+ * person it is not the same thing. On 2026-09-12 a cycle waited the whole ten
+ * minutes at a card nobody saw, and the engineer then told the person they
+ * had declined it. A `rejected` that arrives no sooner than the confirm
+ * window is the deadline, and is reported as one.
+ */
+function tellingExpiry(tools: Record<string, GuardedTool>, confirmTimeoutMs: number): void {
+  for (const [name, tool] of Object.entries(tools)) {
+    const inner = tool.execute;
+    tools[name] = {
+      ...tool,
+      execute: async (input, envelope, signal) => {
+        const started = Date.now();
+        try {
+          return await inner(input, envelope, signal);
+        } catch (cause) {
+          if (wasDeclined(cause) && !wasUnanswered(cause) && Date.now() - started >= confirmTimeoutMs) {
+            throw publicError.rejected(unanswered(name, confirmTimeoutMs));
+          }
+          throw cause;
+        }
+      },
+    };
+  }
 }
 
 /**
@@ -1125,23 +1174,33 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
 
       /** One of this call's own steps, as the existing tool, under its own request id. */
       const step = (name: string): Envelope => ({ ...envelope, requestId: `${envelope.requestId}.${name}` });
-      const run = async (tool: string, stepName: string, toolInput: unknown): Promise<{ declined: true } | { output: unknown }> => {
+      const run = async (
+        tool: string,
+        stepName: string,
+        toolInput: unknown,
+      ): Promise<{ declined: true; expired?: true } | { output: unknown }> => {
         const definition = tools[tool];
         if (definition === undefined) throw new TypeError(`no tool named ${tool}`);
         try {
           return { output: await definition.execute(toolInput, step(stepName), signal) };
         } catch (cause) {
+          if (wasUnanswered(cause)) return { declined: true, expired: true };
           if (wasDeclined(cause)) return { declined: true };
           throw cause;
         }
       };
+      /** What to say when a step's question was declined, or merely expired. */
+      const notAllowed = (what: string, outcome: { expired?: true }, declined: string): string =>
+        outcome.expired === true
+          ? `Nobody answered the question about the ${what} before it expired; it was not declined. Say so, and run the same cycle again when the person is back.`
+          : declined;
 
       // 2. The build.
       const built = await run('candidate.build', 'build', { appId });
       if ('declined' in built) {
-        const next = 'The person declined the build. Ask what they want changed before another cycle.';
+        const next = notAllowed('build', built, 'The person declined the build. Ask what they want changed before another cycle.');
         progress({ step: 'build-declined', releaseId: null, ...carried, next });
-        return { applied, build: { declined: true }, next };
+        return { applied, build: { declined: true, ...(built.expired === true ? { expired: true } : {}) }, next };
       }
       const build = built.output as
         | { ok: true; releaseId: string; schemaVersion: number }
@@ -1187,9 +1246,14 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       // 3. The preview, on a fresh copy of the data.
       const previewed = await run('candidate.preview', 'preview', { appId, releaseId: build.releaseId });
       if ('declined' in previewed) {
-        const next = 'The build passed and the person declined the preview. Ask them before trying again.';
+        const next = notAllowed('preview', previewed, 'The build passed and the person declined the preview. Ask them before trying again.');
         progress({ step: 'preview-declined', releaseId: build.releaseId, failures: [], attempts: 0, next });
-        return { applied, build: { ok: true, releaseId: build.releaseId }, preview: { declined: true }, next };
+        return {
+          applied,
+          build: { ok: true, releaseId: build.releaseId },
+          preview: { declined: true, ...(previewed.expired === true ? { expired: true } : {}) },
+          next,
+        };
       }
       progress({
         step: 'previewed',
@@ -1365,6 +1429,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     },
   });
 
+  if (options.confirmTimeoutMs !== undefined) tellingExpiry(tools, options.confirmTimeoutMs);
   return tools;
 }
 

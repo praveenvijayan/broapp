@@ -12,7 +12,7 @@
  */
 import { readdirSync } from 'node:fs';
 
-import { readCurrent, readRelease, type Layout } from '../spec/index.ts';
+import { APP_ID_PATTERN, readCurrent, readRelease, type Layout } from '../spec/index.ts';
 
 import type { Journal } from './journal.ts';
 import type { ChildHandle, Supervisor } from './supervisor.ts';
@@ -28,10 +28,21 @@ export interface AppRow {
   readonly activationPending: boolean;
 }
 
-/** Every application that has a directory under the root. */
+/**
+ * Every application that has a directory under the root.
+ *
+ * Only directories whose names are application ids. Finder writes `.DS_Store`
+ * into any directory a person opens, and on 2026-09-12 that one file made
+ * `apps.list` fail on every call and the engineer's orientation documents
+ * fail with it, because the layout refused the name as an id. What is not an
+ * application is not listed, and never was one.
+ */
 export function appIds(root: Layout): readonly string[] {
   try {
-    return readdirSync(`${root.root}/apps`).sort();
+    return readdirSync(`${root.root}/apps`, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && APP_ID_PATTERN.test(entry.name))
+      .map((entry) => entry.name)
+      .sort();
   } catch {
     return [];
   }

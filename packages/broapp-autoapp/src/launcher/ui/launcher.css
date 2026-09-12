@@ -412,6 +412,32 @@ body {
   font-size: 0.8rem;
 }
 
+/* The engineer is waiting for an answer; the click scrolls to the card. */
+.launcher__waiting {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--launcher-warn-text);
+  border-radius: 999px;
+  background: var(--launcher-warn-surface);
+  color: var(--launcher-warn-text);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  animation: launcher-waiting 1.6s ease-in-out infinite;
+}
+
+@keyframes launcher-waiting {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launcher__waiting {
+    animation: none;
+  }
+}
+
 .launcher__status--connecting,
 .launcher__status--reconnecting {
   background: var(--launcher-warn-surface);
