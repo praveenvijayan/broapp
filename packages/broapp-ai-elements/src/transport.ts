@@ -143,6 +143,12 @@ interface Call {
   readonly input: unknown;
   /** Set once a `confirm` arrived, so the response chunk can name the same id. */
   approvalId?: string;
+  /**
+   * For a question about one of a call's own steps (`<callId>.build`): the
+   * call whose card carries it. The SDK knows only the calls it was told
+   * about, and throws on an approval for any other id.
+   */
+  parent?: string;
 }
 
 export function createBroappChatTransport(
@@ -156,6 +162,10 @@ export function createBroappChatTransport(
   let calls = new Map<string, Call>();
   /** The calls waiting for a person, by call id. */
   let awaiting = new Set<string>();
+  /** The step each call is waiting on, by the call's id, while one is. */
+  let steps = new Map<string, string>();
+  /** The running turn's chunk writer, for an answer given outside the stream. */
+  let liveEmit: ((chunk: UIMessageChunk) => void) | null = null;
 
   const transport: BroappChatTransport = {
     get active() {
@@ -189,6 +199,7 @@ export function createBroappChatTransport(
       runId = id;
       calls = new Map();
       awaiting = new Set();
+      steps = new Map();
       const refs = [...(options.refs?.() ?? [])];
       const modelId = options.modelId?.() ?? null;
       // The turn owns `running` from here, before the subscription is open:
@@ -219,6 +230,7 @@ export function createBroappChatTransport(
           closed = true;
         }
       };
+      liveEmit = emit;
       /**
        * Put the run id on the message as soon as it has something in it.
        *
@@ -246,6 +258,7 @@ export function createBroappChatTransport(
         if (closed) return;
         closed = true;
         if (running === turn) running = null;
+        if (liveEmit === emit) liveEmit = null;
         try {
           sink?.close();
         } catch {
@@ -301,7 +314,14 @@ export function createBroappChatTransport(
           }
           case 'confirm': {
             const callId = event.callId ?? '';
-            const started = calls.get(callId);
+            // A question about one of a call's own steps — the launcher's
+            // `candidate.cycle` asks for its build and its preview as
+            // `<callId>.build` and `<callId>.preview` — goes on the parent's
+            // card. The SDK throws on an approval for a call it was never told
+            // about, which cancelled the whole turn the moment the step asked.
+            const dot = callId.indexOf('.');
+            const parent = dot > 0 && calls.has(callId.slice(0, dot)) ? callId.slice(0, dot) : null;
+            const started = calls.get(callId) ?? (parent === null ? undefined : calls.get(parent));
             const tool = event.tool ?? started?.tool ?? '';
             // The request id names what the gate is waiting on; falling back to
             // the call id keeps request and response agreeing, which is how the
@@ -310,10 +330,19 @@ export function createBroappChatTransport(
             calls.set(callId, {
               callId,
               tool,
-              input: started?.input ?? event.input,
+              input: parent === null ? (started?.input ?? event.input) : event.input,
               approvalId,
+              ...(parent === null ? {} : { parent }),
             });
             awaiting.add(callId);
+            if (parent !== null) {
+              steps.set(parent, callId);
+              // The card now carries the step's question, and the SDK finds a
+              // card by its latest approval id: the call's own response, sent
+              // with its result, has to name this one.
+              const own = calls.get(parent);
+              if (own !== undefined) calls.set(parent, { ...own, approvalId });
+            }
             const descriptor: BroappApprovalDescriptor = {
               tool,
               ...(event.expiresAt === undefined ? {} : { expiresAt: event.expiresAt }),
@@ -321,7 +350,7 @@ export function createBroappChatTransport(
             emit({
               type: 'tool-approval-request',
               approvalId,
-              toolCallId: callId,
+              toolCallId: parent ?? callId,
               reason: `Allow ${tool}?`,
               approvalDescriptor: descriptor,
             });
@@ -332,15 +361,24 @@ export function createBroappChatTransport(
             const callId = event.callId ?? '';
             const started = calls.get(callId);
             const denied = event.denied === true;
-            if (awaiting.has(callId)) {
+            // A step's question that was never answered — it expired, and the
+            // call carried on without it — ends with the call.
+            const step = steps.get(callId);
+            if (step !== undefined) {
+              steps.delete(callId);
+              awaiting.delete(step);
+            }
+            // A call that was asked about gets its response chunk here, with
+            // its result, whether the person answered or the question expired;
+            // the SDK wants the response before the output.
+            if (started?.approvalId !== undefined && started.parent === undefined) {
               emit({
                 type: 'tool-approval-response',
-                approvalId: started?.approvalId ?? callId,
+                approvalId: started.approvalId,
                 approved: !denied,
               });
-              awaiting.delete(callId);
-              options.onAwaiting?.(awaiting.size);
             }
+            if (awaiting.delete(callId) || step !== undefined) options.onAwaiting?.(awaiting.size);
             emit(
               denied
                 ? { type: 'tool-output-denied', toolCallId: callId }
@@ -484,14 +522,27 @@ export function createBroappChatTransport(
     },
 
     async confirm(callId: string, approve: boolean): Promise<void> {
-      if (running === null || !awaiting.has(callId)) {
+      // The card answers with its own call id; when the question is about
+      // one of that call's steps, the step is what the host is waiting on.
+      const asked = awaiting.has(callId) ? callId : steps.get(callId);
+      if (running === null || asked === undefined) {
         throw new Error('That request has expired.');
       }
       const client = await options.client();
-      const result = await client.call('ai.chatConfirm', { runId, callId, approve });
+      const result = await client.call('ai.chatConfirm', { runId, callId: asked, approve });
       // Nobody was waiting: the turn timed out or was cancelled while the
       // question was on screen.
       if (!result.accepted) throw new Error('That request has expired.');
+      // Answered: nobody is waiting on it now, whatever the tool does next.
+      awaiting.delete(asked);
+      if (asked !== callId) {
+        // A step has no result event of its own: the call's card goes back
+        // to running here, and its next question or its result moves it on.
+        steps.delete(callId);
+        const approvalId = calls.get(asked)?.approvalId ?? asked;
+        liveEmit?.({ type: 'tool-approval-response', approvalId, approved: approve });
+      }
+      options.onAwaiting?.(awaiting.size);
     },
 
     cancel(): void {

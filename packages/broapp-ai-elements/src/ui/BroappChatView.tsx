@@ -257,7 +257,9 @@ function Parts({
                 callId={part.toolCallId}
                 now={now}
                 onConfirm={onConfirm}
-                tool={tool}
+                // The descriptor names what is being asked about, which for a
+                // step of a call is the step, not the call.
+                tool={descriptor?.tool ?? tool}
                 {...(descriptor?.expiresAt === undefined ? {} : { expiresAt: descriptor.expiresAt })}
               />
             ) : null}

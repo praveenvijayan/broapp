@@ -15,10 +15,10 @@ import { join } from 'node:path';
 import { readUIMessageStream } from 'ai';
 import type { UIMessageChunk } from 'ai';
 import { aiContract } from 'broapp/ai';
-import { createAi, createFakeAdapter, fromContract } from 'broapp/ai/host';
+import { createAi, createFakeAdapter, fromContract, guardedTool } from 'broapp/ai/host';
 import type { Ai, FakeAdapter, FakeStep } from 'broapp/ai/host';
 import type { AiClient, ToolCallState } from 'broapp/ai/react';
-import { createHostApp, publicError } from 'broapp/host';
+import { createGate, createHostApp, publicError } from 'broapp/host';
 import type { BroappClient } from 'broapp/client';
 import { defineContract, mergeContracts, s } from 'broapp/shared';
 import { createBroappChatTransport } from 'broapp-ai-elements';
@@ -75,7 +75,33 @@ let directory = '';
 
 async function start(options: StartOptions = {}): Promise<Started> {
   directory = await mkdtemp(join(tmpdir(), 'broapp-ai-elements-'));
-  const ran: Record<string, number> = { 'notes.list': 0, 'notes.create': 0 };
+  const ran: Record<string, number> = { 'notes.list': 0, 'notes.create': 0, 'demo.cycle': 0, 'demo.build': 0 };
+
+  // A tool that asks for one of its own steps under `<callId>.build`, the way
+  // the launcher's candidate.cycle asks for its build and its preview.
+  const gate = createGate({ appId: 'notes', releaseId: 'r1', confirmTimeoutMs: 5_000 });
+  const build = guardedTool(gate, {
+    name: 'demo.build',
+    description: 'The step.',
+    inputSchema: { type: 'object', properties: {} },
+    effect: 'write',
+    run: () => {
+      ran['demo.build'] = (ran['demo.build'] ?? 0) + 1;
+      return Promise.resolve({ built: true });
+    },
+  });
+  const cycle = guardedTool(gate, {
+    name: 'demo.cycle',
+    description: 'A call with a step of its own.',
+    inputSchema: { type: 'object', properties: {} },
+    effect: 'write',
+    run: async (_input, _signal, envelope) => {
+      ran['demo.cycle'] = (ran['demo.cycle'] ?? 0) + 1;
+      if (envelope === undefined) throw new Error('no envelope');
+      const step = await build.execute({}, { ...envelope, requestId: `${envelope.requestId}.build` }, new AbortController().signal);
+      return { step };
+    },
+  });
 
   const app = createHostApp(appContract);
   app.operation('notes.list', () => {
@@ -108,10 +134,14 @@ async function start(options: StartOptions = {}): Promise<Started> {
           }),
         ),
     },
-    tools: fromContract(appContract, app, {
-      read: ['notes.list'],
-      confirm: ['notes.create'],
-    }),
+    tools: {
+      ...fromContract(appContract, app, {
+        read: ['notes.list'],
+        confirm: ['notes.create'],
+      }),
+      'demo.cycle': cycle,
+      'demo.build': build,
+    },
     logger: { warn: () => undefined, error: () => undefined },
   });
 
@@ -362,6 +392,39 @@ describe('tools', () => {
     expect(started.ran['notes.create']).toBe(1);
     expect(wired.awaiting.at(-1)).toBe(0);
     expect(wired.tools[0]).toMatchObject({ tool: 'notes.create', status: 'done' });
+    await wired.client.close();
+  });
+
+  test('a question about a step of a call goes on that call’s card, and its answer reaches the step', async () => {
+    const started = await start({
+      script: [{ kind: 'tool', name: 'demo.cycle', input: {}, then: [{ kind: 'text', chunks: ['cycled'] }] }],
+    });
+    const wired = await wire(started);
+    const watched = watch(await send(wired.transport, [user('run the cycle')]));
+    const folding = fold(watched.stream);
+
+    // The call's own question first.
+    await until(() => wired.awaiting[0] === 1, 5_000, 'the call to ask');
+    const callId = askedCallId(watched.seen);
+    await wired.transport.confirm(callId, true);
+
+    // Then the step's, on the same card, naming the step.
+    await until(() => watched.seen.filter((chunk) => chunk.type === 'tool-approval-request').length === 2, 5_000, 'the step to ask');
+    const stepAsk = watched.seen.filter((chunk) => chunk.type === 'tool-approval-request')[1];
+    expect(stepAsk).toMatchObject({ toolCallId: callId, approvalDescriptor: { tool: 'demo.build' } });
+    expect(stepAsk?.type === 'tool-approval-request' ? stepAsk.approvalId : '').toMatch(/\.build$/);
+    expect(wired.awaiting.at(-1)).toBe(1);
+    // The card answers with its own id; the step is what runs.
+    await wired.transport.confirm(callId, true);
+
+    const message = await folding;
+    const tool = message.parts.find((part) => part.type === 'tool-demo.cycle');
+    expect(tool).toMatchObject({ state: 'output-available', output: { step: { built: true } } });
+    expect(started.ran['demo.cycle']).toBe(1);
+    expect(started.ran['demo.build']).toBe(1);
+    expect(wired.awaiting.at(-1)).toBe(0);
+    // Nothing threw inside the stream: the turn ended on its own.
+    expect(watched.seen.some((chunk) => chunk.type === 'error')).toBe(false);
     await wired.client.close();
   });
 
