@@ -416,6 +416,7 @@ describe('a second turn', () => {
 });
 
 describe('retention', () => {
+  // 2,001 saves, each running both caps: two seconds here, eight on a slow runner.
   test('6. 2,001 transcripts leave 2,000, and one older than 30 days goes on open', () => {
     const dataDir = fresh();
     const store = openThreads(dataDir, { logger: recordingLogger() });
@@ -432,7 +433,7 @@ describe('retention', () => {
     expect(reopened.transcript('run-02000')).not.toBeNull();
     reopened.close();
     expect(rows(dataDir).length).toBe(1_999);
-  });
+  }, 30_000);
 
   test('a stored row that is not assistant or tool messages reads as absent, and is reported once', () => {
     const dataDir = fresh();
