@@ -51,7 +51,7 @@ Verdict **unrelated**: the build error names `confirmText`, so the engineer repa
 
 **No evaluation table.** `knowledge evaluate` writes its table only once every cell has run; neither of the two `--runs 1` attempts reached that point (9 of 12 turns, then 4 of 12). Their run directories and stores are still under `<root>/evaluate/` for anyone who wants to read them; no number below is taken from them. The four-condition comparison is therefore **not measured** by this prompt, and the backlog's "What was measured" table says so beside the 08c and 12b numbers.
 
-**The clean run, after 0.4.2** (2026-09-12, launcher built at `354e23f`, one process on the root, `--runs 1`, `qwen3.8:27b-mlx`, 40 steps and 20 minutes a turn):
+**The single run after 0.4.2** (2026-09-11 23:55 to 2026-09-12 03:50 local, launcher built at `354e23f`, `--runs 1`, `qwen3.8:27b-mlx`, 40 steps and 20 minutes a turn). It was meant to run alone and did not for its first hour: prompt 12f's session ran the test suite, a launcher build, the smoke and the gallery on the same machine until 00:37, so the first three or four turns shared the CPU. Outcomes stand; times for those turns do not. The three-run evaluation that followed at 08:37 ran with nothing else on the machine.
 
 Model ollama.chat/qwen3.8:27b-mlx; 1 run(s) per cell; 40 steps a turn; 20m00s a turn.
 Working code: the evaluation built and previewed what the turn left, and the task example passed. Workflow completed: the engineer itself checked the release it last built and every example passed. The harness answers every question at once, so tool time holds no person’s wait; activation is never part of a run.
