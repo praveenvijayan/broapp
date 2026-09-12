@@ -38,6 +38,7 @@ import {
   launcherContract,
   openJournal,
   type Journal,
+  type LauncherTab,
   type Supervisor,
 } from 'broapp-autoapp/launcher';
 import { layout, readCurrent, setCurrent, writeGrants, type Layout } from 'broapp-autoapp/spec';
@@ -87,6 +88,7 @@ interface World {
 
 let world: World | null = null;
 let live: Harness | null = null;
+let openTab: LauncherTab | null = null;
 /** Every URL the launcher asked to open in a browser, per test. */
 let openedUrls: string[] = [];
 
@@ -96,6 +98,10 @@ const runRoot = join(import.meta.dir, '.autoapp-run');
 afterEach(async () => {
   await live?.stop();
   live = null;
+  // A turn opens the AI layer's threads.sqlite for its transcript; close it
+  // before the directory goes, or Windows refuses to remove it.
+  openTab?.ai.close();
+  openTab = null;
   const current = world;
   world = null;
   if (current === null) return;
@@ -1033,6 +1039,7 @@ describe.skipIf(!available)('the launcher tab', () => {
         return true;
       },
     });
+    openTab = tab;
     live = await harness((bridge) => tab.mount(bridge));
     return { harness: live, where, adapter };
   }

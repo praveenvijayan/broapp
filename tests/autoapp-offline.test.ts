@@ -40,6 +40,7 @@ import {
   launcherContract,
   openJournal,
   type Journal,
+  type LauncherTab,
   type Supervisor,
 } from 'broapp-autoapp/launcher';
 import { layout, setCurrent, type Layout } from 'broapp-autoapp/spec';
@@ -69,10 +70,15 @@ interface World {
 
 let world: World | null = null;
 let live: Harness | null = null;
+let openTab: LauncherTab | null = null;
 
 afterEach(async () => {
   await live?.stop();
   live = null;
+  // A turn opens the AI layer's threads.sqlite for its transcript; close it
+  // before the directory goes, or Windows refuses to remove it.
+  openTab?.ai.close();
+  openTab = null;
   const current = world;
   world = null;
   if (current === null) return;
@@ -293,6 +299,7 @@ describe.skipIf(!available)('edit offline', () => {
       confirmTimeoutMs: 2_000,
       logger: quiet,
     });
+    openTab = tab;
     live = await harness((bridge) => tab.mount(bridge));
 
     const client = await live.connect(mergeContracts(launcherContract, aiContract));

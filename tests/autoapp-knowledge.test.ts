@@ -328,6 +328,8 @@ function handOrigin(runId: string): FullOrigin {
 }
 
 describe('the store', () => {
+  // The first two tests pay for SQLite's first open and checkpoint in this
+  // file; a slow Windows runner took eight seconds where a tenth is normal.
   test('FTS5 exists; every table is created; reopening changes nothing; close leaves no WAL', () => {
     const memory = new Database(':memory:');
     memory.exec("CREATE VIRTUAL TABLE probe USING fts5(summary, trigger, tokenize='unicode61')");
@@ -354,7 +356,7 @@ describe('the store', () => {
     again.close();
     again.close();
     expect(existsSync(join(directory, `${KNOWLEDGE_FILE}-wal`))).toBe(false);
-  });
+  }, 30_000);
 
   test('retention drops old events and orphaned blobs, and keeps what a case refers to', () => {
     const directory = tempDir();
@@ -384,7 +386,7 @@ describe('the store', () => {
     expect(later.getBlob(requestBlob)).toBe('kept because a case refers to it');
     expect(later.db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM episodes').get()?.n).toBe(1);
     later.close();
-  });
+  }, 30_000);
 
   test('a signature ignores path, line, quoted name and hash, and not the stage', () => {
     const one = signature(
@@ -904,6 +906,7 @@ describe('the launcher tab', () => {
       openBrowser: () => Promise.resolve(true),
       knowledge: { store: where.knowledge, log: where.log, evidence: where.evidence },
     });
+    closers.push(() => tab.ai.close());
     expect(tab.knowledge).toBe(where.knowledge);
     live = await harness((bridge) => tab.mount(bridge));
     const client = await live.connect(mergeContracts(launcherContract, aiContract));
@@ -1005,7 +1008,7 @@ async function makeStarterWorld(): Promise<{ root: Layout; source: string }> {
 
 /** The launcher tab over a world, with a fake model and, optionally, a small budget. */
 function makeTab(where: World, adapter: ReturnType<typeof createFakeAdapter>, contextBudgetChars?: number): LauncherTab {
-  return createLauncherTab({
+  const tab = createLauncherTab({
     layout: where.root,
     supervisor: where.supervisor,
     journal: where.journal,
@@ -1025,6 +1028,10 @@ function makeTab(where: World, adapter: ReturnType<typeof createFakeAdapter>, co
     knowledge: { store: where.knowledge, log: where.log, evidence: where.evidence },
     ...(contextBudgetChars === undefined ? {} : { contextBudgetChars }),
   });
+  // A turn opens the AI layer's threads.sqlite for its transcript; Windows
+  // will not remove a directory that holds an open file.
+  closers.push(() => tab.ai.close());
+  return tab;
 }
 
 /** One chat turn over the harness, to its end and its `run` event. */
