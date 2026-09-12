@@ -16,7 +16,7 @@
  * so the engineer reads the part it needs rather than all of it every turn.
  */
 
-import { AUTOAPP_TOKENS, TOKEN_PREFIX, type ThemeToken, type TokenGroup } from '../react/theme.ts';
+import { APPLICATION_VARIABLES, AUTOAPP_TOKENS, TOKEN_PREFIX, type ThemeToken, type TokenGroup } from '../react/theme.ts';
 
 export const REFERENCE_TOPICS = ['contract', 'views', 'acceptance', 'workspace', 'theme'] as const;
 export type ReferenceTopic = (typeof REFERENCE_TOPICS)[number];
@@ -128,7 +128,9 @@ application's \`package.json\`.`;
 /** One line of the theme topic. */
 function tokenLine(token: ThemeToken): string {
   const defaults = token.dark === token.light ? token.light : `${token.light} / ${token.dark}`;
-  return `- \`${TOKEN_PREFIX}${token.name}\` — ${token.purpose} — ${defaults} — read by ${token.consumers.join(', ')}`;
+  const follows = token.reads === undefined ? '' : ` — follows \`${token.reads}\``;
+  const read = token.consumers.length === 0 ? 'nothing yet' : token.consumers.join(', ');
+  return `- \`${TOKEN_PREFIX}${token.name}\` — ${token.purpose} — ${defaults}${follows} — read by ${read}`;
 }
 
 const TOKEN_GROUPS: readonly TokenGroup[] = ['colour', 'space', 'type', 'radius', 'density'];
@@ -144,17 +146,78 @@ function themeReference(tokens: readonly ThemeToken[]): string {
     const members = tokens.filter((token) => token.group === group);
     return members.length === 0 ? '' : `## ${group}\n${members.map(tokenLine).join('\n')}`;
   }).filter((text) => text !== '');
+  const palette = APPLICATION_VARIABLES.map((name) => `\`${name}\``).join(', ');
   return `# theme — src/ui/styles.css
 
 The renderer draws every component itself and takes every colour, gap, size and
 corner from an \`${TOKEN_PREFIX}*\` custom property. Setting those is how an application
 looks like itself; a rule for an \`.autoapp-\` class is not supported.
-The renderer's defaults sit on \`:where(:root)\`, which has no specificity. An
-application sets tokens on \`:root\` in \`src/ui/styles.css\`, and that wins whatever
-order the stylesheets were bundled in. The renderer never sets a token anywhere
-else, so a token set on \`:root\` reaches every component. An application that sets
+
+## The palette, and what follows it
+
+An application's palette is seven properties on its own \`:root\`:
+${palette}. The AI panel reads those seven directly, and every colour token
+below marked "follows" reads the one named there. So an application sets its
+palette once and the renderer and the panel take it together; nothing has to be
+mapped by hand. A token whose meaning has no place in a palette — a notice, a
+warning, an error, the ground of a code block, a button's own grey — follows
+nothing and keeps its default until it is set.
+
+## Which setting wins
+
+1. The renderer's defaults sit on \`:where(:root)\`, which has no specificity, so
+   anything an application writes beats them whatever order the stylesheets were
+   bundled in.
+2. One of the seven, set on the application's \`:root\`, reaches every token that
+   follows it.
+3. A token set directly on \`:root\` beats what it would have followed. That is
+   how an application makes the renderer and the panel differ on purpose: the
+   panel never reads an \`${TOKEN_PREFIX}*\` property, so an override reaches the
+   renderer and nothing else.
+4. Inside the panel, and inside anything the panel portals to the end of the
+   document, \`.broapp-tokens\` carries the panel's own mapping of the same seven.
+   A component drawn there is coloured by the palette, not by the tokens.
+
+The renderer never sets a token anywhere but its defaults, so a token set on
+\`:root\` reaches every component. An application that sets
 a colour for the light scheme sets it for the dark one too, under
 \`@media (prefers-color-scheme: dark)\`; one that sets neither gets the defaults in both.
+
+## Applying a style guide
+
+A brand's style guide becomes a theme by role, never by name. Ask what each
+colour *is for*, and write it where that meaning lives:
+
+- the canvas or page colour → \`--bg\`
+- a card, panel or sheet → \`--surface\`
+- a hairline, rule or divider → \`--border\`
+- primary or body text → \`--text\`
+- secondary, caption or helper text → \`--text-muted\`
+- the signature or primary colour → \`--accent\`
+- the readable foreground on that colour → \`--accent-contrast\`
+- corner radii → \`${TOKEN_PREFIX}radius-sm\`, \`-md\`, \`-lg\`
+- the base unit and gaps → \`${TOKEN_PREFIX}space-1\` … \`-8\` and the padding tokens
+- the type scale → the \`${TOKEN_PREFIX}font-size-*\` tokens
+- the faces → \`${TOKEN_PREFIX}font-sans\` and \`${TOKEN_PREFIX}font-mono\`, but only a face
+  the page itself ships
+
+Do the seven first, then only the tokens the guide actually decides. A guide
+usually names one grey where the renderer has two (\`${TOKEN_PREFIX}text-muted\` and
+\`${TOKEN_PREFIX}muted\`): give both the same value rather than inventing a second.
+
+What a style guide cannot become, and what to say back to the person who asked:
+
+- Marketing-page components — a hero, a pricing table, a carousel — are not
+  renderer kinds, and a theme cannot add one. Say which of the six kinds comes
+  closest, or that the change needs a new kind and a framework decision.
+- A web font the page does not ship. The page's policy allows \`font-src 'self'
+  data:\` and the build fails on an off-origin URL, so a face is either embedded
+  as \`data:\` in the application's own stylesheet or it is the system stack. Name
+  the substitute rather than the face that will not load.
+- A guide with a light palette only: set \`color-scheme: light\` on \`:root\` so the
+  browser stops offering dark form controls and scrollbars for a page that has
+  no dark values, and say that a dark scheme is a second set of seven whenever
+  the brand is ready to decide one.
 A preset is those two blocks and nothing else: \`broapp-autoapp/presets/quiet.css\`
 (low contrast, roomier, rounder) and \`dense.css\` (compact, square, high contrast).
 To use one, copy it to the end of \`src/ui/styles.css\`; it is bundled and hashed with

@@ -76,3 +76,20 @@ export {
   ToolInput,
   ToolOutput,
 } from './components/ai-elements/tool.tsx';
+
+/*
+ * The vendored select, exported because it is the panel's portalled component:
+ * an application composing its own bar needs it, and `bun run theme-check`
+ * drives it to prove that what a portal draws outside the panel still carries
+ * the panel's colours.
+ */
+export {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from './components/ui/select.tsx';

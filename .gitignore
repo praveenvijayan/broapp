@@ -14,3 +14,5 @@ tsconfig.tsbuildinfo
 *.tsbuildinfo
 .autoapp-manual/
 .autoapp-demo/
+# Written per theme by `bun run theme-check`, one build at a time.
+scripts/theme-check/theme.css

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Autoapp theme check</title>
+    <!--
+      The same shell an application ships: `buildPage` replaces the marker
+      below with the Content-Security-Policy and the bundled stylesheet, and
+      the one in <body> with the bundled script. Nothing is loaded over the
+      network, here least of all — the point of this page is that a browser
+      measures what the real build produces.
+
+      No `color-scheme` and no `data-scheme` attribute: which scheme this page
+      is in is the machine's answer, which is what `bun run theme-check`
+      emulates three ways.
+    -->
+    <!--BROAPP_HEAD-->
+  </head>
+  <body>
+    <div id="root"></div>
+    <!--BROAPP_BODY-->
+  </body>
+</html>

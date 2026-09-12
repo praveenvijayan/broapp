@@ -25,23 +25,23 @@
 
   /*
    * Everything inside the page — the forms, tables, buttons and notices — is
-   * drawn by Autoapp's renderer from `src/shared/views.ts`, and the renderer
-   * takes its colours from these properties. This is where a field's text or
-   * background colour is changed; a rule for a class of your own styles only
-   * the frame around it. The values follow the palette above, so they flip
-   * with it under a dark scheme.
+   * drawn by Autoapp's renderer from `src/shared/views.ts`. The renderer reads
+   * the seven properties above through its own `--autoapp-*` tokens, so the
+   * palette already reaches every heading, border, surface and accent it
+   * draws, and the chat panel beside it reads the same seven. Only what this
+   * application wants to *differ* is written out here, and each line says why.
+   *
+   * This is also where a field's text or background colour is changed; a rule
+   * for a class of your own styles only the frame around it.
    */
-  --autoapp-heading: var(--text);
-  --autoapp-text: var(--text);
-  --autoapp-text-muted: var(--text-muted);
-  --autoapp-muted: var(--text-muted);
-  --autoapp-border: var(--border);
-  --autoapp-surface: var(--surface);
+  /* A field and a code block sit on the page's ground, not on a card's. */
   --autoapp-input: var(--bg);
+  --autoapp-code-surface: var(--bg);
+  /* A button is a card that can be pressed, and lightens rather than darkens. */
   --autoapp-button: var(--surface);
   --autoapp-button-hover: var(--bg);
-  --autoapp-accent: var(--accent);
-  --autoapp-code-surface: var(--bg);
+  /* This palette names its own warning and error colours; the renderer's two
+     tokens for them are not palette properties, so they are mapped by hand. */
   --autoapp-warning: var(--pending);
   --autoapp-error-text: var(--bad);
 }

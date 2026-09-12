@@ -42,6 +42,12 @@ function TooltipContent({
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         className={cn(
+          // LOCAL: `.broapp-tokens` because this content is portalled to the
+          // end of the document, outside the panel that carries the shadcn
+          // tokens. Without it every colour below resolves to nothing and this
+          // draws transparent on transparent. `bun run theme-check` measures it.
+          "broapp-tokens",
+          // END LOCAL
           "z-50 w-fit origin-(--radix-tooltip-content-transform-origin) animate-in rounded-md bg-foreground px-3 py-1.5 text-xs text-balance text-background fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
           className
         )}

@@ -222,10 +222,22 @@ renderer used before the table existed, so no application changed appearance
 when the table arrived; `view.css` keeps each default as its `var()` fallback,
 and the test holds every fallback to the table.
 
-Precedence has one rule. The defaults sit on `:where(:root)`, which has no
-specificity; an application sets tokens on `:root` in its own stylesheet, and
-wins whatever order the stylesheets were bundled in; the renderer sets a token
-nowhere else. An application that defines a light palette defines the dark one
+An application does not write that mapping by hand. Its palette is seven
+properties on its own `:root` — `--bg`, `--surface`, `--border`, `--text`,
+`--text-muted`, `--accent`, `--accent-contrast` — which is what the AI panel
+already reads and what the launcher already feeds from `--launcher-*`. Every
+colour token with a `reads` in the table is generated as
+`var(--<reads>, <default>)`, so one palette reaches the renderer and the panel
+together, and the `reads` column is the only copy of the mapping.
+
+Precedence has four rules, in the order they resolve. The defaults sit on
+`:where(:root)`, which has no specificity. One of the seven, on the
+application's `:root`, reaches every token that follows it. A token set directly
+on `:root` beats what it would have followed — which is how an application makes
+the renderer and the panel differ on purpose, since the panel never reads an
+`--autoapp-*` property. Inside the panel, and inside anything the panel portals
+to the end of the document, `.broapp-tokens` carries the panel's own mapping of
+the same seven. An application that defines a light palette defines the dark one
 too. An application imports `broapp-autoapp/react/tokens.css` and then
 `broapp-autoapp/react/view.css`, and all of it lands in the page's one
 stylesheet, pinned by hash like the rest.
@@ -236,12 +248,25 @@ both schemes and nothing else. An application uses one by copying it into its
 it runs. `bun run theme-gallery` draws the starter's page under each preset in
 both schemes, for a person to look at.
 
+`bun run theme-check` is the check a person cannot do by reading. It builds the
+page with the real build under three themes, opens each in Chromium under light,
+dark and no-preference, opens the panel's select so its portal is measured, and
+reads computed styles and contrast: nine combinations, one line per
+measurement. It is the first rendered check in this repository, and it found a
+real fault the day it was written — portalled content sat outside the panel's
+token scope and read no colours at all. What each layer is for, what may be
+added to it and how, is in [components.md](components.md); the checklist a model
+follows when adding one is "Adding a component" in
+[`prompts/autoapp/00-common-rules.md`](../../prompts/autoapp/00-common-rules.md).
+
 A change costs bytes as well as behaviour. `candidate.explain` reports the
 candidate's `page.html` size beside the serving release's, and the launcher's
 candidate panel shows the size when it moved by more than 2%.
 
 ## Where the rest of it is written down
 
+- [components.md](components.md) — the three layers that draw a page, the one
+  theme that reaches all three, and the gate anything new passes.
 - [packaging.md](packaging.md) — the launcher binary, its targets and sizes,
   what is smoke-tested where, Windows, offline evidence, publishing.
 - [security.md](security.md) — the gate, approvals and their windows, the

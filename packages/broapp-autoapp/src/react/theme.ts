@@ -1,9 +1,13 @@
 /**
  * The theme contract: every `--autoapp-*` custom property the renderer reads.
  *
- * An application owns its appearance by setting these on `:root`. Until this
- * table existed the list lived only in a stylesheet, the rule for which setting
- * wins lived in a comment, and the engineer was told neither. Now this is the
+ * An application owns its appearance by setting these on `:root`, or — for
+ * every token with a `reads` — by setting one of the seven properties in
+ * {@link APPLICATION_VARIABLES} that the AI panel already reads, once, and
+ * letting the renderer follow. Until this table existed the list lived only in
+ * a stylesheet, the rule for which setting wins lived in a comment, the
+ * mapping onto the seven was written out by hand in every application, and the
+ * engineer was told none of it. Now this is the
  * one place a token is declared: `tokens.css` is generated from it by
  * `scripts/build-tokens.ts`, the engineer's `theme` reference topic is built
  * from it when the module loads, and `tests/autoapp-theme.test.ts` holds
@@ -49,9 +53,43 @@ export interface ThemeToken {
   readonly dark: string;
   /** What reads it. */
   readonly consumers: readonly TokenConsumer[];
+  /**
+   * The application-level custom property this token follows, without the
+   * prefix an `--autoapp-` token has: one of {@link APPLICATION_VARIABLES}.
+   *
+   * The AI panel reads those seven on its own, and the launcher tab feeds them
+   * from `--launcher-*`. A token with `reads` is generated as
+   * `var(--<reads>, <default>)`, so an application that sets its palette once
+   * themes the renderer and the panel alike, and one that sets nothing keeps
+   * exactly the default it had. Tokens whose meaning has no application-level
+   * name — a notice, a warning, an error, the ground of a code block — read
+   * nothing.
+   */
+  readonly reads?: string;
 }
 
 export const TOKEN_PREFIX = '--autoapp-';
+
+/**
+ * The seven properties that are an Autoapp application's palette.
+ *
+ * Not invented here: this is what `broapp-ai-elements` already maps onto
+ * shadcn's names in `src/ui/tailwind.css`, and what the launcher's own
+ * stylesheet already feeds from `--launcher-*`. Naming them here lets the
+ * renderer follow the same seven instead of asking an application to write the
+ * mapping by hand, which is what the starter and Notes used to do.
+ */
+export const APPLICATION_VARIABLES = [
+  '--bg',
+  '--surface',
+  '--border',
+  '--text',
+  '--text-muted',
+  '--accent',
+  '--accent-contrast',
+] as const;
+
+export type ApplicationVariable = (typeof APPLICATION_VARIABLES)[number];
 
 /** A token that is the same in both schemes. */
 function same(
@@ -70,22 +108,30 @@ function colour(
   dark: string,
   purpose: string,
   consumers: readonly TokenConsumer[],
+  reads?: ApplicationVariable,
 ): ThemeToken {
-  return { name, group: 'colour', purpose, light, dark, consumers };
+  return reads === undefined
+    ? { name, group: 'colour', purpose, light, dark, consumers }
+    : { name, group: 'colour', purpose, light, dark, consumers, reads };
 }
 
 export const AUTOAPP_TOKENS: readonly ThemeToken[] = [
   // Colours: exactly the two blocks `view.css` carried before this table.
-  colour('heading', '#16181d', '#f2f3f5', 'The colour of every heading: a page title and the title of a section, table or form.', ['page', 'section', 'table', 'form']),
-  colour('text', '#33383f', '#e6e8ec', 'Body text, field labels, and what an approval is asking.', ['text', 'form', 'approvals']),
-  colour('text-muted', '#6b6862', '#a2a7b0', 'The countdown on an approval that is waiting.', ['approvals']),
-  colour('muted', '#6b7280', '#a2a7b0', 'Secondary text: column headers, a table with no rows, a status label, a path in a workflow draft.', ['table', 'status', 'runs']),
-  colour('border', '#dfe3ea', '#3a3e46', 'Every border and divider: cards, cells, fields, buttons, status rows, run steps.', ['section', 'table', 'form', 'button', 'status', 'runs']),
-  colour('surface', '#ffffff', '#1e2024', 'The ground of a card: a section, a table or a form.', ['section', 'table', 'form']),
-  colour('input', '#ffffff', '#16171a', 'The ground of a text field.', ['form']),
+  colour('heading', '#16181d', '#f2f3f5', 'The colour of every heading: a page title and the title of a section, table or form.', ['page', 'section', 'table', 'form'], '--text'),
+  colour('text', '#33383f', '#e6e8ec', 'Body text, field labels, and what an approval is asking.', ['text', 'form', 'approvals'], '--text'),
+  colour('text-muted', '#6b6862', '#a2a7b0', 'The countdown on an approval that is waiting.', ['approvals'], '--text-muted'),
+  colour('muted', '#6b7280', '#a2a7b0', 'Secondary text: column headers, a table with no rows, a status label, a path in a workflow draft.', ['table', 'status', 'runs'], '--text-muted'),
+  colour('border', '#dfe3ea', '#3a3e46', 'Every border and divider: cards, cells, fields, buttons, status rows, run steps.', ['section', 'table', 'form', 'button', 'status', 'runs'], '--border'),
+  colour('surface', '#ffffff', '#1e2024', 'The ground of a card: a section, a table or a form.', ['section', 'table', 'form'], '--surface'),
+  colour('input', '#ffffff', '#16171a', 'The ground of a text field.', ['form'], '--surface'),
   colour('button', '#f4f5f8', '#262a30', 'The ground of a button.', ['button']),
   colour('button-hover', '#e9ebf1', '#30353c', 'The ground of a button under the pointer.', ['button']),
-  colour('accent', '#2a5bd7', '#7aa2ff', 'Links, and the focus ring unless `focus-ring` says otherwise.', ['link']),
+  colour('accent', '#2a5bd7', '#7aa2ff', 'Links, and the focus ring unless `focus-ring` says otherwise.', ['link'], '--accent'),
+  // Nothing the renderer draws today puts text on the accent — a link is
+  // accent-coloured text on a surface, not the other way round. The token
+  // exists so the first component that does has a name to read, and so an
+  // application's `--accent-contrast` already reaches it.
+  colour('accent-text', '#ffffff', '#16181d', 'The readable foreground for anything drawn on the accent; nothing in the renderer draws on it yet.', [], '--accent-contrast'),
   colour('code-surface', '#f4f5f8', '#14151a', 'The ground of the arguments block on an approval.', ['approvals']),
   colour('notice-surface', '#fdf6e7', '#2a2618', 'The ground of a notice and of the approvals strip.', ['notice', 'approvals']),
   colour('notice-border', '#f0d9a8', '#5a4a1e', 'The border of a notice and of the approvals strip, and the divider between approvals.', ['notice', 'approvals']),
@@ -126,6 +172,23 @@ export const AUTOAPP_TOKENS: readonly ThemeToken[] = [
   same('font-size-small', 'type', '0.85rem', 'Field labels, small buttons, approval arguments and workflow paths.', ['form', 'button', 'approvals', 'runs']),
   same('font-size-caption', 'type', '0.8rem', 'Column headers.', ['table']),
   same('line-height', 'type', '1.55', 'The line height of a text block.', ['text']),
+  // `inherit` rather than a stack: the renderer set no family before this
+  // token, so its default has to be whatever the page around it says, the way
+  // `control-height` defaults to `auto`. Measured, because it is subtle:
+  // `inherit` in a custom property is the CSS-wide keyword, so on `:root` the
+  // declaration computes to nothing and the `var(--autoapp-font-sans, inherit)`
+  // in `view.css` falls back to its own `inherit` — which is exactly the family
+  // the renderer inherited before the token existed. An application that names
+  // a face here replaces both. It names one the page itself ships;
+  // `font-src 'self' data:` refuses any other.
+  same('font-sans', 'type', 'inherit', "The face of everything the renderer draws except code; by default the page's own.", ['page']),
+  same('font-mono', 'type', 'ui-monospace, SFMono-Regular, Menlo, monospace', 'The face of an approval’s arguments and of a path in a workflow draft.', ['approvals', 'runs']),
+  same('weight-regular', 'type', '400', 'The weight of body text, a table cell and a workflow value.', ['page']),
+  same('weight-strong', 'type', '600', 'The weight of a section title, a field label, a button and a status value.', ['section', 'table', 'form', 'button', 'status', 'approvals']),
+  // 650 and 600 are two values `view.css` uses, so they are two tokens: the
+  // table's rule is that an application which upgrades looks exactly as it did.
+  same('weight-heading', 'type', '650', 'The weight of a page title and of the approvals strip’s title.', ['page', 'approvals']),
+  same('tracking-caps', 'type', '0.04em', 'The letter spacing of a column header, which is drawn in capitals.', ['table']),
 
   // Corners.
   same('radius-sm', 'radius', '7px', 'The corners of fields, buttons, messages and code blocks.', ['form', 'button', 'message', 'approvals']),
@@ -162,6 +225,21 @@ export function fallbackFor(token: ThemeToken, tokens: readonly ThemeToken[] = A
 
 const GROUPS: readonly TokenGroup[] = ['colour', 'space', 'type', 'radius', 'density'];
 
+/**
+ * What `tokens.css` declares a token as, in one scheme.
+ *
+ * A token with `reads` is declared as its application variable with the
+ * default as that variable's fallback, which is the whole adapter: the
+ * declaration is at zero specificity on `:where(:root)`, so an application
+ * that sets `--surface` on its own `:root` reaches `--autoapp-surface` through
+ * this `var()`, an application that sets `--autoapp-surface` directly beats it
+ * outright, and an application that sets neither gets the literal.
+ */
+export function declaredValue(token: ThemeToken, scheme: 'light' | 'dark'): string {
+  const value = scheme === 'light' ? token.light : token.dark;
+  return token.reads === undefined ? value : `var(${token.reads}, ${value})`;
+}
+
 function declarations(tokens: readonly ThemeToken[], pick: (token: ThemeToken) => string, indent: string): string {
   const lines: string[] = [];
   for (const group of GROUPS) {
@@ -191,12 +269,12 @@ export function tokensCss(tokens: readonly ThemeToken[] = AUTOAPP_TOKENS): strin
  */
 
 :where(:root) {
-${declarations(tokens, (token) => token.light, '  ')}
+${declarations(tokens, (token) => declaredValue(token, 'light'), '  ')}
 }
 
 @media (prefers-color-scheme: dark) {
   :where(:root) {
-${declarations(dark, (token) => token.dark, '    ')}
+${declarations(dark, (token) => declaredValue(token, 'dark'), '    ')}
   }
 }
 `;

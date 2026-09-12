@@ -27,10 +27,16 @@ data; a route group is code.
 | `src/host/db.ts` | The SQLite table and its migrations. |
 | `src/ui/` | The browser entry, the document and the palette. |
 
-How it looks is set in `src/ui/styles.css`, as `--autoapp-*` tokens on
-`:root` for both colour schemes: colours, spacing, type, corners and control
-sizes. Every token, with its default, is in the engineer's `spec.reference`
-topic `theme`. Two complete sets ship with the renderer in
+How it looks is set in `src/ui/styles.css`, starting with seven properties on
+`:root` for both colour schemes — `--bg`, `--surface`, `--border`, `--text`,
+`--text-muted`, `--accent`, `--accent-contrast`. That is the palette: the
+renderer reads it through its own `--autoapp-*` tokens and the AI panel reads it
+directly, so setting those seven themes everything on the page. The `--autoapp-*`
+tokens are there for what a palette cannot say — spacing, type, corners, control
+sizes, a notice or an error colour — and for anything this application wants to
+differ from the palette on purpose. Every token, with its default and the
+palette property it follows, is in the engineer's `spec.reference` topic
+`theme`. Two complete sets ship with the renderer in
 `broapp-autoapp/presets/` — `quiet.css` and `dense.css` — and using one means
 copying it to the end of `styles.css`.
 

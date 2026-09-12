@@ -110,6 +110,43 @@ jobs:
       - run: bun run scripts/autoapp-smoke.ts
       - run: bun test tests/autoapp-offline.test.ts
 
+  theme:
+    name: Theme — a browser reads the compiled page
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      # One job, one browser. Chromium is a download, not a package, so it is
+      # cached on the Playwright version that asked for it: a new version gets
+      # a new key and a fresh download rather than a browser that does not
+      # match the client.
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: playwright-${{ runner.os }}-
+      - name: Install Chromium
+        run: bun x playwright install --with-deps chromium
+      # The first rendered check: three themes, three schemes, the renderer's
+      # button and the panel's select — opened, so its portal is measured —
+      # and the contrast of every text/background pair it reads.
+      - run: bun test tests/autoapp-theme-browser.test.ts
+      # The same run again, for the report a person reads when it fails.
+      - run: bun run theme-check
+      - name: Upload the measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-check
+          path: |
+            .broapp-tmp/theme-check.json
+            .broapp-tmp/theme-check.md
+          if-no-files-found: warn
+
   cross-compile:
     name: Cross-compile every target
     runs-on: ubuntu-latest

@@ -25,8 +25,15 @@ export type { PageContextValue, SourceState } from './context.tsx';
 export { announcePending, browserSurface, titleWithPending } from './pending.ts';
 export type { PendingSurface } from './pending.ts';
 
-export { AUTOAPP_TOKENS, fallbackFor, TOKEN_PREFIX, tokensCss } from './theme.ts';
-export type { ThemeToken, TokenConsumer, TokenGroup } from './theme.ts';
+export {
+  APPLICATION_VARIABLES,
+  AUTOAPP_TOKENS,
+  declaredValue,
+  fallbackFor,
+  TOKEN_PREFIX,
+  tokensCss,
+} from './theme.ts';
+export type { ApplicationVariable, ThemeToken, TokenConsumer, TokenGroup } from './theme.ts';
 
 export { readPath, resolveInput, resolveValue } from './bind.ts';
 export type { Scope } from './bind.ts';

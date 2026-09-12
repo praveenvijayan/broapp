@@ -3,7 +3,7 @@
   "version": "0.4.2",
   "private": true,
   "type": "module",
-  "description": "Broapp \u2014 a starter kit for local applications built on Bun, a browser UI, and Brobridge",
+  "description": "Broapp — a starter kit for local applications built on Bun, a browser UI, and Brobridge",
   "license": "MIT",
   "workspaces": [
     "packages/*",
@@ -20,7 +20,8 @@
     "dryrun": "bun run scripts/release-dry-run.ts",
     "dryrun:autoapp": "bun run scripts/autoapp-dry-run.ts",
     "site": "bun run scripts/build-site.ts",
-    "smoke": "bun run scripts/smoke-binary.ts"
+    "smoke": "bun run scripts/smoke-binary.ts",
+    "theme-check": "bun run scripts/theme-check.ts"
   },
   "devDependencies": {
     "@ai-sdk/react": "4.0.96",
@@ -42,6 +43,7 @@
     "cmdk": "1.1.1",
     "lucide-react": "1.42.0",
     "nanoid": "6.0.1",
+    "playwright": "1.63.0",
     "radix-ui": "1.6.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

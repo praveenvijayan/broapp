@@ -1,23 +1,33 @@
 /*
  * Quiet: low contrast, more room, rounder corners.
  *
- * A preset is tokens on `:root` for both colour schemes and nothing else. To
- * use it, copy this file to the end of the application's `src/ui/styles.css`;
- * it is bundled and hashed with the page like any other stylesheet. Every name
- * is listed, with its default, in `spec.reference` topic `theme`.
+ * A preset is the palette and tokens on `:root` for both colour schemes, and
+ * nothing else. To use it, copy this file to the end of the application's
+ * `src/ui/styles.css`; it is bundled and hashed with the page like any other
+ * stylesheet.
+ *
+ * The first block of each scheme is the seven palette properties, which theme
+ * the renderer and the AI panel together. After it come only the tokens that
+ * differ from what the palette gives them — a heading darker than body text, a
+ * field brighter than a card, the notice and error colours a palette has no
+ * word for. Every name is listed, with its default and the palette property it
+ * follows, in `spec.reference` topic `theme`.
  */
 
 :root {
+  --bg: #f5f5f3;
+  --surface: #fcfcfb;
+  --border: #e6e7ea;
+  --text: #464a51;
+  --text-muted: #6f737b;
+  --accent: #46659f;
+  --accent-contrast: #ffffff;
+
   --autoapp-heading: #2b2e33;
-  --autoapp-text: #464a51;
   --autoapp-text-muted: #6e6b65;
-  --autoapp-muted: #6f737b;
-  --autoapp-border: #e6e7ea;
-  --autoapp-surface: #fcfcfb;
   --autoapp-input: #ffffff;
   --autoapp-button: #f3f3f1;
   --autoapp-button-hover: #e9e9e6;
-  --autoapp-accent: #46659f;
   --autoapp-code-surface: #f3f3f1;
   --autoapp-notice-surface: #faf6ec;
   --autoapp-notice-border: #e9ddc0;
@@ -63,16 +73,19 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --bg: #191a1c;
+    --surface: #212327;
+    --border: #34373d;
+    --text: #c6cad1;
+    --text-muted: #9a9fa7;
+    --accent: #8ea7d8;
+    --accent-contrast: #10131a;
+
     --autoapp-heading: #dde0e5;
-    --autoapp-text: #c6cad1;
     --autoapp-text-muted: #9a9fa7;
-    --autoapp-muted: #9a9fa7;
-    --autoapp-border: #34373d;
-    --autoapp-surface: #212327;
     --autoapp-input: #1b1d20;
     --autoapp-button: #2a2d32;
     --autoapp-button-hover: #32353b;
-    --autoapp-accent: #8ea7d8;
     --autoapp-code-surface: #1a1c1f;
     --autoapp-notice-surface: #29261f;
     --autoapp-notice-border: #4a4331;

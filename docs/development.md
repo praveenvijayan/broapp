@@ -99,6 +99,33 @@ To test operations end to end, start a bridge in-process and connect a real
 client — [`tests/harness.ts`](../tests/harness.ts) in this repository shows how,
 including the cookie jar a test process needs and a browser gets for free.
 
+## Checking a theme in a browser
+
+Every other test in this repository reads text. One reads pixels — or rather,
+computed styles: three styling vocabularies share an Autoapp page (the
+renderer's `--autoapp-*` tokens, the AI panel's seven application properties,
+and the application that sets them), and whether they agree can only be
+answered by a browser.
+
+```bash
+bun x playwright install chromium   # once; a download, not a package
+bun run theme-check
+```
+
+It builds the page with the real build three times, once per theme, opens each
+under light, dark and no-preference, opens the panel's select so its portal is
+exercised, and writes `.broapp-tmp/theme-check.json` and `.md`: every colour,
+corner and family it measured, the contrast of each text/background pair, and
+whether each portalled component still sits inside the panel's token scope. It
+exits non-zero on any failing rule, and a failure is a named combination and
+property.
+
+`bun test tests/autoapp-theme-browser.test.ts` runs the same rules, and skips
+itself where Chromium cannot be launched, so `bun test tests` stays green on a
+machine without it. CI installs Chromium in one job, `theme`, and nowhere else.
+Playwright is a root devDependency: no package depends on it, and no binary
+carries it.
+
 ## Building
 
 ```bash

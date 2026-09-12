@@ -62,6 +62,7 @@ const PAGES: readonly Page[] = [
   // header tab, so the titles below do not say it again.
   { slug: 'autoapp.html', title: 'Autoapp', source: 'docs/autoapp/README.md', group: 'Autoapp' },
   { slug: 'autoapp-design.html', title: 'Design', source: 'docs/autoapp/design.md', group: 'Autoapp' },
+  { slug: 'autoapp-components.html', title: 'Components', source: 'docs/autoapp/components.md', group: 'Autoapp' },
   { slug: 'autoapp-learning.html', title: 'What the launcher remembers', source: 'docs/autoapp/learning.md', group: 'Autoapp' },
   { slug: 'autoapp-security.html', title: 'Approvals and limits', source: 'docs/autoapp/security.md', group: 'Autoapp' },
   { slug: 'autoapp-packaging.html', title: 'Packaging and offline', source: 'docs/autoapp/packaging.md', group: 'Autoapp' },

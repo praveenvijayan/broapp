@@ -75,6 +75,66 @@ one, the prompt is wrong; follow this table and say so in your report.
 - Secrets are never returned to a browser, never logged, never in a
   `PublicError` message, never in a run record, never in a journal row.
 
+## 2b. Adding a component
+
+Every later prompt inherits this. A component here is anything new that draws:
+a renderer kind, a component vendored into or composed inside
+`broapp-ai-elements/ui`, or a component in an application's own `src/ui/`. The
+strategy and the reasons are in [`docs/autoapp/components.md`](../../docs/autoapp/components.md);
+this is the checklist.
+
+- **Where it lives, and what it may import.** A renderer kind lives in
+  `packages/broapp-autoapp/src/react` and imports nothing new — no Tailwind, no
+  component library, no icon package. A panel component lives in
+  `packages/broapp-ai-elements/src/ui` and may use what that package already
+  depends on. An application's own component lives in its `src/ui/` and may not
+  import from `src/host`. Nothing outside `broapp-ai-elements` imports a
+  vendored file by path except a script that measures it.
+- **Typed props and controlled state.** Named exports, an exported props
+  interface, no `any`, no `@ts-ignore`. State the caller can own is a prop with
+  a callback, not a `useState` the caller cannot reach.
+- **Keyboard, focus and accessibility.** Reachable and operable by keyboard
+  alone; a visible focus ring from the focus tokens, never `outline: none`; a
+  label or `aria-label` on every control; `aria-expanded`, `aria-current` and
+  friends where the state exists. Use a Radix primitive when focus management,
+  a portal or a roving tab index is the hard part, and nothing else when it is
+  not.
+- **Loading, empty, error and disabled states**, wherever they can happen. A
+  component that can be waiting says so; a list that can be empty says why; an
+  error is a sentence, not a spinner that stopped; a disabled control looks
+  disabled and is not focusable-but-dead.
+- **Stable ids and registration.** A renderer kind is added to the view schema
+  with a literal `kind`, validated by the specification, and drawn from a
+  component's own `id` — never an array index, because an id is what an
+  override, a conflict and a test all name.
+- **`cva`, `cn()` and Radix where they earn their place.** `cva` for a
+  component with real variants; `cn()` so a caller's classes merge rather than
+  fight; Radix for behaviour. In the renderer, none of the three: it has plain
+  classes and plain CSS.
+- **Upstream provenance and an update owner.** A vendored file's first line
+  names the registry and the exact version it came from, local edits are marked
+  `// LOCAL:` and closed with `// END LOCAL`, and the licence stays in the file.
+  The report says who updates it when upstream moves. A test holds the first
+  line and the markers.
+- **Tokens only, no literal.** Every colour, gap, size, corner, weight,
+  tracking and family comes from a token — `--autoapp-*` in the renderer, the
+  panel's mapping of the seven palette properties in the panel. A new token is a
+  row in `AUTOAPP_TOKENS` with a purpose and both schemes, never a value in a
+  stylesheet. Portalled content carries `.broapp-tokens`, or it reads no tokens
+  at all.
+- **The reference topic.** If an engineer can ask for it, the engineer is told
+  about it: a kind goes in the `views` topic, a token in `theme`, generated from
+  the table rather than written beside it.
+- **The gallery.** `bun run --cwd packages/broapp-autoapp theme-gallery` draws
+  it, under every preset, in both schemes, and somebody looks at the result.
+- **The harness combination it adds.** `scripts/theme-check.ts` gains the
+  component as a target — its selector, the property each colour must resolve
+  to, and whether it is portalled — so the next theme change cannot break it
+  quietly.
+- **Tests.** A specification test for a kind, a source test for a vendored
+  file, and the theme tests for whatever it draws. A component with no test is
+  not finished.
+
 ## 3. Verifying third-party APIs
 
 Do not write Bun, Brobridge, `bun:sqlite`, AI SDK or MCP SDK calls from

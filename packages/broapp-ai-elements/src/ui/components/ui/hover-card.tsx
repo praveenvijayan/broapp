@@ -30,6 +30,12 @@ function HoverCardContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
+          // LOCAL: `.broapp-tokens` because this content is portalled to the
+          // end of the document, outside the panel that carries the shadcn
+          // tokens. Without it every colour below resolves to nothing and this
+          // draws transparent on transparent. `bun run theme-check` measures it.
+          "broapp-tokens",
+          // END LOCAL
           "z-50 w-64 origin-(--radix-hover-card-content-transform-origin) rounded-md border bg-popover p-4 text-popover-foreground shadow-md outline-hidden data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           className
         )}

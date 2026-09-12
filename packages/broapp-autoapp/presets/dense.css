@@ -1,23 +1,32 @@
 /*
  * Dense: compact, square, high contrast.
  *
- * A preset is tokens on `:root` for both colour schemes and nothing else. To
- * use it, copy this file to the end of the application's `src/ui/styles.css`;
- * it is bundled and hashed with the page like any other stylesheet. Every name
- * is listed, with its default, in `spec.reference` topic `theme`.
+ * A preset is the palette and tokens on `:root` for both colour schemes, and
+ * nothing else. To use it, copy this file to the end of the application's
+ * `src/ui/styles.css`; it is bundled and hashed with the page like any other
+ * stylesheet.
+ *
+ * The first block of each scheme is the seven palette properties, which theme
+ * the renderer and the AI panel together. After it come only the tokens that
+ * differ from what the palette gives them — black headings over near-black
+ * text, a field that is not a card, the notice and error colours a palette has
+ * no word for. Every name is listed, with its default and the palette property
+ * it follows, in `spec.reference` topic `theme`.
  */
 
 :root {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --border: #7a7a7a;
+  --text: #111111;
+  --text-muted: #3f3f3f;
+  --accent: #0038b8;
+  --accent-contrast: #ffffff;
+
   --autoapp-heading: #000000;
-  --autoapp-text: #111111;
   --autoapp-text-muted: #3b3b3b;
-  --autoapp-muted: #3f3f3f;
-  --autoapp-border: #7a7a7a;
-  --autoapp-surface: #ffffff;
-  --autoapp-input: #ffffff;
   --autoapp-button: #e9e9e9;
   --autoapp-button-hover: #d2d2d2;
-  --autoapp-accent: #0038b8;
   --autoapp-code-surface: #eeeeee;
   --autoapp-notice-surface: #fff3d1;
   --autoapp-notice-border: #9c7400;
@@ -71,16 +80,19 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --bg: #000000;
+    --surface: #0b0b0b;
+    --border: #8f8f8f;
+    --text: #f2f2f2;
+    --text-muted: #c6c6c6;
+    --accent: #9dbdff;
+    --accent-contrast: #000000;
+
     --autoapp-heading: #ffffff;
-    --autoapp-text: #f2f2f2;
     --autoapp-text-muted: #cfcfcf;
-    --autoapp-muted: #c6c6c6;
-    --autoapp-border: #8f8f8f;
-    --autoapp-surface: #0b0b0b;
     --autoapp-input: #000000;
     --autoapp-button: #262626;
     --autoapp-button-hover: #3b3b3b;
-    --autoapp-accent: #9dbdff;
     --autoapp-code-surface: #000000;
     --autoapp-notice-surface: #2a2100;
     --autoapp-notice-border: #c9a02a;

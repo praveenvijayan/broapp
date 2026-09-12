@@ -52,10 +52,10 @@
   --color-border: var(--border-color);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 2px);
-  --radius-xl: calc(var(--radius) + 6px);
+  --radius-sm: calc(var(--radius-base) - 2px);
+  --radius-md: var(--radius-base);
+  --radius-lg: calc(var(--radius-base) + 2px);
+  --radius-xl: calc(var(--radius-base) + 6px);
 }
 
 @layer base {
@@ -129,7 +129,17 @@
     --border-color: var(--border, var(--scheme-light,#dddddd) var(--scheme-dark,#32353b));
     --input: var(--border, var(--scheme-light,#dddddd) var(--scheme-dark,#32353b));
     --ring: var(--focus, var(--accent, var(--scheme-light,#2563eb) var(--scheme-dark,#6fd3b4)));
-    --radius: var(--radius, 8px);
+    /*
+     * `--radius-base`, not `--radius`, for the same reason as `--border-color`
+     * above: `--radius` already means something in an application, and
+     * `--radius: var(--radius, 8px)` is a custom property that refers to
+     * itself. That is a cycle, so it is invalid at computed-value time, so
+     * `--radius` inside the panel resolved to nothing at all and every
+     * `rounded-*` in it computed to 0 — in every application, since the
+     * mapping shipped. Measured by `bun run theme-check`, which is how it was
+     * found.
+     */
+    --radius-base: var(--radius, 8px);
     --warning: var(--pending, var(--scheme-light,#8a6a12) var(--scheme-dark,#e0b95a));
     --warning-bg: color-mix(in srgb, var(--pending, var(--scheme-light,#8a6a12) var(--scheme-dark,#e0b95a)) 12%, transparent);
   }
@@ -243,7 +253,7 @@
     align-items: center;
     padding: 0.5rem 0.75rem;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius);
+    border-radius: var(--radius-base);
   }
 
   /* Under a minute left. Amber rather than red: nothing has gone wrong yet. */
@@ -256,7 +266,7 @@
   .broapp-chat__image {
     max-height: 160px;
     width: auto;
-    border-radius: var(--radius);
+    border-radius: var(--radius-base);
   }
 
   .broapp-chat__suggestions {
@@ -361,7 +371,7 @@
     height: 1.9rem;
     padding: 0;
     border: 1px solid transparent;
-    border-radius: var(--radius);
+    border-radius: var(--radius-base);
     background: transparent;
     color: var(--muted-foreground);
     cursor: pointer;
@@ -398,7 +408,7 @@
     gap: 0.4rem;
     padding: 0.35rem 0.75rem;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius);
+    border-radius: var(--radius-base);
     background: var(--secondary);
     color: var(--foreground);
     font: inherit;
@@ -485,7 +495,7 @@
     max-width: 18rem;
     padding: 0.3rem 0.55rem;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius);
+    border-radius: var(--radius-base);
     background: var(--secondary);
     color: var(--foreground);
     font: inherit;
@@ -509,7 +519,7 @@
     width: 22rem;
     max-width: 100%;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius);
+    border-radius: var(--radius-base);
     background: var(--popover);
     color: var(--popover-foreground);
     box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
@@ -569,7 +579,7 @@
     width: 1.9rem;
     height: 1.9rem;
     border: 1px solid transparent;
-    border-radius: var(--radius);
+    border-radius: var(--radius-base);
     background: transparent;
     color: var(--muted-foreground);
     cursor: pointer;
@@ -598,7 +608,7 @@
   .broapp-chat-menu__cancel {
     padding: 0.15rem 0.45rem;
     border: 1px solid var(--border-color);
-    border-radius: calc(var(--radius) - 3px);
+    border-radius: calc(var(--radius-base) - 3px);
     background: transparent;
     font: inherit;
     font-size: 0.85rem;
@@ -644,7 +654,7 @@
     height: 1.6rem;
     padding: 0;
     border: 1px solid transparent;
-    border-radius: calc(var(--radius) - 2px);
+    border-radius: calc(var(--radius-base) - 2px);
     background: transparent;
     color: var(--muted-foreground);
     cursor: pointer;
@@ -674,7 +684,7 @@
     display: flex;
     align-items: center;
     gap: 0.2rem;
-    border-radius: calc(var(--radius) - 2px);
+    border-radius: calc(var(--radius-base) - 2px);
   }
 
   .broapp-chat-threads__row:hover {
@@ -734,7 +744,7 @@
     min-width: 0;
     padding: 0.25rem 0.4rem;
     border: 1px solid var(--border-color);
-    border-radius: calc(var(--radius) - 2px);
+    border-radius: calc(var(--radius-base) - 2px);
     background: var(--background);
   }
 
@@ -750,7 +760,7 @@
     display: inline-flex;
     padding: 2px;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius);
+    border-radius: var(--radius-base);
     background: var(--secondary);
   }
 
@@ -767,7 +777,7 @@
     height: 1.5rem;
     padding: 0;
     border: 0;
-    border-radius: calc(var(--radius) - 3px);
+    border-radius: calc(var(--radius-base) - 3px);
     background: transparent;
     color: var(--muted-foreground);
     cursor: pointer;
