@@ -21,6 +21,7 @@ import type { Ai, FakeAdapter, FakeStep } from 'broapp/ai/host';
 import { createGate, createHostApp } from 'broapp/host';
 import type { HostLogger } from 'broapp/host';
 import { defineContract, mergeContracts, s } from 'broapp/shared';
+import { ollama } from 'broapp-ai-compatible';
 import { createBroappChatTransport } from 'broapp-ai-elements';
 import type { BroappUIMessage } from 'broapp-ai-elements';
 
@@ -299,7 +300,10 @@ describe('expandHistory', () => {
     expect(call?.toolCallId).toBe('c1');
     expect(call?.toolName).toBe('look');
     const inputJson = JSON.stringify(input);
-    expect(call?.input).toBe(`${inputJson.slice(0, HISTORY_LIMITS.inputChars)}<omitted ${String(inputJson.length - HISTORY_LIMITS.inputChars)} chars>`);
+    // An object, never a bare string: a provider sends it as the call's JSON arguments.
+    expect(call?.input).toEqual({
+      truncated: `${inputJson.slice(0, HISTORY_LIMITS.inputChars)}<omitted ${String(inputJson.length - HISTORY_LIMITS.inputChars)} chars>`,
+    });
     const result = (messages[1]?.content as { toolCallId: string; toolName: string; output: { type: string; value: unknown } }[])[0];
     expect(result?.toolCallId).toBe('c1');
     expect(result?.toolName).toBe('look');
@@ -412,6 +416,55 @@ describe('a second turn', () => {
     expect(prompt).toContain('Looked and peeked.');
     expect(prompt).not.toContain('the peek answer');
     started.ai.close();
+  });
+});
+
+describe('an expanded history on a real adapter', () => {
+  test('a cut tool input still reaches an OpenAI-compatible provider as JSON object arguments', async () => {
+    const dataDir = fresh();
+    const bodies: string[] = [];
+    const chunk = (delta: object, finish: string | null): string =>
+      `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: 'qwen', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+    const fetchImpl = Object.assign(
+      (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (!url.endsWith('/chat/completions')) return Promise.resolve(Response.json({ data: [{ id: 'qwen' }] }));
+        bodies.push(String(init?.body ?? ''));
+        return Promise.resolve(
+          new Response(`${chunk({ role: 'assistant', content: 'ok' }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`, {
+            headers: { 'content-type': 'text/event-stream' },
+          }),
+        );
+      },
+      { preconnect: () => undefined },
+    ) as typeof fetch;
+
+    // A turn that edited with hunks far longer than the input bound.
+    const store = openThreads(dataDir, { logger: recordingLogger() });
+    store.saveTranscript('run-long-edit', transcriptOf('c1', { appId: 'items', hunks: [{ path: 'src/a.ts', find: 'f'.repeat(3_000), replace: 'r' }] }, { ok: true }));
+    store.close();
+
+    const ai = createAi({ dataDir, providers: [ollama()], app: { name: 'test', purpose: 'test' }, fetch: fetchImpl, logger: recordingLogger() });
+    await ai.registry.update({ provider: 'ollama', modelId: 'qwen' });
+    const result = await ai.turn(
+      {
+        runId: 'run-after-edit',
+        message: 'continue',
+        history: [
+          { role: 'user', content: 'edit it' },
+          { role: 'assistant', content: '', runId: 'run-long-edit' },
+        ],
+      },
+      { answer: () => true },
+    );
+    expect(result.status).toBe('succeeded');
+    const body = JSON.parse(bodies[0] ?? '{}') as { messages: { tool_calls?: { function: { arguments: string } }[] }[] };
+    const calls = body.messages.flatMap((message) => message.tool_calls ?? []);
+    expect(calls).toHaveLength(1);
+    const parsed: unknown = JSON.parse(calls[0]?.function.arguments ?? 'null');
+    expect(typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)).toBe(true);
+    expect(JSON.stringify(parsed)).toContain('<omitted ');
+    ai.close();
   });
 });
 
