@@ -14,6 +14,9 @@ import { blockedCount, replayEvidence, showLesson, type LessonRecord } from './c
 import { unrelatedHintCredit } from './scoring.ts';
 import type { Knowledge } from './store.ts';
 
+/** The most lessons one list returns; the contract's cap. */
+const LESSONS_MAX = 5_000;
+
 /** How much of one document's text a turn's detail returns. */
 export const DOCUMENT_TEXT_MAX = 20_000;
 /** How much of a case's problem a list returns. */
@@ -191,13 +194,24 @@ function turnOf(knowledge: Knowledge, row: ContextRow, store: RunStore | undefin
           : (serving.outcome ?? (blocked(serving.lesson_id) ? 'blocked' : 'open')),
     }));
 
-  const count = (kind: string): number =>
-    db.query<{ n: number }, [string, string]>('SELECT COUNT(*) AS n FROM events WHERE run_id = ? AND kind = ?').get(row.run_id, kind)
-      ?.n ?? 0;
-  const casesOpened =
-    db.query<{ n: number }, [string]>('SELECT COUNT(*) AS n FROM episodes WHERE run_id = ?').get(row.run_id)?.n ?? 0;
-  const casesResolved =
-    db.query<{ n: number }, [string]>('SELECT COUNT(*) AS n FROM episodes WHERE resolved_run_id = ?').get(row.run_id)?.n ?? 0;
+  // One grouped read for the three event kinds and one for both case counts:
+  // two hundred turns are the list's cap, and each row's reads add up.
+  const byKind = new Map<string, number>();
+  for (const entry of db
+    .query<{ kind: string; n: number }, [string]>(
+      "SELECT kind, COUNT(*) AS n FROM events WHERE run_id = ? AND kind IN ('edit', 'build', 'check') GROUP BY kind",
+    )
+    .all(row.run_id)) {
+    byKind.set(entry.kind, entry.n);
+  }
+  const count = (kind: string): number => byKind.get(kind) ?? 0;
+  const cases = db
+    .query<{ opened: number | null; resolved: number | null }, [string, string, string, string]>(
+      'SELECT SUM(run_id = ?) AS opened, SUM(resolved_run_id = ?) AS resolved FROM episodes WHERE run_id = ? OR resolved_run_id = ?',
+    )
+    .get(row.run_id, row.run_id, row.run_id, row.run_id);
+  const casesOpened = cases?.opened ?? 0;
+  const casesResolved = cases?.resolved ?? 0;
 
   const opened = db
     .query<{ request_blob: string }, [string]>('SELECT request_blob FROM episodes WHERE run_id = ? ORDER BY id LIMIT 1')
@@ -306,15 +320,30 @@ export function knowledgeLessons(
       },
       string[]
     >(
-      `SELECT id, status, review, origin, diagnosis, scope, applies, summary, created_at, reviewed_by FROM lessons${where} ORDER BY id`,
+      `SELECT id, status, review, origin, diagnosis, scope, applies, summary, created_at, reviewed_by FROM lessons${where} ORDER BY id LIMIT ${String(LESSONS_MAX)}`,
     )
     .all(...params);
+  // Every lesson's served counts in one read, and every "waits" line once,
+  // rather than two reads per lesson listed.
+  const outcomesByLesson = new Map<number, { outcome: string | null; included: number; n: number }[]>();
+  for (const entry of knowledge.db
+    .query<{ lesson_id: number; outcome: string | null; included: number; n: number }, []>(
+      'SELECT lesson_id, outcome, included, COUNT(*) AS n FROM servings GROUP BY lesson_id, outcome, included',
+    )
+    .all()) {
+    const list = outcomesByLesson.get(entry.lesson_id) ?? [];
+    list.push(entry);
+    outcomesByLesson.set(entry.lesson_id, list);
+  }
+  const blockedByLesson = new Map<number, number>();
+  for (const entry of knowledge.db
+    .query<{ message: string }, []>("SELECT message FROM events WHERE kind = 'log' AND message LIKE 'a serving of lesson % waits:%'")
+    .all()) {
+    const id = Number(/^a serving of lesson (\d+) waits:/.exec(entry.message)?.[1]);
+    if (Number.isFinite(id)) blockedByLesson.set(id, (blockedByLesson.get(id) ?? 0) + 1);
+  }
   return rows.map((row) => {
-    const outcomes = knowledge.db
-      .query<{ outcome: string | null; included: number; n: number }, [number]>(
-        'SELECT outcome, included, COUNT(*) AS n FROM servings WHERE lesson_id = ? GROUP BY outcome, included',
-      )
-      .all(row.id);
+    const outcomes = outcomesByLesson.get(row.id) ?? [];
     const count = (outcome: string): number =>
       outcomes.filter((entry) => entry.included === 1 && entry.outcome === outcome).reduce((sum, entry) => sum + entry.n, 0);
     return {
@@ -331,7 +360,7 @@ export function knowledgeLessons(
       served: {
         resolved: count('resolved'),
         recurred: count('recurred'),
-        blocked: blockedCount(knowledge, row.id),
+        blocked: blockedByLesson.get(row.id) ?? 0,
         inconclusive: count('inconclusive'),
         unrelated: count('unrelated'),
         none: count('none'),
