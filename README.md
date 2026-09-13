@@ -202,12 +202,15 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.10: the launcher's tab shows its own log. A scroll icon on the
-rail opens the knowledge store's events newest first, filtered by level and
-application, searched by a word, following every five seconds, with the
-shown lines copied as text for a bug report. Launcher only: `broapp-autoapp`
-0.3.9; `broapp-ai-elements` stays at 0.4.5, `broapp` at 0.4.2, the providers
-and `create-broapp` at 0.4.1. Earlier: 0.4.9 (approving a change cycle
+Version 0.4.11: a window on the knowledge layer. A book icon on the rail
+opens a Knowledge panel with three views: the turns (what each was given,
+whether it was cut, and what came of each served lesson), the lessons (their
+servings, provenance and replay evidence) and the cases; a person can
+confirm, retire, write or replace a lesson from it, writing the same rows the
+command line writes, served on the next turn. Launcher only: `broapp-autoapp`
+0.3.10; `broapp-ai-elements` stays at 0.4.5, `broapp` at 0.4.2, the
+providers and `create-broapp` at 0.4.1. Earlier: 0.4.10 (the log in the
+tab), 0.4.9 (approving a change cycle
 works), 0.4.8 (the host keeps each turn's tool
 calls and results and gives them back on "continue"), 0.4.7 (`.DS_Store`, expired
 questions, the waiting strip), 0.4.6 (the running mark), 0.4.5 (remove to
