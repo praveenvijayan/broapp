@@ -84,8 +84,20 @@ export type { CreateDistillerInput, Diagnosis, Distiller } from './distil.ts';
 
 export { REVIEW_REASONS, instructionsHash, reviewFlags } from './freshness.ts';
 
-export { replayEvidence, runKnowledgeCommand, showLesson } from './cli.ts';
+export { blockedCount, replayEvidence, runKnowledgeCommand, showLesson } from './cli.ts';
 export type { KnowledgeCommandOptions, LessonProvenance, LessonRecord, LessonServing } from './cli.ts';
+
+export {
+  LESSON_STAGES,
+  WRITTEN_DETAIL_MAX,
+  WRITTEN_SUMMARY_MAX,
+  WRITTEN_TRIGGER_MAX,
+  confirmLesson,
+  insertLesson,
+  retireLesson,
+  writeLesson,
+} from './review.ts';
+export type { LessonColumns, LessonInput } from './review.ts';
 
 export { SESSION_FILE, openSession } from './session.ts';
 export type { Session } from './session.ts';

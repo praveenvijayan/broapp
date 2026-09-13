@@ -807,3 +807,196 @@ code {
   outline: 2px solid var(--launcher-accent);
   outline-offset: 1px;
 }
+
+/*
+ * The Knowledge panel: the log's overlay, wider, with three views.
+ *
+ * Rows reuse the log's list and its data blocks; what is new is a line that
+ * wraps, because a turn's row carries chips and a lesson's a sentence, and the
+ * chips, which take their colours from the four pairs the page already has.
+ */
+.launcher__k {
+  width: min(56rem, 100%);
+}
+
+.launcher__k-tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border: 1px solid var(--launcher-border);
+  border-radius: 8px;
+  background: var(--launcher-surface);
+}
+
+.launcher__k-tab {
+  padding: 0.25rem 0.7rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--launcher-muted);
+  cursor: pointer;
+}
+
+.launcher__k-tab--active {
+  background: var(--launcher-selected);
+  color: var(--launcher-heading);
+}
+
+.launcher__k-tab:focus-visible,
+.launcher__k-line:focus-visible,
+.launcher__k-link:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 1px;
+}
+
+.launcher__k-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.launcher__k-list {
+  flex: none;
+  overflow-y: visible;
+}
+
+.launcher__k-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.6rem;
+  width: 100%;
+  padding: 0.4rem 0.2rem;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.launcher__k-line:hover {
+  background: var(--launcher-quiet);
+}
+
+.launcher__k-text {
+  flex: 1 1 16rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+}
+
+.launcher__k-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.launcher__k-chip {
+  padding: 0 0.35rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  white-space: nowrap;
+  background: var(--launcher-quiet);
+  color: var(--launcher-muted);
+}
+
+.launcher__k-chip--good {
+  background: var(--launcher-good-surface);
+  color: var(--launcher-good-text);
+}
+
+.launcher__k-chip--warn {
+  background: var(--launcher-warn-surface);
+  color: var(--launcher-warn-text);
+}
+
+.launcher__k-chip--error {
+  background: var(--launcher-error-surface);
+  color: var(--launcher-error-text);
+}
+
+.launcher__k-chip--dim {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.launcher__k-counts {
+  color: var(--launcher-muted);
+  font-size: 0.72rem;
+}
+
+.launcher__k-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.4rem 0.2rem 0.8rem;
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+}
+
+.launcher__k-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 620;
+  color: var(--launcher-heading);
+}
+
+.launcher__k-quote {
+  margin: 0;
+  padding-left: 0.6rem;
+  border-left: 3px solid var(--launcher-border);
+  color: var(--launcher-heading);
+}
+
+.launcher__k-fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 0.8rem;
+  margin: 0;
+}
+
+.launcher__k-fields dt {
+  color: var(--launcher-muted);
+}
+
+.launcher__k-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.launcher__k-document .launcher__log-data {
+  max-height: 24rem;
+  white-space: pre-wrap;
+}
+
+.launcher__k-scroll {
+  overflow-x: auto;
+}
+
+.launcher__k-table {
+  font-size: 0.78rem;
+}
+
+.launcher__k-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--launcher-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}

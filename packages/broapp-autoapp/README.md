@@ -21,3 +21,9 @@ indistinguishable from one you imported yourself.
 move an application's whole directory — releases, source workspace and data —
 into `<root>/trash/`. Nothing is deleted, the launcher never empties that
 directory, and nothing is removed while the application is running.
+
+The **Knowledge** panel in the tab shows what the launcher remembers: each
+engineer turn with what it was given and what became of each lesson served,
+the lessons with their provenance, and the cases; a person confirms, retires,
+writes or replaces a lesson there, writing the same rows `broapp-autoapp
+knowledge confirm|retire` write. See [what the launcher remembers](../../docs/autoapp/learning.md).

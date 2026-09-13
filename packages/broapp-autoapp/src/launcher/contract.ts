@@ -47,6 +47,123 @@ const eventRow = s.object({
   data: s.nullable(s.unknown()),
 });
 
+/**
+ * The Knowledge panel's rows.
+ *
+ * Bounds are generous on text a person wrote or a model produced, because a
+ * refusal of a row the store already holds would hide it; the store is what
+ * limits what goes in, and `review.ts` what a person may write.
+ */
+const count = s.number({ int: true, min: 0 });
+
+const turnRow = {
+  runId: s.string({ max: 200 }),
+  appId: s.nullable(s.string({ max: 40 })),
+  at: s.number({ int: true, min: 0 }),
+  corpusVersion: count,
+  request: s.nullable(s.string({ max: 400 })),
+  words: s.array(s.string({ max: 200 }), { max: 16 }),
+  documents: s.array(
+    s.object({ ref: s.string({ max: 200 }), title: s.string({ max: 300 }), bytes: count, truncated: s.boolean() }),
+    { max: 20 },
+  ),
+  servings: s.array(
+    s.object({ lessonId: count, how: s.string({ max: 20 }), included: s.boolean(), outcome: s.string({ max: 20 }) }),
+    { max: 100 },
+  ),
+  counts: s.object({ edits: count, builds: count, checks: count, casesOpened: count, casesResolved: count }),
+  run: s.nullable(s.object({ steps: count, ms: s.nullable(count), status: s.string({ max: 20 }) })),
+};
+
+const LESSON_STATUSES = ['provisional', 'confirmed', 'superseded', 'retired'] as const;
+
+const lessonRow = s.object({
+  id: count,
+  status: s.string({ max: 20 }),
+  review: s.nullable(s.string({ max: 60 })),
+  origin: s.string({ max: 20 }),
+  diagnosis: s.nullable(s.string({ max: 40 })),
+  scope: s.string({ max: 60 }),
+  applies: s.unknown(),
+  summary: s.string({ max: 4_000 }),
+  createdAt: count,
+  reviewedBy: s.nullable(s.string({ max: 200 })),
+  served: s.object({
+    resolved: count,
+    recurred: count,
+    blocked: count,
+    inconclusive: count,
+    unrelated: count,
+    none: count,
+    open: count,
+    notIncluded: count,
+  }),
+});
+
+const lessonServing = s.object({
+  runId: s.string({ max: 200 }),
+  how: s.string({ max: 20 }),
+  included: s.boolean(),
+  servedAt: count,
+  outcome: s.nullable(s.string({ max: 20 })),
+  attemptKind: s.nullable(s.string({ max: 20 })),
+  attemptCallId: s.nullable(s.string({ max: 200 })),
+  attemptRelease: s.nullable(s.string({ max: 64 })),
+  attemptAt: s.nullable(count),
+});
+
+const lessonRecord = s.object({
+  id: count,
+  version: count,
+  status: s.string({ max: 20 }),
+  review: s.nullable(s.string({ max: 60 })),
+  origin: s.string({ max: 20 }),
+  diagnosis: s.nullable(s.string({ max: 40 })),
+  scope: s.string({ max: 60 }),
+  applies: s.unknown(),
+  summary: s.string({ max: 4_000 }),
+  detail: s.string({ max: 20_000 }),
+  trigger: s.string({ max: 4_000 }),
+  instructionsHash: s.string({ max: 64 }),
+  autoappVersion: s.string({ max: 40 }),
+  createdAt: count,
+  updatedAt: count,
+  reviewedBy: s.nullable(s.string({ max: 200 })),
+  reviewedAt: s.nullable(count),
+  supersedes: s.nullable(count),
+  supersededBy: s.nullable(count),
+  provenance: s.nullable(
+    s.object({
+      episodeId: count,
+      appId: s.string({ max: 40 }),
+      stage: s.string({ max: 20 }),
+      problem: s.string({ max: 20_000 }),
+      request: s.nullable(s.string({ max: 100_000 })),
+      sourceRevBefore: s.string({ max: 80 }),
+      sourceRevAfter: s.nullable(s.string({ max: 80 })),
+      releaseBefore: s.nullable(s.string({ max: 64 })),
+      releaseAfter: s.nullable(s.string({ max: 64 })),
+      diagnosis: s.nullable(s.string({ max: 40 })),
+      reasoning: s.nullable(s.string({ max: 4_000 })),
+    }),
+  ),
+  servings: s.array(lessonServing, { max: 500 }),
+});
+
+const caseRow = {
+  id: count,
+  appId: s.string({ max: 40 }),
+  stage: s.string({ max: 20 }),
+  signature: s.string({ max: 64 }),
+  problem: s.string({ max: 20_000 }),
+  openedAt: count,
+  resolvedAt: s.nullable(count),
+  diagnosis: s.nullable(s.string({ max: 40 })),
+  distillState: s.string({ max: 20 }),
+  lessonId: s.nullable(count),
+  edits: count,
+};
+
 const appSummary = s.object({
   appId: s.string({ max: 40 }),
   name: s.string({ max: 200 }),
@@ -203,6 +320,108 @@ export const launcherContract = defineContract({
         dropped: s.number({ int: true, min: 0 }),
       }),
       summary: "The launcher's own log, newest first: what it did, warned about and failed at.",
+    },
+    'launcher.knowledgeTurns': {
+      effect: 'read',
+      input: s.object({
+        limit: s.optional(s.number({ int: true, min: 1, max: 200 })),
+        appId: s.optional(s.string({ max: 40 })),
+      }),
+      output: s.object({ turns: s.array(s.object(turnRow), { max: 200 }) }),
+      summary: 'The engineer’s turns, newest first: what each was given, whether it was cut, and what came of each lesson.',
+    },
+    'launcher.knowledgeTurn': {
+      effect: 'read',
+      input: s.object({ runId: s.string({ min: 1, max: 200 }) }),
+      output: s.object({
+        turn: s.object({
+          ...turnRow,
+          texts: s.array(s.object({ ref: s.string({ max: 200 }), text: s.string({ max: 20_000 }), cut: s.boolean() }), {
+            max: 20,
+          }),
+          instructions: s.object({ sha256: s.string({ max: 64 }), length: count }),
+          systemLength: count,
+        }),
+      }),
+      summary: 'One turn, with the text of every document it was given.',
+    },
+    'launcher.knowledgeLessons': {
+      effect: 'read',
+      input: s.object({
+        status: s.optional(s.enum(LESSON_STATUSES)),
+        review: s.optional(s.boolean()),
+      }),
+      output: s.object({ lessons: s.array(lessonRow, { max: 5_000 }) }),
+      summary: 'Every lesson, with how its servings came out.',
+    },
+    'launcher.knowledgeLesson': {
+      effect: 'read',
+      input: s.object({ id: s.number({ int: true, min: 1 }) }),
+      output: s.object({
+        lesson: lessonRecord,
+        blocked: count,
+        unrelatedByStage: count,
+        evidence: s.array(s.string({ max: 2_000 }), { max: 200 }),
+      }),
+      summary: 'One lesson: its text, where it came from, every serving, and what its replays found.',
+    },
+    'launcher.knowledgeCases': {
+      effect: 'read',
+      input: s.object({
+        limit: s.optional(s.number({ int: true, min: 1, max: 200 })),
+        appId: s.optional(s.string({ max: 40 })),
+      }),
+      output: s.object({ cases: s.array(s.object(caseRow), { max: 200 }) }),
+      summary: 'The failures the engineer met and how they were repaired, newest first.',
+    },
+    'launcher.knowledgeCase': {
+      effect: 'read',
+      input: s.object({ id: s.number({ int: true, min: 1 }) }),
+      output: s.object({
+        case: s.object({
+          ...caseRow,
+          runId: s.string({ max: 200 }),
+          request: s.nullable(s.string({ max: 100_000 })),
+          editLog: s.string({ max: 10_000 }),
+          reasoning: s.nullable(s.string({ max: 4_000 })),
+          sourceRevBefore: s.string({ max: 80 }),
+          sourceRevAfter: s.nullable(s.string({ max: 80 })),
+          releaseBefore: s.nullable(s.string({ max: 64 })),
+          releaseAfter: s.nullable(s.string({ max: 64 })),
+        }),
+      }),
+      summary: 'One case in full: the problem, the request, the edits and the revisions either side.',
+    },
+    'launcher.lessonReview': {
+      // A write, and a person's: it changes what the engineer is served from
+      // the next turn on. No engineer tool names it, so on channel `ai` it
+      // could only arrive through MCP or a workflow, and the gate would ask.
+      effect: 'write',
+      input: s.object({
+        id: s.number({ int: true, min: 1 }),
+        decision: s.enum(['confirm', 'retire']),
+        by: s.string({ min: 1, max: 80 }),
+      }),
+      output: s.object({ changed: s.boolean(), status: s.string({ max: 20 }) }),
+      summary: 'Confirm or retire a lesson, as `knowledge confirm` and `knowledge retire` do.',
+    },
+    'launcher.lessonWrite': {
+      effect: 'write',
+      input: s.object({
+        // Wider than a lesson may be, so the refusal that names the field and
+        // its limit comes from `writeLesson` rather than from the schema.
+        summary: s.string({ max: 4_000 }),
+        detail: s.string({ max: 20_000 }),
+        trigger: s.string({ max: 4_000 }),
+        scope: s.string({ max: 60 }),
+        stage: s.optional(s.string({ max: 20 })),
+        routes: s.optional(s.array(s.string({ max: 400 }), { max: 50 })),
+        files: s.optional(s.array(s.string({ max: 400 }), { max: 50 })),
+        supersedes: s.optional(s.number({ int: true, min: 1 })),
+        by: s.string({ min: 1, max: 80 }),
+      }),
+      output: s.object({ id: count }),
+      summary: 'Write a confirmed lesson by hand, or replace one with a corrected lesson that supersedes it.',
     },
     'launcher.grantsGet': {
       effect: 'read',

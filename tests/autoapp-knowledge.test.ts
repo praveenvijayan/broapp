@@ -15,6 +15,8 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
 import {
   cpSync,
   existsSync,
@@ -30,6 +32,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { aiContract } from 'broapp/ai';
+import type { BroappClient } from 'broapp/client';
 import { createAi, createFakeAdapter } from 'broapp/ai/host';
 import { canonicalJson, createGate, createPendingApprovals } from 'broapp/host';
 import type { Envelope, Gate, HostLogger } from 'broapp/host';
@@ -104,6 +107,8 @@ import {
   type Supervisor,
 } from 'broapp-autoapp/launcher';
 import { layout, setCurrent, type Layout } from 'broapp-autoapp/spec';
+
+import { KnowledgePanel } from '../packages/broapp-autoapp/src/launcher/ui/KnowledgePanel.tsx';
 
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
 import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
@@ -2927,4 +2932,260 @@ describe.skipIf(!available)('12d: replay with children, and the evaluation', () 
     expect(lessonsIn('learned')).toEqual([learned]);
     expect(lessonsIn('orientation+facts')).toEqual([]);
   }, 600_000);
+});
+
+// ── 12k: a window on the knowledge layer ───────────────────────────────────
+
+/** The launcher's routes and the AI layer's, as one contract. */
+const launcherAndAi = mergeContracts(launcherContract, aiContract);
+/** A connected launcher client, as the tests below use one. */
+type LauncherClient = BroappClient<typeof launcherAndAi>;
+
+/** Mount a tab once and connect to it, choosing the fake model. */
+async function openTab(tab: LauncherTab): Promise<LauncherClient> {
+  live = await harness((bridge) => tab.mount(bridge));
+  const client = await live.connect(launcherAndAi);
+  closers.push(() => client.close());
+  await client.call('ai.settingsUpdate', { provider: 'fake', modelId: 'fake-1' });
+  return client;
+}
+
+/** One turn over an open client, approving whatever it asks, to its `run` event. */
+async function turnOver(where: World, client: LauncherClient, runId: string, message: string): Promise<void> {
+  let finished = false;
+  const asked = new Set<string>();
+  await client.subscribe(
+    'ai.chat',
+    { runId, message, refs: [], history: [] },
+    {
+      onEvent: (event) => {
+        const seen = event as { type: string; callId?: string };
+        if (seen.type === 'confirm' && seen.callId !== undefined && !asked.has(seen.callId)) {
+          asked.add(seen.callId);
+          void client.call('ai.chatConfirm', { runId, callId: seen.callId, approve: true });
+        }
+        if (seen.type === 'done' || seen.type === 'error') finished = true;
+      },
+      onError: () => {
+        finished = true;
+      },
+    },
+  );
+  while (!finished) await Bun.sleep(10);
+  await until(() => events(where.knowledge, 'run').some((row) => row.run_id === runId), 5_000, 'the run event');
+}
+
+/** The text of the lessons document a turn was given, or `null` when it had none. */
+function lessonsDocument(knowledge: Knowledge, runId: string): string | null {
+  const row = knowledge.db.query<{ included: string }, [string]>('SELECT included FROM contexts WHERE run_id = ?').get(runId);
+  const entry = (JSON.parse(row?.included ?? '[]') as { ref: string; blob: string }[]).find((item) => item.ref.startsWith('lessons:'));
+  return entry === undefined ? null : knowledge.getBlob(entry.blob);
+}
+
+describe('12k: the Knowledge panel', () => {
+  test('the turns route lists a turn with what it was given and what it did', async () => {
+    const where = makeWorld();
+    const adapter = createFakeAdapter({
+      script: [
+        {
+          kind: 'tool',
+          name: 'source.edit',
+          input: {
+            appId: 'items',
+            message: 'rename the label column',
+            hunks: [{ path: 'src/shared/views.ts', find: "header: 'Label'", replace: "header: 'What it is'" }],
+          },
+          then: [{ kind: 'text', chunks: ['renamed it'] }],
+        },
+      ],
+    });
+    const client = await openTab(makeTab(where, adapter));
+    await turnOver(where, client, 'run-window1', 'rename the label column');
+
+    const { turns } = await client.call('launcher.knowledgeTurns', { limit: 10 });
+    const turn = turns.find((entry) => entry.runId === 'run-window1');
+    if (turn === undefined) throw new Error('the turn is not listed');
+    expect(turn.appId).toBe('items');
+    expect(turn.documents.slice(0, 2).map((document) => [document.ref, document.truncated])).toEqual([
+      ['digest:items', false],
+      ['evidence:items', false],
+    ]);
+    expect(turn.documents[0]?.bytes).toBeGreaterThan(0);
+    expect(turn.counts).toMatchObject({ edits: events(where.knowledge, 'edit').length, builds: 0, checks: 0, casesOpened: 0 });
+    expect(turn.counts.edits).toBe(1);
+    expect(turn.words).toContain('label');
+
+    const { turn: detail } = await client.call('launcher.knowledgeTurn', { runId: 'run-window1' });
+    const row = where.knowledge.db
+      .query<{ included: string; instructions_blob: string }, [string]>('SELECT included, instructions_blob FROM contexts WHERE run_id = ?')
+      .get('run-window1');
+    const digest = (JSON.parse(row?.included ?? '[]') as { ref: string; blob: string }[]).find((item) => item.ref === 'digest:items');
+    expect(detail.texts.find((entry) => entry.ref === 'digest:items')?.text).toBe(where.knowledge.getBlob(digest?.blob ?? '') ?? 'missing');
+    expect(detail.instructions.sha256).toBe(row?.instructions_blob ?? 'missing');
+    expect(detail.systemLength).toBeGreaterThan(0);
+    await expect(client.call('launcher.knowledgeTurn', { runId: 'no-such-run' })).rejects.toMatchObject({ code: 'not_found' });
+  }, 90_000);
+
+  test('lessons are listed with their servings, and a confirmation from the tab is served on the next turn', async () => {
+    const where = makeWorld();
+    const tab = makeTab(where, createFakeAdapter());
+    const client = await openTab(tab);
+
+    const { lessons: seeds } = await client.call('launcher.knowledgeLessons', {});
+    expect(seeds.length).toBe(SEED_LESSONS.length);
+    for (const seed of seeds) expect(seed).toMatchObject({ status: 'confirmed', origin: 'curated' });
+
+    const summary = 'A colour tag is stored on the item row itself, as plain text.';
+    const id = storeLesson(where.knowledge, { applies: {}, summary, trigger: 'colour tag item row' });
+    await turnOver(where, client, 'run-window2', 'store a colour tag on each item');
+    expect(lessonsDocument(where.knowledge, 'run-window2')).toContain(summary);
+
+    const listed = (await client.call('launcher.knowledgeLessons', { status: 'provisional' })).lessons.find((lesson) => lesson.id === id);
+    const served = listed?.served;
+    expect(served === undefined ? 0 : Object.values(served).reduce((sum, n) => sum + n, 0)).toBe(1);
+    expect(served?.notIncluded).toBe(0);
+
+    const { turns } = await client.call('launcher.knowledgeTurns', {});
+    expect(turns.find((entry) => entry.runId === 'run-window2')?.servings).toEqual([
+      expect.objectContaining({ lessonId: id, how: 'turn', included: true }),
+    ]);
+
+    await expect(client.call('launcher.lessonReview', { id, decision: 'confirm', by: 'pv' })).resolves.toEqual({ changed: true, status: 'confirmed' });
+    expect(events(where.knowledge, 'log').some((row) => row.message === `lesson ${String(id)} confirmed by pv`)).toBe(true);
+    const shown = await client.call('launcher.knowledgeLesson', { id });
+    expect(shown.lesson).toMatchObject({ status: 'confirmed', reviewedBy: 'pv' });
+    expect(shown.lesson.servings).toHaveLength(1);
+
+    await turnOver(where, client, 'run-window3', 'store a colour tag on each item');
+    expect(lessonsDocument(where.knowledge, 'run-window3')).toContain(summary);
+    expect(lessonsDocument(where.knowledge, 'run-window3')).not.toContain(`${summary} (provisional)`);
+
+    // A person's route only: a write, and no engineer tool reaches it.
+    expect(launcherContract.operations['launcher.lessonReview'].effect).toBe('write');
+    expect(launcherContract.operations['launcher.lessonWrite'].effect).toBe('write');
+    // The one knowledge tool the engineer has reads a lesson; none confirms, retires or writes one.
+    const tools = Object.keys(where.tools).filter((name) => /lesson|knowledge/i.test(name));
+    expect(tools).toEqual(['knowledge.show']);
+    expect(where.tools['knowledge.show']?.effect).toBe('read');
+  }, 90_000);
+
+  test('a lesson replaced from the tab is served in place of the one it supersedes', async () => {
+    const where = makeWorld();
+    const client = await openTab(makeTab(where, createFakeAdapter()));
+    const seed = seedId(where.knowledge, 0);
+    const old = SEED_LESSONS[0]?.summary ?? '';
+    const replacement = 'A button that only moves to another page names a read operation, with `then` naming the page it goes to.';
+
+    await turnOver(where, client, 'run-window4', 'add a back button that navigates to the page of all items');
+    expect(lessonsDocument(where.knowledge, 'run-window4')).toContain(old);
+
+    const { id } = await client.call('launcher.lessonWrite', {
+      summary: replacement,
+      detail: 'Corrected by a person from the seed.',
+      trigger: SEED_LESSONS[0]?.trigger ?? '',
+      scope: 'global',
+      stage: 'views',
+      files: ['src/shared/views.ts'],
+      supersedes: seed,
+      by: 'pv',
+    });
+    expect((await client.call('launcher.knowledgeLesson', { id: seed })).lesson).toMatchObject({ status: 'superseded', supersededBy: id });
+    await expect(
+      client.call('launcher.lessonWrite', { summary: '', detail: 'd', trigger: 't', scope: 'global', by: 'pv' }),
+    ).rejects.toMatchObject({ code: 'invalid_input' });
+
+    await turnOver(where, client, 'run-window5', 'add a back button that navigates to the page of all items');
+    const document = lessonsDocument(where.knowledge, 'run-window5');
+    expect(document).toContain(replacement);
+    expect(document).not.toContain(old);
+  }, 90_000);
+
+  test('the cases route lists a case a failing build opened and a later build resolved', async () => {
+    const where = makeWorld({
+      git: true,
+      turn: (runId) =>
+        runId === 'r-case' ? { message: 'give ping an effect', contextId: null, model: { provider: 'fake', id: 'fake-1' } } : undefined,
+    });
+    const contract = join(where.source, 'src', 'shared', 'contract.ts');
+    rewrite(contract, / {6}effect: 'external',\r?\n/, '');
+    git(where.source, 'commit', '--quiet', '--no-gpg-sign', '-am', 'drop an effect');
+    const failed = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true, id: 'r-case:b1' })) as { ok: boolean };
+    expect(failed.ok).toBe(false);
+    await callTool(
+      where,
+      'source.edit',
+      {
+        appId: 'items',
+        message: 'put the effect back',
+        hunks: [
+          {
+            path: 'src/shared/contract.ts',
+            find: "summary: 'Pretend to reach outside this machine.',",
+            replace: "effect: 'external',\n      summary: 'Pretend to reach outside this machine.',",
+          },
+        ],
+      },
+      { approve: true, id: 'r-case:e1' },
+    );
+    const fixed = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true, id: 'r-case:b2' })) as { ok: boolean };
+    expect(fixed.ok).toBe(true);
+
+    const client = await openTab(makeTab(where, createFakeAdapter()));
+    const { cases } = await client.call('launcher.knowledgeCases', { appId: 'items' });
+    expect(cases).toHaveLength(1);
+    const [found] = cases;
+    expect(found).toMatchObject({ appId: 'items', stage: 'contract', edits: 1, lessonId: null, distillState: 'pending' });
+    expect(found?.resolvedAt).not.toBeNull();
+    const { case: detail } = await client.call('launcher.knowledgeCase', { id: found?.id ?? 0 });
+    expect(detail.request).toBe('give ping an effect');
+    expect(detail.editLog).toContain('put the effect back');
+    expect(detail.sourceRevAfter).not.toBeNull();
+  }, 120_000);
+
+  test('a tab without a knowledge store refuses every knowledge route, and the panel says why', async () => {
+    const where = makeWorld();
+    const tab = createLauncherTab({
+      layout: where.root,
+      supervisor: where.supervisor,
+      journal: where.journal,
+      gate: where.gate,
+      dataDir: join(where.directory, 'launcher'),
+      store: where.store,
+      templates: TEMPLATES,
+      versions: STARTER_VERSIONS,
+      install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
+      initGit: () => false,
+      providers: [createFakeAdapter()],
+      fetch: noNetwork,
+      logger: quiet,
+      openBrowser: () => Promise.resolve(true),
+    });
+    closers.push(() => tab.ai.close());
+    const client = await openTab(tab);
+    const calls: (() => Promise<unknown>)[] = [
+      () => client.call('launcher.knowledgeTurns', {}),
+      () => client.call('launcher.knowledgeTurn', { runId: 'r' }),
+      () => client.call('launcher.knowledgeLessons', {}),
+      () => client.call('launcher.knowledgeLesson', { id: 1 }),
+      () => client.call('launcher.knowledgeCases', {}),
+      () => client.call('launcher.knowledgeCase', { id: 1 }),
+      () => client.call('launcher.lessonReview', { id: 1, decision: 'retire', by: 'pv' }),
+      () => client.call('launcher.lessonWrite', { summary: 's', detail: 'd', trigger: 't', scope: 'global', by: 'pv' }),
+    ];
+    let message = '';
+    for (const call of calls) {
+      const refused = await call().then(
+        () => null,
+        (cause: unknown) => cause as { code?: string; message?: string },
+      );
+      expect(refused?.code).toBe('unavailable');
+      message = refused?.message ?? '';
+    }
+    expect(message).toBe('This launcher keeps no knowledge store.');
+
+    const markup = renderToString(createElement(KnowledgePanel, { apps: [], onClose: () => undefined, error: message }));
+    expect(markup).toContain('This launcher keeps no knowledge store.');
+    expect(markup).toContain('aria-label="Knowledge"');
+    expect(markup).toContain('role="alert"');
+  }, 60_000);
 });

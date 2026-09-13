@@ -25,6 +25,7 @@ import { s } from 'broapp/shared';
 import { BUILD_STAGES } from '../launcher/candidate.ts';
 
 import { sanitise, type EventLog } from './log.ts';
+import { insertLesson } from './review.ts';
 import type { Knowledge } from './store.ts';
 
 /** The six causes a failure can be put down to. */
@@ -443,35 +444,30 @@ export function createDistiller(input: CreateDistillerInput): Distiller {
       };
       const version =
         (db.query<{ v: number | null }, []>('SELECT MAX(version) AS v FROM corpus_versions').get()?.v ?? 0) + 1;
-      const inserted = db
-        .query<
-          null,
-          [number, number, number | null, string, string, string, string, string, string, string, string, number, number]
-        >(
-          `INSERT OR IGNORE INTO lessons
-             (version, status, origin, episode_id, supersedes, diagnosis, scope, applies, summary, detail, trigger,
-              instructions_hash, autoapp_version, created_at, updated_at)
-           VALUES (?, 'provisional', 'distilled', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
+      const inserted = insertLesson(
+        db,
+        {
           version,
-          episode.id,
-          same?.id ?? null,
-          answer.diagnosis,
+          status: 'provisional',
+          origin: 'distilled',
+          episodeId: episode.id,
+          supersedes: same?.id ?? null,
+          diagnosis: answer.diagnosis,
           scope,
-          JSON.stringify(applies),
-          sanitise(lesson.summary),
-          sanitise(lesson.detail),
-          lesson.trigger.map(sanitise).join(' '),
-          hash,
-          input.autoappVersion,
+          applies: JSON.stringify(applies),
+          summary: sanitise(lesson.summary),
+          detail: sanitise(lesson.detail),
+          trigger: lesson.trigger.map(sanitise).join(' '),
+          instructionsHash: hash,
+          autoappVersion: input.autoappVersion,
           now,
-          now,
-        );
+        },
+        { orIgnore: true },
+      );
       // The unique index on `episode_id`: a second distillation of the same
       // case is a no-op, whatever the model said the second time.
-      if (inserted.changes === 0) return;
-      lessonId = Number(inserted.lastInsertRowid);
+      if (inserted === null) return;
+      lessonId = inserted;
       db.query<null, [number, string, string]>('INSERT INTO lessons_fts (rowid, summary, trigger) VALUES (?, ?, ?)').run(
         lessonId,
         sanitise(lesson.summary),

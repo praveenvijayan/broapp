@@ -31,12 +31,13 @@ import {
 import type { BroappChatControls, BroappScheme } from 'broapp-ai-elements/ui';
 import { useConnection, useOperation } from 'broapp/react';
 import { announcePending, browserSurface } from 'broapp-autoapp/react';
-import { History, PanelRight, Plus, ScrollText, SlidersHorizontal } from 'lucide-react';
+import { BookOpen, History, PanelRight, Plus, ScrollText, SlidersHorizontal } from 'lucide-react';
 
 import type { LauncherContract } from '../contract.ts';
 
 import { AppsTable } from './AppsTable.tsx';
 import { CandidatePanel } from './CandidatePanel.tsx';
+import { KnowledgePanel } from './KnowledgePanel.tsx';
 import { LogsPanel } from './LogsPanel.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
 import { readScheme, applyScheme, SCHEME_KEY } from './scheme.ts';
@@ -110,6 +111,7 @@ export function App(): React.ReactElement {
   const [selected, setSelected] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [showKnowledge, setShowKnowledge] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(() => remembered(HISTORY_OPEN, true));
   const [appsOpen, setAppsOpen] = useState(() => remembered(APPS_OPEN, true));
   const [scheme, setScheme] = useState<BroappScheme>(() => readScheme());
@@ -301,6 +303,21 @@ export function App(): React.ReactElement {
     };
   }, [showSettings]);
 
+  // Escape closes the Knowledge panel, as it does Settings. Not while a field
+  // inside it has focus and something to lose: a half-written lesson is closed
+  // with its own Cancel.
+  useEffect(() => {
+    if (!showKnowledge) return undefined;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      const active = document.activeElement;
+      if (active !== null && (active.tagName === 'TEXTAREA' || active.closest('form') !== null)) return;
+      setShowKnowledge(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showKnowledge]);
+
   // The host opens the tab; this page never sees the address. All it can be
   // told is that no browser could be opened.
   const notOpened = open.data?.opened === false;
@@ -353,6 +370,16 @@ export function App(): React.ReactElement {
           type="button"
         >
           <ScrollText aria-hidden="true" size={17} />
+        </button>
+        <button
+          aria-expanded={showKnowledge}
+          aria-label="Knowledge"
+          className="launcher__rail-button"
+          onClick={() => setShowKnowledge((open) => !open)}
+          title="Knowledge"
+          type="button"
+        >
+          <BookOpen aria-hidden="true" size={17} />
         </button>
         <div className="launcher__rail-spacer" />
         {/*
@@ -515,6 +542,18 @@ export function App(): React.ReactElement {
         <>
           <button aria-label="Close log" className="launcher__scrim" onClick={() => setShowLogs(false)} type="button" />
           <LogsPanel apps={rows.map((row) => row.appId)} onClose={() => setShowLogs(false)} />
+        </>
+      ) : null}
+
+      {showKnowledge ? (
+        <>
+          <button
+            aria-label="Close knowledge"
+            className="launcher__scrim"
+            onClick={() => setShowKnowledge(false)}
+            type="button"
+          />
+          <KnowledgePanel apps={rows.map((row) => row.appId)} onClose={() => setShowKnowledge(false)} />
         </>
       ) : null}
 

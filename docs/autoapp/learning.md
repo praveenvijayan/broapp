@@ -38,6 +38,56 @@ answers that it keeps no log.
 The application the person last selected, by a row click or through any tool
 that names an application, is kept in `<root>/launcher/session.json`.
 
+## A window on it
+
+The book icon on the launcher tab's rail opens the **Knowledge** panel, over
+the page like the log, with three views. It reads when it opens and when
+Refresh is pressed, never on a timer, and every read writes nothing.
+
+- **Turns**, newest first. One row per `contexts` row: when, the application,
+  the request (from the case the turn opened, when it opened one; otherwise the
+  words its documents were searched by, because the request itself is kept only
+  with a case), a chip for each document delivered — `orientation`, `evidence`,
+  `lessons ×n`, struck through when the budget cut it — the turn's edits,
+  builds, checks and cases opened, and one chip per serving with what came of
+  it: `resolved`, `recurred`, `blocked`, `inconclusive`, `unrelated`, `none`,
+  `open`, or `not included`. Opening a row shows each document's text as it
+  was delivered, its byte count, the instructions' hash, and links to the
+  lessons served. Read down the column of chips to see, turn by turn, what the
+  loop delivered and what came of it.
+- **Lessons**, filtered by status (provisional and confirmed by default) and
+  by *needs review*. Opening one shows its detail, trigger and `applies`, the
+  case it came from with the distiller's diagnosis and reasoning, every serving,
+  and the replay table `knowledge show` prints.
+- **Cases**, newest first: stage, signature, open or resolved, the diagnosis,
+  the distil state and the lesson that came of it. Opening one shows the
+  problem in full, the request, the edits appended while it was open, and the
+  revisions and releases either side.
+
+What a person may change from it is exactly what the command line can, and
+one thing more: **Confirm** a provisional lesson (or a confirmed one carrying
+a review flag, which clears the flag), **Retire** a provisional or confirmed
+lesson, **Write a lesson** by hand, and **Replace** a lesson with a corrected
+one. A written lesson is curated and confirmed, and its writer is its
+reviewer. A replacement is a new lesson with `supersedes` set; the old one
+becomes `superseded` and leaves the index in the same transaction, as the
+distiller's own supersession does. A lesson's text is never edited in place,
+so its servings and its case keep pointing at what was actually served.
+Retire and Replace ask inline first. A `method_unclear` lesson is shown and
+can be retired, and is still never served.
+
+The writes are `launcher.lessonReview` and `launcher.lessonWrite`, routes on
+channel `user` with effect `write`; no engineer tool reaches them. They call
+the same functions in `knowledge/review.ts` that `knowledge confirm` and
+`knowledge retire` call, so the tab and the command line write the same
+rows — the lesson, its index row, one corpus version — with the name the
+person gave (`Reviewing as`, remembered in the browser, `tab` by default) and
+one `log` event saying who did it. The serve layer reads lessons from the
+database at every turn, so a change is served on the very next one. The
+command line still refuses to change anything while a launcher serves from its
+root; the tab is that launcher, so there is nothing to refuse. A launcher
+started without the store answers every knowledge route with `unavailable`.
+
 ## Identity
 
 Every row carries the run id, the call id, the application, the release and the
@@ -404,6 +454,6 @@ are deleted. Cases and contexts are never deleted.
 
 | What | Where |
 |---|---|
-| A Lessons panel in the launcher tab, with the replay table beside each lesson | [backlog](backlog.md) |
+| Turning a turn's documents or hints on and off from the tab | [backlog](backlog.md) |
 | Promoting a lesson without a person | [backlog](backlog.md) |
 | Recording a data snapshot when a check case opens | [backlog](backlog.md) |

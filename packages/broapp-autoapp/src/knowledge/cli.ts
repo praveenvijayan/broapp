@@ -15,6 +15,7 @@ import { join } from 'node:path';
 
 import type { Layout } from '../spec/index.ts';
 
+import { confirmLesson, retireLesson } from './review.ts';
 import { unrelatedHintCredit } from './scoring.ts';
 import { openKnowledge, type Knowledge } from './store.ts';
 import { replayTable, type ReplayRow } from './verdict.ts';
@@ -219,7 +220,7 @@ export function showLesson(knowledge: Knowledge, id: number): LessonRecord | nul
  * `blocked` is never a stored outcome — the serving stays open for the build
  * that does run its stage — so it is counted from the events that record it.
  */
-function blockedCount(knowledge: Knowledge, id: number): number {
+export function blockedCount(knowledge: Knowledge, id: number): number {
   return (
     knowledge.db
       .query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM events WHERE kind = 'log' AND message LIKE ?")
@@ -502,24 +503,16 @@ export function runKnowledgeCommand(options: KnowledgeCommandOptions): number {
             }
           }
         }
-        const changed = db.transaction((): boolean => {
-          const updated = db
-            .query<null, [string, string, number, number, number]>(
-              `UPDATE lessons SET status = ?, review = NULL, reviewed_by = ?, reviewed_at = ?, updated_at = ?
-                WHERE id = ? AND status IN ('provisional', 'confirmed')`,
-            )
-            .run(status, by, now, now, id).changes;
-          if (updated === 0) return false;
-          // Retired lessons leave the index, so nothing matches them again.
-          if (status === 'retired') db.query<null, [number]>('DELETE FROM lessons_fts WHERE rowid = ?').run(id);
-          db.query<null, [number, string, number]>(
-            `INSERT INTO corpus_versions (version, lesson_id, change, at)
-             VALUES ((SELECT COALESCE(MAX(version), 0) + 1 FROM corpus_versions), ?, ?, ?)`,
-          ).run(id, command, now);
-          return true;
-        })();
+        // The same rows the launcher's tab writes, from the same functions.
+        const changed = command === 'confirm' ? confirmLesson(knowledge, id, by, now) : retireLesson(knowledge, id, by, now);
         if (!changed) {
           const current = db.query<{ status: string }, [number]>('SELECT status FROM lessons WHERE id = ?').get(id);
+          // A confirmed lesson with nothing to review is already what a
+          // confirmation would make it: said, and not an error.
+          if (command === 'confirm' && current?.status === 'confirmed') {
+            out(`lesson ${String(id)} is already confirmed`);
+            return 0;
+          }
           err(
             current === null
               ? `there is no lesson ${String(id)}`

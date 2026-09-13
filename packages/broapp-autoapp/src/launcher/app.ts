@@ -16,8 +16,19 @@ import type { Bridge } from 'brobridge';
 
 import { startPreview } from '../engineer/preview.ts';
 import type { CandidateStates } from '../engineer/state.ts';
+import type { RunStore } from '../host/run-store.ts';
 import type { EventLog } from '../knowledge/log.ts';
+import { confirmLesson, retireLesson, writeLesson } from '../knowledge/review.ts';
 import type { Session } from '../knowledge/session.ts';
+import type { Knowledge } from '../knowledge/store.ts';
+import {
+  knowledgeCase,
+  knowledgeCases,
+  knowledgeLesson,
+  knowledgeLessons,
+  knowledgeTurn,
+  knowledgeTurns,
+} from '../knowledge/window.ts';
 import {
   listReleases,
   readCurrent,
@@ -51,6 +62,13 @@ export interface CreateLauncherAppOptions {
   readonly log?: EventLog;
   /** Where the application the person selected is remembered. */
   readonly session?: Session;
+  /**
+   * The knowledge store the Knowledge panel reads and a person's lesson
+   * changes are written to. Absent, every knowledge route answers `unavailable`.
+   */
+  readonly knowledge?: Knowledge;
+  /** The launcher's run store, for a turn's steps, duration and status. */
+  readonly store?: RunStore;
   /**
    * Open a URL in the person's browser. Defaults to the operating system's
    * opener; tests pass a stub so a suite does not open tabs.
@@ -223,6 +241,97 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       })],
       dropped: log.stats().dropped,
     };
+  });
+
+  /**
+   * The knowledge store, or the refusal every knowledge route gives without one.
+   *
+   * Reads here write nothing. The three writes write what `knowledge confirm`
+   * and `knowledge retire` write, from the same functions, and one event each
+   * saying who did it; the serve layer reads lessons from the database at every
+   * turn, so the next turn is served the change.
+   */
+  function store(): Knowledge {
+    if (options.knowledge === undefined) throw publicError.unavailable('This launcher keeps no knowledge store.');
+    return options.knowledge;
+  }
+
+  host.operation('launcher.knowledgeTurns', (filter) => ({
+    turns: knowledgeTurns(store(), filter, options.store).map((turn) => ({
+      ...turn,
+      words: [...turn.words],
+      documents: turn.documents.map((document) => ({ ...document })),
+      servings: turn.servings.map((serving) => ({ ...serving })),
+    })),
+  }));
+
+  host.operation('launcher.knowledgeTurn', ({ runId }) => {
+    const turn = knowledgeTurn(store(), runId, options.store);
+    if (turn === null) throw publicError.notFound(`There is no recorded turn ${runId}.`);
+    return {
+      turn: {
+        ...turn,
+        words: [...turn.words],
+        documents: turn.documents.map((document) => ({ ...document })),
+        servings: turn.servings.map((serving) => ({ ...serving })),
+        texts: turn.texts.map((entry) => ({ ...entry })),
+      },
+    };
+  });
+
+  host.operation('launcher.knowledgeLessons', (filter) => ({ lessons: knowledgeLessons(store(), filter) }));
+
+  host.operation('launcher.knowledgeLesson', ({ id }) => {
+    const found = knowledgeLesson(store(), id);
+    if (found === null) throw publicError.notFound(`There is no lesson ${String(id)}.`);
+    return {
+      ...found,
+      // The newest five hundred: a lesson served for months has more, and the
+      // command line's `show` still prints every one.
+      lesson: { ...found.lesson, servings: found.lesson.servings.slice(-500).map((serving) => ({ ...serving })) },
+    };
+  });
+
+  host.operation('launcher.knowledgeCases', (filter) => ({ cases: knowledgeCases(store(), filter) }));
+
+  host.operation('launcher.knowledgeCase', ({ id }) => {
+    const found = knowledgeCase(store(), id);
+    if (found === null) throw publicError.notFound(`There is no case ${String(id)}.`);
+    return { case: found };
+  });
+
+  host.operation('launcher.lessonReview', ({ id, decision, by }) => {
+    const knowledge = store();
+    const changed = decision === 'confirm' ? confirmLesson(knowledge, id, by) : retireLesson(knowledge, id, by);
+    const status = knowledge.db.query<{ status: string }, [number]>('SELECT status FROM lessons WHERE id = ?').get(id)?.status;
+    if (status === undefined) throw publicError.notFound(`There is no lesson ${String(id)}.`);
+    if (changed) {
+      options.log?.event('log', `lesson ${String(id)} ${decision === 'confirm' ? 'confirmed' : 'retired'} by ${by}`);
+    }
+    return { changed, status };
+  });
+
+  host.operation('launcher.lessonWrite', ({ by, stage, routes, files, supersedes, ...fields }) => {
+    const id = writeLesson(
+      store(),
+      {
+        ...fields,
+        applies: {
+          ...(stage === undefined ? {} : { stage }),
+          ...(routes === undefined ? {} : { routes }),
+          ...(files === undefined ? {} : { files }),
+        },
+        ...(supersedes === undefined ? {} : { supersedes }),
+      },
+      by,
+    );
+    options.log?.event(
+      'log',
+      supersedes === undefined
+        ? `lesson ${String(id)} written by ${by}`
+        : `lesson ${String(id)} written by ${by}, superseding lesson ${String(supersedes)}`,
+    );
+    return { id };
   });
 
   host.operation('launcher.appSelect', ({ appId }) => {
