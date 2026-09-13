@@ -35,6 +35,24 @@ Brobridge's two-minute default: that default guards a URL in shell scrollback,
 and a supervised child's is never printed. Without it, a preview or an
 activated release that nobody clicked within two minutes could never be opened.
 
+**One token per address.** Brobridge 0.2.2 lets a bridge hold more than one
+live launch token, and every address is still single-use and loopback. A token
+is minted by the host on its own decision and never on a browser's request:
+for a person's click in a tab that is already authenticated, or for a local
+process over the control connection. The bridge keeps at most eight live and
+drops the oldest when a ninth is minted.
+
+**Back to the panel.** An application the launcher serves draws an **Autoapp**
+mark. Its click calls `autoapp.panel { mint: true }`, a route the child runtime
+mounts beside the application's own; the child asks the launcher over IPC, and
+the launcher mints a fresh address for its own tab and hands it to the
+operating system's browser opener. The address never reaches the application's
+page, for the reason above: a page on the application's port navigating to the
+panel's port arrives `same-site` and would be refused. When no browser can be
+opened the address goes to the launcher's terminal, and the page says so. A
+launcher started with `serve <appId>` has no panel; the page's probe at load
+hears `available: false` and draws no mark.
+
 Creating an application ends the same way. `launcher.appCreate` is a `write`,
 which on channel `user` is a person's own click, and it finishes by opening the
 new application's tab through the same function `appOpen` uses — so the address
@@ -114,6 +132,18 @@ IPC — the launcher authenticates the connection and forwards only
 `{ route, input, client, requestId }` — and it is in no log, no run record and
 no journal row.
 
+**`panel`.** `broapp-autoapp open` against a launcher that is already running
+asks it for a panel address with `{ type: "panel" }` instead of starting a
+second launcher, and gets `{ ok: true, url }` or a refusal. This request hands
+out a credential, and it is on the same terms as `invoke` on purpose: the secret
+already reaches `invoke`, and through the launcher's routes `launcher.appOpen`,
+which hands out an application's address, so a process holding it can already
+have one. A panel address gives it nothing it could not reach. Each address
+issued is written to the event log as "a panel address was issued to a local
+process" (the address itself is not), and the launcher answers at most one
+`panel` request per two seconds, refusing the rest `unavailable`. `serving`
+still answers only whether, never where.
+
 **On Windows the mode bits are not enforced.** The file's protection there is
 the user profile directory's ACL. Anything that can read your profile can read
 the secret, and with it can reach the applications this launcher is serving —
@@ -137,6 +167,12 @@ is at the other end of the connection.
 
 A write with no tab open is refused and says why — nobody could be asked. A
 read still runs.
+
+`autoapp.panel` is not an application route and is not offered as a tool. It
+is refused with `rejected` on every channel but `user`, whatever its effect
+says: an MCP client or a workflow asking for the panel is asking for a
+credential, and a question to the person would not make that right. The refusal
+is recorded by the application's gate like any other failed call.
 
 ## Attachment
 

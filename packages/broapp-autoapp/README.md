@@ -22,6 +22,15 @@ move an application's whole directory â€” releases, source workspace and data â€
 into `<root>/trash/`. Nothing is deleted, the launcher never empties that
 directory, and nothing is removed while the application is running.
 
+Every application the launcher serves has an **Autoapp** mark in its page that
+opens the launcher's tab again on a fresh one-time address, so closing that tab
+is not a reason to stop the launcher. `broapp-autoapp open` against a launcher
+that is already running over the same root opens its tab (or, with
+`--no-open`, prints the address) and exits, rather than starting a second
+launcher. Applications that were serving when the launcher stopped are started
+again when it starts, on new ports; `broapp-autoapp open --no-restore` skips
+that.
+
 The **Knowledge** panel in the tab shows what the launcher remembers: each
 engineer turn with what it was given and what became of each lesson served,
 the lessons with their provenance, and the cases; a person confirms, retires,

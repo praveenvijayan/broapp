@@ -12,7 +12,7 @@
 import { IPC_VERSION, MAX_MESSAGE_BYTES, type Message } from './messages.ts';
 
 /** Every `type` a message may have. */
-const TYPES = ['hello', 'ready', 'health', 'drain', 'shutdown', 'fatal', 'migrate', 'invoke'] as const;
+const TYPES = ['hello', 'ready', 'health', 'drain', 'shutdown', 'fatal', 'migrate', 'invoke', 'ask', 'answer'] as const;
 
 /** The states a child may report. */
 const STATES = ['starting', 'serving', 'draining', 'stopping'] as const;
@@ -153,6 +153,28 @@ export function parseMessage(raw: unknown): Message {
         ...(record['output'] === undefined ? {} : { output: record['output'] }),
         ...(record['code'] === undefined ? {} : { code: requireString(record, 'code') }),
         ...(record['message'] === undefined ? {} : { message: requireString(record, 'message') }),
+      };
+    }
+    case 'ask': {
+      if (record['what'] !== 'panel') {
+        throw new TypeError(`ask.what must be "panel", not ${JSON.stringify(record['what'])}`);
+      }
+      const mint = optionalBoolean(record, 'mint');
+      if (mint === undefined) throw new TypeError('message field "mint" must be a boolean');
+      return { ...base, type: 'ask', what: 'panel', mint };
+    }
+    case 'answer': {
+      const ok = optionalBoolean(record, 'ok');
+      if (ok === undefined) throw new TypeError('message field "ok" must be a boolean');
+      const available = optionalBoolean(record, 'available');
+      const opened = optionalBoolean(record, 'opened');
+      return {
+        ...base,
+        type: 'answer',
+        ok,
+        ...(available === undefined ? {} : { available }),
+        ...(opened === undefined ? {} : { opened }),
+        ...(record['reason'] === undefined ? {} : { reason: requireString(record, 'reason') }),
       };
     }
     case 'migrate': {

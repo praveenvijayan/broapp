@@ -19,6 +19,7 @@ import type { HostLogger } from 'broapp/host';
 import { readCurrent, setCurrent, type Layout } from '../spec/index.ts';
 
 import type { Activation, Journal } from './journal.ts';
+import { readServing, removeServing } from './serving.ts';
 import type { ChildHandle, Supervisor } from './supervisor.ts';
 
 /** What recovery did about one interrupted activation. */
@@ -63,6 +64,42 @@ export async function recover(params: RecoverParams): Promise<readonly Recovered
     }
   }
   return results;
+}
+
+/** Options for {@link restoreServing}. */
+export interface RestoreParams {
+  readonly layout: Layout;
+  readonly supervisor: Supervisor;
+  readonly logger?: HostLogger;
+}
+
+/**
+ * Start every application `serving.json` lists that has a current release.
+ *
+ * On new ports, with no browser: the person comes back to the panel, which
+ * lists them serving, and opens whichever they want. One that has no current
+ * release, or will not start, is logged and taken off the list, so a broken
+ * application does not fail every launcher start after it.
+ */
+export async function restoreServing(params: RestoreParams): Promise<readonly string[]> {
+  const logger: HostLogger = params.logger ?? console;
+  const started: string[] = [];
+  for (const appId of readServing(params.layout, logger)) {
+    const release = readCurrent(params.layout, appId);
+    if (release === null) {
+      logger.warn(`[autoapp] ${appId} was serving when the launcher stopped and has no current release now; not restored`);
+      removeServing(params.layout, appId);
+      continue;
+    }
+    try {
+      await startServing(params, appId, release);
+      started.push(appId);
+    } catch (cause) {
+      logger.error(`[autoapp] ${appId} was serving when the launcher stopped and would not start again: ${String(cause)}`);
+      removeServing(params.layout, appId);
+    }
+  }
+  return started;
 }
 
 /** Put the filesystem and the journal back into a state somebody can use. */
@@ -191,7 +228,7 @@ function resolveOne(
 
 /** Start one application's current release, unless it is already running. */
 async function startServing(
-  params: RecoverParams,
+  params: Pick<RecoverParams, 'layout' | 'supervisor'>,
   appId: string,
   releaseId: string,
 ): Promise<ChildHandle | null> {

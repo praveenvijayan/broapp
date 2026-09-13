@@ -22,13 +22,14 @@ import type { Approver, Gate, HostLogger, RunningApp } from 'broapp/host';
 import { fromTransportError } from 'broapp/shared';
 
 import { parseMessage } from '../ipc/codec.ts';
-import { IPC_VERSION, type Message } from '../ipc/messages.ts';
+import { IPC_TIMEOUT_MS, IPC_VERSION, type Answer, type Message } from '../ipc/messages.ts';
 import { layout, readRelease } from '../spec/index.ts';
 import { createRunStore, type RunStore } from '../host/run-store.ts';
 
 import { attachedOnly } from '../host/autoapp.ts';
 
 import { assertAppInstance, assertAppModule, type AppInstance } from './module.ts';
+import { createPanelRoute, withPanel } from './panel.ts';
 
 /** Eight hours: Brobridge's default session cookie lifetime. */
 const SUPERVISED_LAUNCH_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
@@ -179,6 +180,9 @@ export async function runChild(argv: readonly string[]): Promise<number> {
     approver: null,
   };
 
+  // Questions this child has asked the launcher, by id, waiting for `answer`.
+  const asked = new Map<string, (answer: Answer) => void>();
+
   let finish: (code: number) => void = () => undefined;
   const exiting = new Promise<number>((resolve) => {
     finish = resolve;
@@ -230,6 +234,27 @@ export async function runChild(argv: readonly string[]): Promise<number> {
     );
     child.instance = instance;
 
+    // The way back to the panel, beside the application's own routes. Its
+    // records go through the application's gate like any other call.
+    const panel = createPanelRoute({
+      gate,
+      logger,
+      ask: (message) =>
+        new Promise<Answer>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            asked.delete(message.id);
+            reject(new Error('the launcher did not answer'));
+          }, IPC_TIMEOUT_MS);
+          timer.unref?.();
+          asked.set(message.id, (answer) => {
+            clearTimeout(timer);
+            asked.delete(message.id);
+            resolve(answer);
+          });
+          post(message);
+        }),
+    });
+
     const running = await startApp({
       page: readFileSync(join(releaseDir, spec.manifest.entry.page), 'utf8'),
       appName: spec.manifest.name,
@@ -244,7 +269,11 @@ export async function runChild(argv: readonly string[]): Promise<number> {
       // Open more than two minutes after it started. So the token lives as
       // long as the session cookie it mints.
       bridge: { launchTokenTtlMs: SUPERVISED_LAUNCH_TOKEN_TTL_MS },
-      register: (bridge) => instance.register(bridge),
+      register: async (bridge) => {
+        const folded = withPanel(bridge, panel);
+        await instance.register(folded.bridge);
+        folded.finish();
+      },
       isBusy: () => instance.isBusy(),
       onShutdown: async (reason) => {
         await instance.shutdown(reason);
@@ -409,6 +438,12 @@ export async function runChild(argv: readonly string[]): Promise<number> {
         break;
       }
 
+      case 'answer':
+        // The launcher's reply to a question this child asked. One that names
+        // no question was asked too late, after the wait gave up.
+        if (message.re !== undefined) asked.get(message.re)?.(message);
+        break;
+
       case 'fatal':
         // A `fatal` arriving *from* the launcher is how it refuses a channel it
         // cannot read. There is nothing to negotiate.
@@ -416,7 +451,7 @@ export async function runChild(argv: readonly string[]): Promise<number> {
         break;
 
       default:
-        // `hello`, `ready` and `migrate` only ever travel the other way, or
+        // `hello`, `ready`, `ask` and `migrate` only ever travel the other way, or
         // belong to the migrate-mode invocation.
         post({
           v: IPC_VERSION,

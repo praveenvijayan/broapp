@@ -9,7 +9,7 @@
 import * as React from 'react';
 
 import { useBroappReady } from 'broapp/react';
-import { BroappError } from 'broapp/shared';
+import { BroappError, fromTransportError } from 'broapp/shared';
 import type { AnyContract } from 'broapp/shared';
 
 import type { Component, Page as PageSpec, ViewsSpec } from '../views/types.ts';
@@ -70,6 +70,64 @@ export function renderComponent(component: Component): React.ReactElement | null
     case 'status':
       return <Status component={component} key={component.id} />;
   }
+}
+
+/** The route the launcher's child runtime mounts beside an application's own. */
+const PANEL_ROUTE = 'autoapp.panel';
+
+/** What `autoapp.panel` answers, checked here because it is not in the page's contract. */
+function panelAnswer(raw: unknown): { available: boolean; opened: boolean | null } | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { available, opened } = raw as Record<string, unknown>;
+  if (typeof available !== 'boolean') return null;
+  return { available, opened: typeof opened === 'boolean' ? opened : null };
+}
+
+/**
+ * Whether there is a launcher panel to go back to, asked once when the page loads.
+ *
+ * Called on the bridge rather than through the client: the route belongs to
+ * the launcher, not to the application's contract, and the client refuses a
+ * route its contract does not name. An application the launcher does not
+ * serve has no such route, the call fails, and the mark stays hidden.
+ */
+function usePanelLink(): { available: boolean; message: string | null; open(): void } {
+  const ready = useBroappReady<AnyContract>();
+  const [available, setAvailable] = React.useState(false);
+  const [message, setMessage] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const client = await ready;
+        const answer = panelAnswer(await client.bridge.call(PANEL_ROUTE, { mint: false }));
+        if (live) setAvailable(answer?.available === true);
+      } catch {
+        // No route, no launcher, no mark.
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [ready]);
+
+  const open = React.useCallback(() => {
+    setMessage(null);
+    void (async () => {
+      try {
+        const client = await ready;
+        const answer = panelAnswer(await client.bridge.call(PANEL_ROUTE, { mint: true }));
+        if (answer?.opened === false) {
+          setMessage('The launcher could not open a browser. Its terminal shows the panel’s address.');
+        }
+      } catch (cause) {
+        setMessage(fromTransportError(cause).message);
+      }
+    })();
+  }, [ready]);
+
+  return { available, message, open };
 }
 
 /** The browser's own confirmation dialog, where there is a browser. */
@@ -168,6 +226,7 @@ export function Page({
   }, []);
 
   const run = useRunAction(routes, reload, navigate, confirm);
+  const panel = usePanelLink();
 
   const value = React.useMemo<PageContextValue>(
     () => ({ views, params: named, sources, routes, reload, navigate, confirm, run }),
@@ -177,7 +236,26 @@ export function Page({
   return (
     <PageProvider value={value}>
       <div className="autoapp-page" data-autoapp-page={page.id}>
-        <h1 className="autoapp-page__title">{page.title}</h1>
+        {panel.available ? (
+          <div className="autoapp-page__head">
+            <h1 className="autoapp-page__title">{page.title}</h1>
+            <button
+              type="button"
+              className="autoapp-page__panel"
+              title="Open the Autoapp panel"
+              onClick={panel.open}
+            >
+              Autoapp
+            </button>
+          </div>
+        ) : (
+          <h1 className="autoapp-page__title">{page.title}</h1>
+        )}
+        {panel.message === null ? null : (
+          <p className="autoapp-message autoapp-message--error" role="alert">
+            {panel.message}
+          </p>
+        )}
         {page.children.map((component) => renderComponent(component))}
       </div>
     </PageProvider>

@@ -36,6 +36,7 @@ import { readCurrent, type Layout } from '../spec/index.ts';
 
 import { serving } from './apps.ts';
 import type { Journal } from './journal.ts';
+import { removeServing } from './serving.ts';
 import type { Supervisor } from './supervisor.ts';
 
 /** What a removal moved, as the person who asked for it is told. */
@@ -222,6 +223,8 @@ export async function removeApplication(deps: RemoveDeps, appId: string): Promis
   // candidate state would resume a build for an application nobody has.
   if (deps.session?.get().selectedAppId === appId) deps.session.clear();
   states.drop(appId);
+  // A restarted launcher must not try to serve what is in the trash.
+  removeServing(root, appId);
 
   const receipt: RemovalReceipt = {
     ...described,

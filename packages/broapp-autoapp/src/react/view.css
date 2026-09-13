@@ -25,6 +25,31 @@
   gap: var(--autoapp-space-8, 1.25rem);
 }
 
+.autoapp-page__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--autoapp-space-6, 0.75rem);
+}
+
+.autoapp-page__panel {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--autoapp-text-muted, #6b6862);
+  font: inherit;
+  font-size: var(--autoapp-font-size-small, 0.85rem);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.autoapp-page__panel:hover,
+.autoapp-page__panel:focus-visible {
+  color: var(--autoapp-text, #33383f);
+  text-decoration: underline;
+}
+
 .autoapp-page__title {
   margin: 0;
   font-size: var(--autoapp-font-size-title, 1.35rem);

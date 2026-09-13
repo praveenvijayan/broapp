@@ -278,3 +278,22 @@ export const autoappContract = defineContract({
 
 /** Autoapp's contract type, for `HostApp` and client generics. */
 export type AutoappContract = typeof autoappContract;
+
+/**
+ * The way back to the panel, mounted by the child runtime beside an
+ * application's own routes rather than by Autoapp's host: a release built
+ * before it existed still gets it, because the launcher runs every release.
+ */
+export const panelContract = defineContract({
+  operations: {
+    'autoapp.panel': {
+      effect: 'read',
+      input: s.object({ mint: s.boolean() }),
+      output: s.object({ available: s.boolean(), opened: s.nullable(s.boolean()) }),
+      summary: 'Whether there is a launcher panel to go back to; with `mint`, open it in the browser.',
+    },
+  },
+  streams: {},
+});
+
+export type PanelContract = typeof panelContract;

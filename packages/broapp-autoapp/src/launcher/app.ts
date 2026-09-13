@@ -45,6 +45,7 @@ import { launcherContract, type LauncherContract } from './contract.ts';
 import { createApplication } from './create.ts';
 import type { Journal } from './journal.ts';
 import { removeApplication } from './remove.ts';
+import { addServing, removeServing } from './serving.ts';
 import type { Templates } from './starter.ts';
 import type { ChildHandle, Supervisor } from './supervisor.ts';
 import type { PrepareOptions } from './workspace.ts';
@@ -148,7 +149,10 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
    */
   async function openApplication(appId: string): Promise<{ opened: boolean }> {
     const existing = serving(appId);
-    if (existing !== null) return await openTab(existing);
+    if (existing !== null) {
+      addServing(root, appId);
+      return await openTab(existing);
+    }
     const releaseId = readCurrent(root, appId);
     if (releaseId === null) throw publicError.notFound(`${appId} has no current release yet.`);
     const app = root.app(appId);
@@ -159,6 +163,8 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       dataDir: app.data,
       mode: 'live',
     });
+    // Written down so a restarted launcher serves it again.
+    addServing(root, appId);
     // Opened from here. The address is never returned to the tab, never
     // written down, never given to a model.
     return await openTab(child);
@@ -341,6 +347,8 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   });
 
   host.operation('launcher.appStop', async ({ appId }) => {
+    // A person stopped it: a restarted launcher should not start it again.
+    removeServing(root, appId);
     const child = serving(appId);
     if (child === null) return { stopped: false };
     await child.drain(DRAIN_DEADLINE_MS);

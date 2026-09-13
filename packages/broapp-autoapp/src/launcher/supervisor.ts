@@ -20,7 +20,7 @@ import { INTERNAL_ERROR_MESSAGE, PublicError } from 'broapp/shared';
 import type { PublicErrorCode } from 'broapp/shared';
 
 import { parseMessage } from '../ipc/codec.ts';
-import { IPC_VERSION, type Message } from '../ipc/messages.ts';
+import { IPC_TIMEOUT_MS, IPC_VERSION, type Answer, type Ask, type Message } from '../ipc/messages.ts';
 
 /** How a child reports itself when asked. */
 export interface HealthReport {
@@ -69,6 +69,20 @@ export interface ChildHandle {
   readonly exited: Promise<number | null>;
 }
 
+/**
+ * The launcher's panel, as a child's question sees it.
+ *
+ * `open` mints a fresh single-use address for the panel and hands it to the
+ * operating system's browser opener; the address never goes back to the child.
+ */
+export type PanelDoor =
+  | { readonly available: true; open(): Promise<{ opened: boolean }> }
+  | { readonly available: false };
+
+/** Said to a child whose launcher has no panel to go back to. */
+export const NO_PANEL_REASON =
+  'This launcher was started for one application. Run `broapp-autoapp open` for the panel.';
+
 /** Options for {@link createSupervisor}. */
 export interface SupervisorOptions {
   /**
@@ -85,6 +99,11 @@ export interface SupervisorOptions {
    * a line is recorded as the child's rather than the launcher's.
    */
   readonly logger?: HostLogger & { child?(appId: string, pid?: number): HostLogger };
+  /**
+   * Where a child's `ask` for the panel is answered from. Absent, every ask is
+   * answered `available: false`. `setPanel` replaces it once the panel exists.
+   */
+  readonly panel?: () => PanelDoor;
 }
 
 /** What a child is started with. */
@@ -124,6 +143,11 @@ export interface Supervisor {
    * this is the last chance to stop a child outliving its launcher.
    */
   killAll(): void;
+  /**
+   * Say where the panel is, once the launcher's own tab is running, or `null`
+   * when it has stopped. Children started before this ask the new answer.
+   */
+  setPanel(panel: (() => PanelDoor) | null): void;
 }
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5_000;
@@ -235,6 +259,27 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
    * be draining first.
    */
   const processes = new Map<ChildHandle, Subprocess>();
+  let panel: (() => PanelDoor) | null = options.panel ?? null;
+
+  /**
+   * Answer one child's question about the panel.
+   *
+   * Answered from memory and within `IPC_TIMEOUT_MS`: a browser opener that
+   * hangs must not leave a person's click waiting on nothing.
+   */
+  async function answer(ask: Ask, appId: string): Promise<Answer> {
+    const base = { v: IPC_VERSION, id: nextId(), re: ask.id, type: 'answer' } as const;
+    const door = panel?.() ?? { available: false as const };
+    if (!door.available) return { ...base, ok: true, available: false, reason: NO_PANEL_REASON };
+    if (!ask.mint) return { ...base, ok: true, available: true };
+    try {
+      const { opened } = await withDeadline(door.open(), IPC_TIMEOUT_MS, 'the panel to open');
+      return { ...base, ok: true, available: true, opened };
+    } catch (cause) {
+      logger.warn(`[autoapp] ${appId} asked for the panel and it could not be opened: ${String(cause)}`);
+      return { ...base, ok: false, reason: 'The panel could not be opened. Try again.' };
+    }
+  }
 
   /** Spawn a child and wrap its IPC channel in something waitable. */
   function launch(
@@ -260,7 +305,20 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
       serialization: 'json',
       ipc: (raw: unknown) => {
         try {
-          inbox.push(parseMessage(raw));
+          const message = parseMessage(raw);
+          // The one message a child starts. It is answered here rather than
+          // queued: nothing on the launcher's side waits for it.
+          if (message.type === 'ask') {
+            void answer(message, appId).then((reply) => {
+              try {
+                child.send(reply);
+              } catch {
+                // The child went away before its answer; nobody is waiting.
+              }
+            });
+            return;
+          }
+          inbox.push(message);
         } catch (cause) {
           protocolFault = cause instanceof Error ? cause : new Error(String(cause));
           try {
@@ -538,6 +596,10 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
 
     async stopAll(deadlineMs: number): Promise<void> {
       await Promise.all([...live].map((handle) => handle.shutdown(deadlineMs)));
+    },
+
+    setPanel(next): void {
+      panel = next;
     },
 
     killAll(): void {

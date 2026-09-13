@@ -219,6 +219,32 @@ platform matrix and the Windows differences are in
 [packaging.md](packaging.md); approvals, the control connection and what none of
 this protects are in [security.md](security.md).
 
+## Between an application and the panel
+
+Every tab is its own bridge with its own launch token, so the panel opening an
+application was a one-way door: a person who closed the panel's tab had no way
+back to it but stopping the launcher, and stopping the launcher stopped their
+applications. Three things close that.
+
+An application the launcher serves draws an **Autoapp** mark in its page's
+top-right. The route behind it, `autoapp.panel`, is mounted by the child
+runtime rather than by the application, so a release built before the route
+existed gets it too; it asks the launcher over IPC (`ask`, `answer`), and the
+launcher mints a fresh single-use address for its own tab with Brobridge's
+`launchUrl()` and hands it to the operating system's browser opener, the same
+way the panel opens an application. The mark is drawn only when the page's
+probe at load says there is a panel; `serve <appId>` has none.
+
+`broapp-autoapp open` against a root whose launcher is running asks that
+launcher for a panel address over the control connection and exits, instead of
+starting a second launcher beside it.
+
+`<root>/launcher/serving.json` lists the applications that are serving. Opening
+one adds it; stopping or removing it takes it out; stopping the launcher does
+not. A launcher that starts again serves everything listed that has a current
+release, on new ports and without opening a browser, unless `--no-restore`.
+This is the one change to existing behaviour.
+
 ## The theme contract
 
 An application owns its appearance through tokens, not through rules. The

@@ -6,8 +6,8 @@
  * `node:` or `bun:`, because the browser bundle follows these imports and a
  * page that could reach the filesystem would be a bug. A test asserts it.
  */
-export { autoappContract } from './contract.ts';
-export type { AutoappContract } from './contract.ts';
+export { autoappContract, panelContract } from './contract.ts';
+export type { AutoappContract, PanelContract } from './contract.ts';
 
 export { VIEWS_VERSION } from '../views/types.ts';
 export type {

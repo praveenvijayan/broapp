@@ -463,6 +463,7 @@ describe.skipIf(!available)('the stdio server', () => {
       // Nothing here asks; the MCP server never needs to know whether a
       // launcher is serving, which is a question the `remove` command asks.
       serving: () => Promise.resolve(true),
+      panel: () => Promise.resolve({ ok: false as const, reason: 'no panel in this test' }),
       invoke: ({ route, client: name }) => {
         calls.push({ route, client: name });
         return Promise.resolve({ ok: true as const, output: { route } });

@@ -23,9 +23,12 @@ export type {
   HealthReport,
   MigrateParams,
   StartParams,
+  PanelDoor,
   Supervisor,
   SupervisorOptions,
 } from './supervisor.ts';
+export { NO_PANEL_REASON } from './supervisor.ts';
+export { addServing, readServing, removeServing, servingPath } from './serving.ts';
 
 export { connectToChild } from './client.ts';
 
@@ -63,5 +66,5 @@ export type { Activation, Journal, Phase, PhaseDetails } from './journal.ts';
 export { activate } from './activate.ts';
 export type { ActivateParams, ActivateResult } from './activate.ts';
 
-export { recover } from './recover.ts';
-export type { Recovered, RecoverParams } from './recover.ts';
+export { recover, restoreServing } from './recover.ts';
+export type { Recovered, RecoverParams, RestoreParams } from './recover.ts';

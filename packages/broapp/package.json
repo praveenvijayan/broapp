@@ -49,9 +49,9 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@brobridgejs/client": "^0.2.1",
-    "@brobridgejs/core": "^0.2.1",
-    "brobridge": "^0.2.1"
+    "@brobridgejs/client": "^0.2.2",
+    "@brobridgejs/core": "^0.2.2",
+    "brobridge": "^0.2.2"
   },
   "peerDependencies": {
     "react": ">=18",

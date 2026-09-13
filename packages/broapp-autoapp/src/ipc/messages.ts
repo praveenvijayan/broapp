@@ -1,9 +1,9 @@
 /**
  * The messages a launcher and an application child exchange.
  *
- * There are eight and there will not quietly be a ninth: the set is small
+ * There are ten and there will not quietly be an eleventh: the set is small
  * enough to reason about, and every one of them is about the child's lifecycle
- * rather than about the application's work. An application's operations never
+ * or the person's way around it, rather than about the application's work. An application's operations never
  * travel this channel — the launcher supervises, it does not proxy.
  *
  * Every message carries `v`. A child built by a different release of the
@@ -107,6 +107,41 @@ export interface Invoke extends Base {
   readonly message?: string;
 }
 
+/**
+ * Child → launcher: a question only the launcher can answer.
+ *
+ * The one message a child starts rather than answers. There is one question:
+ * is there a panel to go back to, and — with `mint` — open it. It is asked on
+ * a person's click in the application's own authenticated tab, and the child
+ * has already refused it on every other channel before it gets here.
+ */
+export interface Ask extends Base {
+  readonly type: 'ask';
+  readonly what: 'panel';
+  /** `false` is the page's probe at load; `true` opens the panel. */
+  readonly mint: boolean;
+}
+
+/**
+ * Launcher → child: the reply to an `ask`, carrying its id in `re`.
+ *
+ * No address crosses here. The launcher mints the panel's address and hands it
+ * to the operating system's browser opener itself: a page on the application's
+ * port navigating to the panel's port arrives `Sec-Fetch-Site: same-site`,
+ * which the panel's bridge refuses, and an address that never reaches the
+ * child cannot leak from it.
+ */
+export interface Answer extends Base {
+  readonly type: 'answer';
+  readonly ok: boolean;
+  /** Whether this launcher has a panel at all. Present when `ok`. */
+  readonly available?: boolean;
+  /** Whether a browser was opened on the panel. Present when `ok` and minted. */
+  readonly opened?: boolean;
+  /** One sentence, when not `ok` or not `available`. */
+  readonly reason?: string;
+}
+
 /** Child → launcher: something unrecoverable; the child exits after sending. */
 export interface Fatal extends Base {
   readonly type: 'fatal';
@@ -115,7 +150,25 @@ export interface Fatal extends Base {
 }
 
 /** Anything that may legitimately cross the channel. */
-export type Message = Hello | Ready | Health | Drain | Shutdown | Fatal | Migrate | Invoke;
+export type Message =
+  | Hello
+  | Ready
+  | Health
+  | Drain
+  | Shutdown
+  | Fatal
+  | Migrate
+  | Invoke
+  | Ask
+  | Answer;
+
+/**
+ * How long either side waits for the other to answer a short question.
+ *
+ * An `ask` is answered from memory; a launcher that takes longer than this is
+ * not going to answer at all, and the person's click should say so.
+ */
+export const IPC_TIMEOUT_MS = 5_000;
 
 /**
  * The most a single message may weigh.

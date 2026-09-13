@@ -23,6 +23,12 @@ export interface ControlClient {
   describe(appId: string): Promise<Described>;
   /** Whether the launcher on the other end has a live child for this application. */
   serving(appId: string): Promise<boolean>;
+  /**
+   * A fresh single-use address for the launcher's panel. Never log it.
+   * Resolves `{ ok: false, reason }` when the launcher has no panel or issued
+   * one less than two seconds ago.
+   */
+  panel(): Promise<{ ok: true; url: string } | { ok: false; reason: string }>;
   invoke(params: {
     appId: string;
     route: string;
@@ -154,6 +160,13 @@ export async function connectControl(controlPath: string): Promise<ControlClient
         throw new Error(String(reply['message'] ?? 'the launcher would not say'));
       }
       return (reply['output'] as { serving?: unknown }).serving === true;
+    },
+
+    async panel() {
+      const reply = await request({ type: 'panel' });
+      return reply['ok'] === true && typeof reply['url'] === 'string'
+        ? { ok: true, url: reply['url'] }
+        : { ok: false, reason: String(reply['reason'] ?? reply['message'] ?? 'unavailable') };
     },
 
     async invoke({ appId, route, input, client }) {

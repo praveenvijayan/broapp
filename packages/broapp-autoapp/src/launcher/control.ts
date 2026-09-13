@@ -55,6 +55,13 @@ export interface StartControlOptions {
    * `remove` that asked during that window would otherwise be told "no".
    */
   readonly serves?: (appId: string) => boolean;
+  /**
+   * Mint a fresh single-use address for this launcher's panel, or `null` when
+   * it has none (`serve <appId>`). Absent, a `panel` request is refused.
+   */
+  readonly panel?: () => string | null;
+  /** Injectable clock for the `panel` rate limit. */
+  readonly now?: () => number;
 }
 
 /** The one address anything may connect from. */
@@ -65,6 +72,8 @@ const AUTH_DEADLINE_MS = 2_000;
 const MAX_LINE_BYTES = 1_000_000;
 /** How long a forwarded call may take, allowing for somebody to answer a question. */
 const DEFAULT_INVOKE_TIMEOUT_MS = 300_000;
+/** At most one panel address per this long, whoever asks. */
+export const PANEL_INTERVAL_MS = 2_000;
 
 /** Per-connection state. */
 interface Session {
@@ -90,6 +99,9 @@ export function startControl(options: StartControlOptions): Control {
   const invokeTimeoutMs = options.invokeTimeoutMs ?? DEFAULT_INVOKE_TIMEOUT_MS;
   const secret = randomBytes(32).toString('hex');
   const sessions = new WeakMap<Socket<undefined>, Session>();
+  const now = options.now ?? Date.now;
+  /** When the last panel address was issued; `null` before the first. */
+  let lastPanelAt: number | null = null;
 
   /** Answer one request. */
   async function handle(request: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -119,6 +131,41 @@ export function startControl(options: StartControlOptions): Control {
       );
       const serving = child !== undefined || options.serves?.(appId) === true;
       return reply({ ok: true, output: { serving } });
+    }
+
+    if (request['type'] === 'panel') {
+      // Asked by `broapp-autoapp open` when this launcher is already running,
+      // so a second command joins it instead of starting a second launcher.
+      //
+      // Unlike `serving`, this answer is a credential, and that is not a new
+      // door. The secret this connection authenticated with already reaches
+      // `invoke`, and through the launcher's own routes `launcher.appOpen`,
+      // which hands out an application's address; a process holding it can
+      // already have that. A panel address on the same terms gives it nothing
+      // it could not reach. What stays true is that the address is single-use,
+      // loopback, minted here on this request and never on a browser's, and
+      // that each one is written down.
+      const mint = options.panel;
+      if (mint === undefined) {
+        return reply({ ok: false, code: 'unavailable', reason: 'This launcher has no panel.' });
+      }
+      const at = now();
+      if (lastPanelAt !== null && at - lastPanelAt < PANEL_INTERVAL_MS) {
+        return reply({ ok: false, code: 'unavailable', reason: 'A panel address was issued a moment ago. Try again in two seconds.' });
+      }
+      const url = mint();
+      if (url === null) {
+        return reply({
+          ok: false,
+          code: 'unavailable',
+          reason: 'This launcher was started for one application. Run `broapp-autoapp open` for the panel.',
+        });
+      }
+      lastPanelAt = at;
+      const log = logger as HostLogger & { event?: (kind: 'log', message: string) => void };
+      if (typeof log.event === 'function') log.event('log', 'a panel address was issued to a local process');
+      else logger.warn('[autoapp] a panel address was issued to a local process');
+      return reply({ ok: true, url });
     }
 
     if (request['type'] === 'invoke') {

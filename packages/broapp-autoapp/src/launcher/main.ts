@@ -16,12 +16,13 @@ import launcherPage from '../../dist/launcher-page.html' with { type: 'text' };
 import packedTemplates from '../../dist/templates.json' with { type: 'json' };
 import selfManifest from '../../package.json' with { type: 'json' };
 
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { anthropic } from 'broapp-ai-anthropic';
 import { customServer, ollama, openai } from 'broapp-ai-compatible';
 import { ensureDataDir, openBrowser, startApp } from 'broapp/host';
+import type { RunningApp } from 'broapp/host';
 
 import { createCandidateStates } from '../engineer/state.ts';
 import { createRunStore } from '../host/run-store.ts';
@@ -55,7 +56,8 @@ import { buildCandidate } from './candidate.ts';
 import { startControl, type Control } from './control.ts';
 import { openJournal, type Journal } from './journal.ts';
 import { keepServing } from './keepalive.ts';
-import { recover } from './recover.ts';
+import { recover, restoreServing } from './recover.ts';
+import { addServing, removeServing } from './serving.ts';
 import { createSupervisor, type Supervisor } from './supervisor.ts';
 import { createLauncherGate } from './app.ts';
 import { createApplication } from './create.ts';
@@ -98,7 +100,12 @@ const VERSIONS = {
 const HELP = `broapp-autoapp
 
 Usage:
-  broapp-autoapp                        Open the launcher's own tab
+  broapp-autoapp [open] [--no-open] [--no-restore]
+                                        Open the launcher's own tab. Against a
+                                        launcher already running, open a fresh
+                                        address for its panel instead. On start,
+                                        applications that were serving are
+                                        started again unless --no-restore.
   broapp-autoapp serve <appId> [--no-open]
   broapp-autoapp create <appId> [--name <name>] [--description <text>]
                                 [--template starter|blank]
@@ -129,6 +136,20 @@ Environment:
 
 An application runs as its own child process, as trusted local code: crash
 isolated from the launcher, not permission isolated from you.`;
+
+/**
+ * The operating system's browser opener, or one that opens nothing.
+ *
+ * A test or the smoke run drives the compiled launcher through every path that
+ * opens a tab, and a machine running them should not grow a browser window per
+ * case. Honoured only under `NODE_ENV=test`, like `AUTOAPP_TEST_NO_NETWORK`:
+ * the opener then reports failure, and every address goes to the terminal as
+ * it would on a machine with no browser.
+ */
+const browser: (url: string) => Promise<boolean> =
+  Bun.env['NODE_ENV'] === 'test' && Bun.env['AUTOAPP_TEST_NO_BROWSER'] === '1'
+    ? () => Promise.resolve(false)
+    : openBrowser;
 
 /** How long a child gets to stop before it is killed. */
 const STOP_DEADLINE_MS = 10_000;
@@ -206,7 +227,15 @@ async function serve(
   // tab — is still reachable over MCP.
   // Said before the child exists: a remove that asks in the seconds a child
   // takes to start must hear "yes", not "not yet".
-  let control: Control | null = startControl({ layout: root, supervisor, serves: (id) => id === appId, ...loggerOf(recording) });
+  let control: Control | null = startControl({
+    layout: root,
+    supervisor,
+    serves: (id) => id === appId,
+    // No panel runs here, so there is no address to give; the request is
+    // answered with the sentence that says how to get one.
+    panel: () => null,
+    ...loggerOf(recording),
+  });
   process.on('exit', () => control?.stop());
 
   console.log(`${appId} ${current}`);
@@ -216,19 +245,22 @@ async function serve(
     appId,
     ...loggerOf(recording),
     onStart: (child, restart) => {
+      if (restart === 0) addServing(root, appId);
       if (restart > 0) console.log(`${appId} stopped and was started again; its address has changed.`);
       // The launch URL carries a one-time token and is a credential until it is
       // redeemed. Written to the terminal on purpose, because somebody whose
       // browser did not open needs it — and to the terminal only.
       console.log(`Open this address if your browser does not: ${child.url}`);
       if (!open) return;
-      void openBrowser(child.url).then((opened) => {
+      void browser(child.url).then((opened) => {
         if (!opened) console.log('Could not open a browser automatically. Use the address above.');
       });
     },
   });
   control.stop();
   control = null;
+  // Stopped cleanly: a launcher started later should not serve it again.
+  if (code === 0) removeServing(root, appId);
   return code;
 }
 
@@ -245,6 +277,7 @@ async function openLauncher(
   supervisor: Supervisor,
   open: boolean,
   recording: Recording | null,
+  restore: boolean,
 ): Promise<number> {
   for (const recovered of await recover({
     layout: root,
@@ -256,9 +289,26 @@ async function openLauncher(
     console.log(`recovered: ${recovered.finding}`);
   }
 
+  // Applications that were serving when the last launcher stopped. Awaited
+  // before the tab exists, so a person's first click cannot race a restore
+  // into starting a second child over the same data directory.
+  if (restore) {
+    for (const appId of await restoreServing({ layout: root, supervisor, ...loggerOf(recording) })) {
+      console.log(`restored: ${appId}`);
+    }
+  }
+
+  // Set once the tab's bridge is serving; the panel's addresses come from it.
+  let running: RunningApp | null = null;
+
   // The door an MCP server comes in by. Only the launcher's own long-running
   // commands open it, and it is removed when they stop.
-  const control = startControl({ layout: root, supervisor, ...loggerOf(recording) });
+  const control = startControl({
+    layout: root,
+    supervisor,
+    panel: () => running?.launchUrl() ?? null,
+    ...loggerOf(recording),
+  });
 
   // Knowledge was opened before this, in `main`, beside where the run store is
   // opened now: both live in the launcher's own data directory.
@@ -292,6 +342,7 @@ async function openLauncher(
         }),
     templates,
     versions: VERSIONS,
+    openBrowser: browser,
     providers: [anthropic(), ollama(), openai(), customServer()],
     // The offline tier tests need a launcher whose AI layer cannot reach the
     // network, and severing an interface in CI is not something a test may do.
@@ -302,7 +353,7 @@ async function openLauncher(
       : {}),
   });
 
-  const running = await startApp({
+  running = await startApp({
     page,
     appName: 'Autoapp',
     version: selfManifest.version,
@@ -311,6 +362,7 @@ async function openLauncher(
     register: (bridge) => tab.mount(bridge),
     isBusy: () => tab.ai.activeStreams > 0,
     onShutdown: async () => {
+      supervisor.setPanel(null);
       tab.ai.abortAll('the launcher is shutting down');
       // The conversations live in a SQLite file of the AI layer's own, and a
       // database that is never closed misses its last WAL checkpoint.
@@ -328,7 +380,82 @@ async function openLauncher(
     },
   });
 
+  // The way back from an application. Its mark asks its child, the child asks
+  // here, and the address goes to the operating system's opener — never to
+  // the application's page, which could not navigate to it anyway.
+  const tabRunning = running;
+  supervisor.setPanel(() => ({
+    available: true,
+    open: async () => {
+      const url = tabRunning.launchUrl();
+      const opened = await browser(url);
+      // A credential, so the terminal only, as `serve` prints an address.
+      if (!opened) console.log(`Could not open a browser. Open the panel at this address: ${url}`);
+      return { opened };
+    },
+  }));
+
   return await running.done;
+}
+
+/**
+ * Join a launcher that is already running over this root, if there is one.
+ *
+ * Returns the exit code when one answered, or `null` to go on and start a
+ * launcher. A `launcher.json` nobody answers names a launcher that has gone —
+ * one killed without running its exit handler — and is removed.
+ */
+async function joinRunning(root: Layout, open: boolean): Promise<number | null> {
+  if (!existsSync(root.control)) return null;
+  let control: ControlClient;
+  try {
+    control = await withTimeout(connectControl(root.control), JOIN_TIMEOUT_MS);
+  } catch {
+    rmSync(root.control, { force: true });
+    return null;
+  }
+  try {
+    const answer = await withTimeout(control.panel(), JOIN_TIMEOUT_MS);
+    if (!answer.ok) {
+      console.error(`refused: unavailable — ${answer.reason}`);
+      return 1;
+    }
+    console.log('A launcher is already running over this root.');
+    if (!open) {
+      console.log(`Open the panel at this address: ${answer.url}`);
+      return 0;
+    }
+    if (!(await browser(answer.url))) {
+      console.log(`Could not open a browser. Open the panel at this address: ${answer.url}`);
+    }
+    return 0;
+  } catch (cause) {
+    console.error(`refused: unavailable — the running launcher did not answer: ${String(cause instanceof Error ? cause.message : cause)}`);
+    return 1;
+  } finally {
+    control.close();
+  }
+}
+
+/** How long a running launcher gets to answer `open`. It answers from memory. */
+const JOIN_TIMEOUT_MS = 5_000;
+
+/** Reject after `ms` without holding the process open. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timed out')), ms);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (cause: unknown) => {
+        clearTimeout(timer);
+        reject(cause instanceof Error ? cause : new Error(String(cause)));
+      },
+    );
+  });
 }
 
 /**
@@ -541,6 +668,17 @@ async function main(): Promise<number> {
 
   const root = layout(defaultRoot());
   mkdirSync(root.root, { recursive: true, mode: 0o700 });
+
+  // `open`, the bare command, and `serve` with no application all mean the
+  // panel. Over a root that already has a launcher, that launcher is asked for
+  // a panel address before this process opens the journal or knowledge, so a
+  // second launcher is never started beside the first.
+  const wantsPanel = command === undefined || command === 'open' || (command === 'serve' && positional(argv, 1) === undefined);
+  if (wantsPanel) {
+    const joined = await joinRunning(root, !argv.includes('--no-open'));
+    if (joined !== null) return joined;
+  }
+
   const journal = openJournal(root.journal);
   // The long-running commands write down what happens. Opened before the
   // supervisor, so a child's stderr is recorded from its first line; one-shot
@@ -558,14 +696,14 @@ async function main(): Promise<number> {
     switch (command) {
       case undefined:
       case 'open':
-        return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'), recording);
+        return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'), recording, !argv.includes('--no-restore'));
 
       case 'serve': {
         const appId = positional(argv, 1);
         // `serve` with no application is the launcher's own tab, which is the
         // ordinary way in: from there a person opens whichever they want.
         if (appId === undefined) {
-          return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'), recording);
+          return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'), recording, !argv.includes('--no-restore'));
         }
         return await serve(root, journal, supervisor, appId, !argv.includes('--no-open'), recording);
       }

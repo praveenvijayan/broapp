@@ -186,6 +186,85 @@ async function stopServing(): Promise<void> {
   serving = null;
 }
 
+/** Open the application from the panel, ask its child for the panel, load the address once. */
+async function panelLink(): Promise<void> {
+  rmSync(controlPath(), { force: true });
+  const panel = Bun.spawn({
+    cmd: [launcher, 'open', '--no-open', '--no-restore'],
+    env: {
+      ...process.env,
+      BROAPP_DATA_DIR: root,
+      NODE_ENV: 'test',
+      AUTOAPP_TEST_NO_BROWSER: '1',
+      AUTOAPP_TEST_NO_NETWORK: '1',
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  let output = '';
+  for (const stream of [panel.stdout, panel.stderr] as ReadableStream<Uint8Array>[]) {
+    void (async () => {
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        output += decoder.decode(value, { stream: true });
+      }
+    })();
+  }
+  /** The newest address printed after `label`. */
+  const address = (label: string): string | null => {
+    const at = output.lastIndexOf(label);
+    if (at < 0) return null;
+    return /http:\/\/127\.0\.0\.1:\d+\/\?bt=[A-Za-z0-9_-]+/.exec(output.slice(at))?.[0] ?? null;
+  };
+  const clients: { close(): Promise<void> }[] = [];
+  try {
+    if (!(await until(() => address('Open this address if your browser does not:') !== null, 30_000))) {
+      fail('panel link', `the launcher did not print its address:\n${output}`);
+      return;
+    }
+    const { connectToChild } = await import('broapp-autoapp/launcher');
+    const tab = await connectToChild(address('Open this address if your browser does not:') as string);
+    clients.push(tab);
+    await tab.call('launcher.appOpen', { appId: 'items' });
+    if (!(await until(() => address('open this address yourself:') !== null, 30_000))) {
+      fail('panel link', `opening items printed no address:\n${output}`);
+      return;
+    }
+    const app = await connectToChild(address('open this address yourself:') as string);
+    clients.push(app);
+    const answer = (await app.call('autoapp.panel', { mint: true })) as { available?: boolean };
+    if (answer.available !== true) {
+      fail('panel link', `the child said there is no panel: ${JSON.stringify(answer)}`);
+      return;
+    }
+    if (!(await until(() => address('Open the panel at this address:') !== null, 10_000))) {
+      fail('panel link', 'the launcher printed no panel address');
+      return;
+    }
+    const url = address('Open the panel at this address:') as string;
+    const first = await fetch(url, { redirect: 'manual' });
+    const second = await fetch(url, { redirect: 'manual' });
+    if (first.status !== 303 || second.status !== 403) {
+      fail('panel link', `the panel address answered ${String(first.status)} then ${String(second.status)}`);
+    } else ok('panel link', 'an application asked for the panel; its address loaded once');
+  } catch (cause) {
+    fail('panel link', String(cause instanceof Error ? cause.message : cause));
+  } finally {
+    for (const client of clients) await client.close().catch(() => undefined);
+    if (process.platform === 'win32') {
+      Bun.spawnSync({ cmd: ['taskkill', '/F', '/T', '/PID', String(panel.pid)], stdout: 'ignore', stderr: 'ignore' });
+      rmSync(controlPath(), { force: true });
+    } else {
+      panel.kill('SIGTERM');
+    }
+    await Promise.race([panel.exited, after(10_000, null)]);
+    if (panel.exitCode === null) panel.kill('SIGKILL');
+  }
+}
+
 async function main(): Promise<number> {
   if (!existsSync(launcher)) {
     console.error(`the launcher is not built: ${launcher}`);
@@ -380,6 +459,14 @@ async function main(): Promise<number> {
   } else if (controlFile() !== null) {
     fail('cleanup', 'launcher.json outlived the launcher');
   } else ok('cleanup', 'launcher.json removed on exit');
+
+  // 6b. The way back to the panel.
+  //
+  // The panel opens the application; the application's mark asks its child,
+  // the child asks the launcher, and the launcher mints a fresh address for its
+  // own tab. With no browser to hand it to (`AUTOAPP_TEST_NO_BROWSER`), the
+  // address goes to the launcher's terminal, which is where this reads it.
+  await panelLink();
 
   // 7. A workspace outside this repository, through the compiled binary.
   //

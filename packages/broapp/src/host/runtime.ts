@@ -76,6 +76,15 @@ export interface RunningApp {
    * looking attached for that whole minute.
    */
   readonly attached: boolean;
+  /**
+   * A fresh address for this application, carrying a new one-time launch token.
+   *
+   * Brobridge mints the token; each address works once and expires on the
+   * bridge's launch-token lifetime. Call it on the host's own decision — a
+   * person's click in an authenticated tab, a local process that already holds
+   * a credential — never because a browser asked. Do not log the result.
+   */
+  launchUrl(): string;
 }
 
 const POLL_INTERVAL_MS = 1_000;
@@ -215,5 +224,6 @@ export async function startApp(options: StartAppOptions): Promise<RunningApp> {
     get attached() {
       return isAttached();
     },
+    launchUrl: () => bridge.launchUrl(),
   };
 }
