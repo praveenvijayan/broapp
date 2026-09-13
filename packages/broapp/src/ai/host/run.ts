@@ -288,14 +288,22 @@ function boundOutput(output: unknown, max: number): unknown {
   return { type: 'text', value: cut(json, max) };
 }
 
-/** One transcript message with every tool input and output bounded. */
+/**
+ * One transcript message with every tool input and output bounded.
+ *
+ * A cut input stays an object, `{ truncated: "<head><omitted N chars>" }`,
+ * rather than becoming the string itself: an OpenAI-compatible provider sends
+ * a call's input as its `arguments`, and Ollama refuses a whole request whose
+ * arguments are not a JSON object ("invalid tool call arguments"). The first
+ * 12j evaluation lost a turn to exactly that.
+ */
 function boundMessage(message: ResponseMessage, limits: HistoryLimits): ModelMessage {
   if (!Array.isArray(message.content)) return message;
   const content = (message.content as readonly unknown[]).map((part) => {
     if (!isRecord(part)) return part;
     if (part['type'] === 'tool-call') {
       const json = JSON.stringify(part['input']) ?? '';
-      return json.length <= limits.inputChars ? part : { ...part, input: cut(json, limits.inputChars) };
+      return json.length <= limits.inputChars ? part : { ...part, input: { truncated: cut(json, limits.inputChars) } };
     }
     if (part['type'] === 'tool-result') return { ...part, output: boundOutput(part['output'], limits.outputChars) };
     return part;
