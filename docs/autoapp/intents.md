@@ -236,7 +236,14 @@ measured what a local model does with one long open-ended turn.
    makes no tool call for eight minutes is ended first (the clock holds while a
    tool runs and while a question waits for the person), and the verdict says
    so: "The turn made no tool call for 8 minutes." The twenty-minute limit
-   stays.
+   stays. A turn that ended on its own — not aborted by either limit or a
+   Stop, not a provider ending, not a question — with edits nothing built is
+   built once by the host first: one `candidate.cycle` with no hunks and no
+   files, through the same gate, under the turn's run id, answered by the run's
+   standing answer. Its request id is `<runId>:host-build`, a log event says the
+   host made it, and a task that completes on it says "completed after the host
+   built what the turn left unbuilt". The builder's closing words are still not
+   evidence; the build and the checks are.
 7. Completed: the next task. Not completed: another attempt with the reasons.
    Two attempts that do not complete stop the run, but an attempt that passed
    more criteria than every earlier one of this run is not counted, and its
@@ -255,7 +262,13 @@ application's completed tasks is still among the checks ("The example
 0004-author-column-c2, from a finished task, is gone."), so none was removed to
 make that true; and for every criterion an example named `<slug>-c<n>` ran. Otherwise each condition that did not hold is a
 sentence ("No example named 0007-add-tags-c2 was run.", "The turn ran out of
-time."). A completed task records `rev_after`, `release_id` and `actual_lines`
+time."). When nothing was built, the sentences after "Nothing was built." say
+what the tools refused, read from the gate's own record of the turn in the
+launcher's run store: one per refused group of `candidate.cycle` and
+`candidate.build` ("candidate.cycle was refused 3 times: create: expected an
+array."), at most three, then one for every refused edit ("22 edits were
+refused; most often: message: expected a string."). A completed verdict never
+mentions refusals, and a call the gate denied is not a refusal. A completed task records `rev_after`, `release_id` and `actual_lines`
 (from `git diff --shortstat`), and each criterion whose example passed is drawn
 `[x]` in its plan. A verdict is only as strong as the examples the builder wrote;
 the backlog's **A verdict as strong as its examples** row says what would
@@ -266,7 +279,10 @@ with its reasons and run ids, the intent is `stopped`, and later tasks stay
 `in-queue`. The workspace is left as the attempt left it, so the person and the
 engineer can look; nothing is reset. The main model is then asked one
 structured question, `{ diagnosis, advice: retry | revise | split | ask, note }`,
-and the answer is shown under the failure; it stays there when the task is
+and the answer is shown under the failure. The question is told what the tools
+refused in the last attempt and the one before, and that when a builder's
+calls were refused for their input the plan is not at fault and another model
+may be the answer. It stays there when the task is
 queued again and goes when the task completes or is revised. An answer that does not arrive or
 does not parse stores nothing and changes no status. From there the person runs
 again (failed and interrupted tasks are queued, and the run continues from the
@@ -288,7 +304,19 @@ most six paths, from the launcher's run store, which already records every
 `source.read`), and when the newest earlier attempt changed nothing the
 document ends with the one line in it that tells the builder what to do: "The
 last attempt read these and changed nothing. Do not read them again: make the
-first edit the plan calls for, then use candidate.cycle."
+first edit the plan calls for, then use candidate.cycle." Each earlier attempt
+also says what its tools refused (**Refused:**, the three largest groups), so a
+builder whose every cycle was refused for its input is not left to send the same
+call again.
+
+**A repeated refusal shows a valid input.** Inside one turn, the second time a
+tool is refused for its input with the same error, the error goes back to the
+model with "A valid input looks like:" and one minimal example of that tool's
+input, held to the tool's own schema by a test. The second hunk that matches
+nothing in the same file adds "Read the file again before another hunk: what you
+remember of it is not what is on disk." A first refusal is unchanged, no tool
+accepts anything it refused before, and what a turn was refused is forgotten
+when the turn ends.
 
 **A turn the provider killed is not an attempt.** When the AI provider fails
 during a builder's turn, the turn cannot start, or it ends `failed` before the
@@ -313,6 +341,10 @@ the intent `stopped` "by the person", and the preview is left as it is. While a
 run is going, other turns may read the application and talk to the engineer,
 but every tool that writes to that application, and `launcher.activate`, is
 refused until the run stops.
+
+**Stopping the launcher** — Quit in the panel, `broapp-autoapp stop`, or
+Ctrl+C — stops a run the same way: the task in hand is `interrupted` with its
+attempt given back, and the intent `stopped`.
 
 **A restart interrupts and never resumes.** When the launcher's tab opens the
 store (`openIntents(…, { recover: true })`; `serve <appId>` and the one-shot

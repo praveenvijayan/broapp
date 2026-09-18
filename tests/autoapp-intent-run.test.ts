@@ -23,15 +23,24 @@ import { mergeContracts } from 'broapp/shared';
 import { createRunStore, type RunStore } from 'broapp-autoapp/host';
 import {
   BUILDER_MAY_NOT_PLAN,
+  createCandidateStates,
+  createInputMemory,
   engineerTools,
+  INPUT_EXAMPLES,
+  READ_AGAIN,
   intentTools,
   RUN_AGREEMENT,
   specReference,
   SPLIT_RULES,
 } from 'broapp-autoapp/engineer';
 import {
+  advicePrompt,
   createExecutor,
   DECIDE,
+  HOST_BUILT_COMPLETED,
+  HOST_CALL_ID,
+  NOTHING_BUILT,
+  refusalsOf,
   idleSentence,
   INTENT_APPROVES,
   INTENT_REFUSES,
@@ -46,6 +55,7 @@ import {
   verdictOf,
   type IntentStore,
   type TaskInput,
+  type TaskRecord,
 } from 'broapp-autoapp/intent';
 import { createEventLog, createEvidence, openKnowledge, sanitisedLogger, type Knowledge } from 'broapp-autoapp/knowledge';
 import {
@@ -1135,7 +1145,11 @@ describe('13d: holding a run to its earlier examples, and letting progress earn 
 
   // 3.
   test('a second attempt that only builds and checks what the first edited completes', async () => {
-    const w = await world([editOnly('0001-only-part', ['c1', 'c2']), verify()]);
+    // Attempt 1 edits and is then ended by the idle limit, so its edits are
+    // left unbuilt: since 14c a turn that ends on its own is built by the host,
+    // and only an aborted one leaves this case for the next attempt.
+    const silent: FakeStep = { kind: 'text', chunks: Array.from({ length: 12 }, () => 'thinking ') };
+    const w = await world([editOnly('0001-only-part', ['c1', 'c2'], [silent]), verify()], { idleTimeoutMs: 400, chunkDelayMs: 150 });
     const { id } = submitted(w.intents, [plan('only-part')]);
     const executor = executorOf(w);
     await executor.start(id, 'the test');
@@ -1145,6 +1159,8 @@ describe('13d: holding a run to its earlier examples, and letting progress earn 
     expect(task?.attempts).toBe(2);
     // The second turn's own revision did not move; the task's did.
     expect(task?.revAfter).not.toBe(task?.revBefore);
+    // An aborted turn gets no host build.
+    expect((w.runs.getRun(task?.runIds[0] ?? '')?.steps ?? []).some((step) => step.requestId.includes(':host-build'))).toBe(false);
     expect(w.intents.get(id)?.intent.status).toBe('done');
   }, 240_000);
 
@@ -1342,3 +1358,247 @@ describe('the Backlog panel', () => {
     expect(done).toContain('Estimated 20 lines, changed 12.');
   }, 60_000);
 });
+
+// ── 14c: a failure that names its cause ─────────────────────────────────────
+
+describe('14c: what the tools refused', () => {
+  const reasonsOf = (w: World, taskId: number): string[] => (w.intents.task(taskId)?.failure as { reasons: string[] } | null)?.reasons ?? [];
+  const step = (route: string, decision: string, outcome: string | null, error: string | null) => ({ route, decision, outcome, error });
+
+  // 1.
+  test('refusalsOf groups by route and kind, counts, keeps the newest error, and orders by count', () => {
+    const input = 'the input is not what this tool takes';
+    const groups = refusalsOf([
+      step('candidate.cycle', 'confirmed', 'failed', `${input}: create: expected an array`),
+      step('source.edit', 'confirmed', 'failed', 'not found in src/a.ts: const a. Closest line 3: "const b"'),
+      step('candidate.cycle', 'confirmed', 'failed', `${input}: hunks: expected an array`),
+      step('source.edit', 'confirmed', 'failed', `${input}: message: expected a string`),
+      step('source.edit', 'allowed', 'failed', `${input}: message: expected a string`),
+      step('source.edit', 'confirmed', 'failed', `${input}: message: expected a string`),
+      // A gate denial is somebody saying no, not a refusal of the input.
+      step('source.edit', 'denied', null, null),
+      step('candidate.build', 'denied', 'cancelled', 'candidate.build was not approved'),
+      // Succeeded, cancelled and the fixed internal sentence are not refusals either.
+      step('source.read', 'allowed', 'succeeded', null),
+      step('candidate.cycle', 'confirmed', 'cancelled', 'stopped'),
+      step('candidate.build', 'confirmed', 'failed', 'The application could not complete that operation.'),
+      // Sanitised: a key's id and a URL's query do not survive.
+      step('candidate.preview', 'confirmed', 'failed', `could not reach https://example.test/?token=abc ${'f'.repeat(64)}`),
+    ]);
+    expect(groups.map((group) => [group.route, group.kind, group.count])).toEqual([
+      ['source.edit', 'input', 3],
+      ['candidate.cycle', 'input', 2],
+      ['candidate.preview', 'other', 1],
+      ['source.edit', 'no-match', 1],
+    ]);
+    expect(groups[1]?.error).toBe(`${input}: hunks: expected an array`);
+    expect(groups[2]?.error).not.toContain('f'.repeat(64));
+    expect(groups[2]?.error).not.toContain('token=abc');
+    expect(groups.every((group) => group.error.length <= 200)).toBe(true);
+  });
+
+  test('the verdict names the refusals after nothing was built, and a completed verdict never does', () => {
+    const task = { slug: '0001-part', criteria: [{ id: 'c1', text: 'x', failure: false }] };
+    const nothing = { releaseId: null, problems: [], editsSinceBuild: false, checksVerified: false, checks: [] };
+    const groups = refusalsOf([
+      step('candidate.cycle', 'confirmed', 'failed', 'the input is not what this tool takes: create: expected an array'),
+      step('candidate.cycle', 'confirmed', 'failed', 'the input is not what this tool takes: create: expected an array'),
+      step('candidate.cycle', 'confirmed', 'failed', 'the input is not what this tool takes: create: expected an array'),
+      ...Array.from({ length: 15 }, () => step('source.edit', 'confirmed', 'failed', 'the input is not what this tool takes: message: expected a string')),
+      ...Array.from({ length: 7 }, () => step('source.change', 'confirmed', 'failed', 'not found in src/a.ts: x.')),
+    ]);
+    const reasons = verdictOf(task, nothing, 'a', 'b', {}, [], groups).reasons;
+    const at = reasons.indexOf(NOTHING_BUILT);
+    expect(reasons.slice(at, at + 3)).toEqual([
+      NOTHING_BUILT,
+      'candidate.cycle was refused 3 times: create: expected an array.',
+      '22 edits were refused; most often: message: expected a string.',
+    ]);
+    const passing = {
+      releaseId: 'r'.repeat(32),
+      problems: [],
+      editsSinceBuild: false,
+      checksVerified: true,
+      checks: [{ id: '0001-part-c1', title: 't', passed: true }],
+    };
+    const done = verdictOf(task, passing, 'a', 'b', {}, [], groups);
+    expect(done.completed).toBe(true);
+    expect(done.reasons).toEqual([]);
+    // Without refusals the sentence stands alone, as it always did.
+    expect(verdictOf(task, nothing, 'a', 'b').reasons).not.toContain('candidate.cycle was refused 3 times: create: expected an array.');
+  });
+
+  // 2 and 6.
+  test('a turn whose cycles were refused says so after nothing was built, and the advice is told', async () => {
+    const refusedCycle = (then: readonly FakeStep[]): FakeStep =>
+      tool('candidate.cycle', { appId: 'items', message: 'add the examples', hunks: [], create: 'migrations/004.sql' }, then);
+    const refusedEdit = (then: readonly FakeStep[]): FakeStep =>
+      tool('source.edit', { appId: 'items', message: 5, hunks: [{ path: 'autoapp.json', find: '"acceptance": [', replace: '"acceptance": [' }] }, then);
+    const advice = { diagnosis: 'Every cycle was refused for its input.', advice: 'retry', note: 'Another model may do better.' };
+    const w = await world([refusedCycle([refusedCycle([refusedEdit([text('done')])])]), text(JSON.stringify(advice))], { maxAttempts: 1 });
+    const { id, slugs } = submitted(w.intents, [plan('only-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+
+    // The spoke turn's steps are recorded under its own run id.
+    const runId = `intent-${String(id)}-${slugs[0] ?? ''}-a1`;
+    const steps = w.runs.getRun(runId)?.steps ?? [];
+    expect(steps.map((one) => [one.route, one.decision, one.outcome])).toEqual([
+      ['candidate.cycle', 'confirmed', 'failed'],
+      ['candidate.cycle', 'confirmed', 'failed'],
+      ['source.edit', 'confirmed', 'failed'],
+    ]);
+    const task = w.intents.runOrder(id)[0];
+    const reasons = reasonsOf(w, task?.id ?? 0);
+    const at = reasons.indexOf(NOTHING_BUILT);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(reasons[at + 1]).toBe('candidate.cycle was refused 2 times: create: expected an array.');
+    expect(reasons[at + 2]).toBe('1 edit was refused; most often: message: expected a string.');
+    // Nothing changed, so the host had nothing to build.
+    expect(steps.some((one) => one.requestId.includes(`:${HOST_CALL_ID}`))).toBe(false);
+
+    // 6. The advice question was told what was refused.
+    const asked = prompts(w.fake).find((prompt) => prompt.includes('# What the tools refused'));
+    expect(asked).toContain('the last attempt: candidate.cycle ×2: create: expected an array');
+    expect(asked).toContain('the last attempt: source.edit ×1: message: expected a string');
+    expect(asked).toContain('another model may be the answer');
+    expect(task?.advice).toEqual({ ...advice, at: expect.any(Number) });
+  }, 120_000);
+
+  test('the advice prompt has the refused section for both attempts, or says nothing was refused', () => {
+    const task = { ...submittedTask(), criteria: [] } as never;
+    const both = advicePrompt(task, ['Nothing was built.'], [], {
+      last: refusalsOf([step('candidate.cycle', 'confirmed', 'failed', 'the input is not what this tool takes: create: expected an array')]),
+      before: refusalsOf([step('source.edit', 'confirmed', 'failed', 'not found in src/a.ts: x.')]),
+    });
+    expect(both).toContain('# What the tools refused\n- the last attempt: candidate.cycle ×1: create: expected an array\n- the attempt before: source.edit ×1: not found in src/a.ts: x.');
+    const none = advicePrompt(task, ['Nothing was built.'], []);
+    expect(none).toContain('# What the tools refused\n(nothing was refused)\n# Your answer');
+    // Nothing else moved: the sections, in their order, with the new one before the answer.
+    expect(none.split('\n').filter((line) => line.startsWith('# '))).toEqual([
+      '# The task',
+      '# Why it was not completed',
+      '# What the last change cycle still had wrong',
+      '# What the tools refused',
+      '# Your answer',
+    ]);
+  });
+
+  // 3 and 8.
+  test('a second identical input refusal in a turn shows a valid input; a different error, a new turn and a first refusal do not', async () => {
+    const w = await world([]);
+    const journal = openJournal(w.root.journal);
+    const supervisor = createSupervisor({ logger: quiet });
+    closers.push(() => supervisor.stopAll(5_000), () => journal.close());
+    const inputs = createInputMemory();
+    const tools = engineerTools({
+      layout: w.root,
+      supervisor,
+      journal,
+      gate: w.gate,
+      states: createCandidateStates(w.root),
+      templates: TEMPLATES,
+      versions: STARTER_VERSIONS,
+      logger: quiet,
+      inputs,
+    });
+    const call = (name: string, input: unknown, runId: string, n: number): Promise<{ code: string; message: string }> =>
+      refusal(tools[name]?.execute(input, { ...chatEnvelope(runId), requestId: `${runId}:call-${String(n)}` }, new AbortController().signal) ?? Promise.resolve());
+    const badCreate = { appId: 'items', message: 'm', hunks: [], create: 'migrations/004.sql' };
+    const example = `A valid input looks like: ${JSON.stringify(INPUT_EXAMPLES['candidate.cycle'])}`;
+
+    const first = await call('candidate.cycle', badCreate, 'turn-1', 1);
+    expect(first.code).toBe('invalid_input');
+    expect(first.message).not.toContain('A valid input looks like');
+    const second = await call('candidate.cycle', badCreate, 'turn-1', 2);
+    expect(second.message).toContain('create: expected an array');
+    expect(second.message).toContain(example);
+    // A different error for the same tool is a first refusal of its own.
+    const different = await call('candidate.cycle', { appId: 'items', message: 'm', hunks: 'x' }, 'turn-1', 3);
+    expect(different.message).toContain('hunks: expected an array');
+    expect(different.message).not.toContain('A valid input looks like');
+    // A new turn starts clean, and so does one the tab has ended.
+    expect((await call('candidate.cycle', badCreate, 'turn-2', 1)).message).not.toContain('A valid input looks like');
+    inputs.ended('turn-2');
+    expect((await call('candidate.cycle', badCreate, 'turn-2', 2)).message).not.toContain('A valid input looks like');
+    // The gate's record keeps the tool's own words, so a refusal groups as one.
+    const recorded = w.runs.getRun('turn-1')?.steps.map((one) => one.error) ?? [];
+    expect(recorded.filter((error) => error?.includes('A valid input looks like') === true)).toEqual([]);
+
+    // 8. The second hunk that matches nothing in one file says to read it again.
+    const miss = (n: number): Promise<{ code: string; message: string }> =>
+      call('source.edit', { appId: 'items', message: 'm', hunks: [{ path: 'autoapp.json', find: `"nothing like this ${String(n)}"`, replace: 'x' }] }, 'turn-3', n);
+    const once = await miss(1);
+    expect(once.message).toStartWith('not found in autoapp.json');
+    expect(once.message).not.toContain(READ_AGAIN);
+    expect((await miss(2)).message).toEndWith(READ_AGAIN);
+  }, 60_000);
+
+  // 5.
+  test('a turn that edits and ends without building is built once by the host, and completes on that build', async () => {
+    const w = await world([editOnly('0001-only-part', ['c1', 'c2'])], { maxAttempts: 1 });
+    const { id, slugs } = submitted(w.intents, [plan('only-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const detail = w.intents.get(id);
+    const task = detail?.tasks[0];
+    expect(task?.stored).toBe('completed');
+    expect(task?.events.at(-1)?.note).toBe(HOST_BUILT_COMPLETED);
+    // The host's call is in the gate's record under the turn's run id, and its
+    // request id says whose it was; so do its steps and a log event.
+    const runId = `intent-${String(id)}-${slugs[0] ?? ''}-a1`;
+    const steps = w.runs.getRun(runId)?.steps ?? [];
+    const host = steps.filter((one) => one.requestId.startsWith(`${runId}:${HOST_CALL_ID}`));
+    // By route: the cycle and its first step can share a millisecond.
+    expect(host.map((one) => [one.requestId.slice(runId.length + 1), one.route, one.decision, one.outcome]).sort()).toEqual([
+      [HOST_CALL_ID, 'candidate.cycle', 'confirmed', 'succeeded'],
+      [`${HOST_CALL_ID}.build`, 'candidate.build', 'confirmed', 'succeeded'],
+      [`${HOST_CALL_ID}.check`, 'candidate.check', 'allowed', 'succeeded'],
+      [`${HOST_CALL_ID}.preview`, 'candidate.preview', 'confirmed', 'succeeded'],
+    ]);
+    expect((host.find((one) => one.route === 'candidate.cycle')?.input as { hunks: unknown[] }).hunks).toEqual([]);
+    const log = w.knowledge.db.query<{ message: string; call_id: string | null }, []>("SELECT message, call_id FROM events WHERE kind = 'log' ORDER BY id").all();
+    expect(log.some((row) => row.message.startsWith(`the host built what turn ${runId} left unbuilt`) && row.call_id === HOST_CALL_ID)).toBe(true);
+  }, 120_000);
+
+  test('an aborted turn with unbuilt edits gets no host build, and a turn that built for itself gets none', async () => {
+    const silent: FakeStep = { kind: 'text', chunks: Array.from({ length: 12 }, () => 'thinking ') };
+    const aborted = await world([editOnly('0001-only-part', ['c1', 'c2'], [silent]), text('not advice')], {
+      maxAttempts: 1,
+      idleTimeoutMs: 400,
+      chunkDelayMs: 150,
+    });
+    const first = submitted(aborted.intents, [plan('only-part')]);
+    await executorOf(aborted).start(first.id, 'the test');
+    await executorOf(aborted).idle();
+    const cut = aborted.intents.runOrder(first.id)[0];
+    expect(cut?.stored).toBe('failed');
+    expect(reasonsOf(aborted, cut?.id ?? 0)).toContain(NOTHING_BUILT);
+    const cutSteps = aborted.runs.getRun(cut?.runIds[0] ?? '')?.steps ?? [];
+    expect(cutSteps.some((one) => one.requestId.includes(`:${HOST_CALL_ID}`))).toBe(false);
+
+    const own = await world([cycle('0001-only-part')]);
+    const second = submitted(own.intents, [plan('only-part')]);
+    await executorOf(own).start(second.id, 'the test');
+    await executorOf(own).idle();
+    const built = own.intents.get(second.id)?.tasks[0];
+    expect(built?.stored).toBe('completed');
+    expect(built?.events.at(-1)?.note).not.toBe(HOST_BUILT_COMPLETED);
+    const ownSteps = own.runs.getRun(built?.runIds[0] ?? '')?.steps ?? [];
+    expect(ownSteps.some((one) => one.requestId.includes(`:${HOST_CALL_ID}`))).toBe(false);
+  }, 180_000);
+});
+
+/** A task record good enough for a prompt: rendered, never stored. */
+function submittedTask(): TaskRecord {
+  const dir = mkdtempSync(join(runRoot, 'intent-run-task-'));
+  scratch.push(dir);
+  const intents = openIntents(dir);
+  closers.push(() => intents.close());
+  const { id } = submitted(intents, [plan('only-part')]);
+  const task = intents.runOrder(id)[0];
+  if (task === undefined) throw new Error('no task');
+  return task;
+}

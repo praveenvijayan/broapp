@@ -40,6 +40,7 @@ import { CandidatePanel } from './CandidatePanel.tsx';
 import { IntentPanel } from './IntentPanel.tsx';
 import { KnowledgePanel } from './KnowledgePanel.tsx';
 import { LogsPanel } from './LogsPanel.tsx';
+import { LauncherStopped, QuitControl } from './QuitControl.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
 import { readScheme, applyScheme, SCHEME_KEY } from './scheme.ts';
 import { firstSelection } from './selection.ts';
@@ -102,12 +103,29 @@ function remember(key: string, value: string): void {
   }
 }
 
+/**
+ * The launcher's tab: the workspace while the launcher runs, and one sentence
+ * once the person has quit it. The workspace is unmounted rather than hidden,
+ * so every poll in it stops with it.
+ */
 export function App(): React.ReactElement {
+  const [stopped, setStopped] = useState(false);
+  return stopped ? <LauncherStopped /> : <Workspace onStopped={() => setStopped(true)} />;
+}
+
+function Workspace({ onStopped }: { readonly onStopped: () => void }): React.ReactElement {
   const connection = useConnection();
   const apps = useOperation<LauncherContract, 'launcher.appsList'>('launcher.appsList');
   const open = useOperation<LauncherContract, 'launcher.appOpen'>('launcher.appOpen');
   const stop = useOperation<LauncherContract, 'launcher.appStop'>('launcher.appStop');
   const selectOperation = useOperation<LauncherContract, 'launcher.appSelect'>('launcher.appSelect');
+  // Quit, as the person confirmed it. The route answers before the launcher
+  // begins to stop, so its answer is what says the page can stop too.
+  const quitOperation = useOperation<LauncherContract, 'launcher.quit'>('launcher.quit');
+  const quitStopping = quitOperation.data?.stopping === true;
+  useEffect(() => {
+    if (quitStopping) onStopped();
+  }, [quitStopping, onStopped]);
   const threads = useAiThreads();
 
   const [selected, setSelected] = useState<string | null>(null);
@@ -436,6 +454,11 @@ export function App(): React.ReactElement {
         <div className="broapp-tokens launcher__rail-scheme">
           <BroappSchemeToggle onChange={chooseScheme} orientation="vertical" value={scheme} />
         </div>
+        <QuitControl
+          error={quitOperation.error?.message ?? null}
+          onQuit={() => void quitOperation.run(undefined)}
+          pending={quitOperation.pending}
+        />
       </nav>
 
       {historyOpen ? (

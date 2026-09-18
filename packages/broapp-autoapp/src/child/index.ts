@@ -7,3 +7,4 @@
  */
 export { assertAppInstance, assertAppModule } from './module.ts';
 export type { AppInstance, AppModule, AppStartContext } from './module.ts';
+export { LAUNCHER_PID_ENV, LAUNCHER_WATCH_MS, processAlive } from './watch.ts';

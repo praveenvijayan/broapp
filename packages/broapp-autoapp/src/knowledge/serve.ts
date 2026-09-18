@@ -28,7 +28,7 @@
 import type { AiContextProviders, ContextDocument, ContextRef, DeliveredContext } from 'broapp/ai/host';
 
 import type { CandidateStates } from '../engineer/state.ts';
-import type { IntentStore, TaskRecord } from '../intent/index.ts';
+import type { IntentStore, RefusalGroup, TaskRecord } from '../intent/index.ts';
 import type { AppRow } from '../launcher/apps.ts';
 import type { BuildProblem } from '../launcher/candidate.ts';
 import type { Layout } from '../spec/index.ts';
@@ -153,6 +153,11 @@ export interface CreateServeInput {
    * attempt that changed nothing says what it read.
    */
   readonly reads?: (runId: string) => readonly string[];
+  /**
+   * What the tools refused in one earlier run, from the same run store.
+   * Present, each earlier attempt says what was refused.
+   */
+  readonly refusals?: (runId: string) => readonly RefusalGroup[];
 }
 
 /** The most a backlog document may be. */
@@ -600,7 +605,7 @@ export function createServe(input: CreateServeInput): Serve {
         const attempts =
           appId === null || task === null || input.intents === undefined || documents.attempts === false
             ? null
-            : attemptsDocument(attemptsInput(knowledge, input.intents, task, query.runId ?? null, input.reads));
+            : attemptsDocument(attemptsInput(knowledge, input.intents, task, query.runId ?? null, input.reads, input.refusals));
         const why = new Map<string, WhyReason>();
         const refs: ContextRef[] =
           appId === null

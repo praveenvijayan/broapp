@@ -13,7 +13,7 @@
  * the function exactly the case it means.
  */
 import type { RunStore } from '../host/run-store.ts';
-import { NOT_AN_ATTEMPT, reasonsFromNote, type IntentStore, type TaskRecord } from '../intent/index.ts';
+import { NOT_AN_ATTEMPT, reasonsFromNote, refusalLine, type IntentStore, type RefusalGroup, type TaskRecord } from '../intent/index.ts';
 
 import { sanitise } from './log.ts';
 import { problemSignature } from './scoring.ts';
@@ -35,8 +35,12 @@ const MAX_READ_PATHS = 6;
  */
 export const START_FROM_AN_EDIT =
   'The last attempt read these and changed nothing. Do not read them again: make the first edit the plan calls for, then use candidate.cycle.';
-/** The most lines under `Ended with:`, and under `Still wrong at the end:`. */
+/** The most lines under `Ended with:`, `Refused:` and `Still wrong at the end:`. */
 const MAX_LINES = 3;
+/** How many paths `Changed:` keeps when the newest attempt alone is over the cap. */
+const TRIMMED_PATHS = 3;
+/** The longest error a `Refused:` line keeps. */
+const REFUSAL_CHARS = 120;
 /** The longest one problem, detail or reason may be. */
 const LINE_CHARS = 160;
 
@@ -70,6 +74,12 @@ export interface AttemptRecord {
    * nothing: for one that did, what it changed says more than what it looked at.
    */
   readonly read?: readonly string[];
+  /**
+   * What the tools refused in its turn, largest group first, from the
+   * launcher's run store. A builder whose every cycle was refused for its
+   * input and is then told only "Nothing was built" repeats the same call.
+   */
+  readonly refused?: readonly RefusalGroup[];
 }
 
 /** What {@link attemptsDocument} is built from. */
@@ -97,13 +107,23 @@ function isAttempt(record: AttemptRecord): boolean {
   return record.ended === null || !record.ended.note.startsWith(NOT_AN_ATTEMPT);
 }
 
+/** How much of an attempt a block shows: every section, or less when over the cap. */
+interface BlockShape {
+  /** Whether the `Refused:` section is shown. */
+  readonly refused: boolean;
+  /** How many paths `Changed:` names before "and <k> more". */
+  readonly paths: number;
+}
+
+const WHOLE: BlockShape = { refused: true, paths: MAX_PATHS };
+
 /** One attempt's lines. */
-function block(record: AttemptRecord): string[] {
+function block(record: AttemptRecord, shape: BlockShape = WHOLE): string[] {
   const stopped = record.ended?.to === 'interrupted';
   const lines = [`Attempt ${String(record.attempt)}${stopped ? ' (stopped before it finished)' : ''}`];
   const paths = record.edited.map((path) => sanitise(path));
-  const named = paths.slice(0, MAX_PATHS).join(', ');
-  const more = paths.length > MAX_PATHS ? ` and ${String(paths.length - MAX_PATHS)} more` : '';
+  const named = paths.slice(0, shape.paths).join(', ');
+  const more = paths.length > shape.paths ? ` and ${String(paths.length - shape.paths)} more` : '';
   lines.push(`Changed: ${paths.length === 0 ? 'nothing' : `${named}${more}`}`);
   const read = paths.length === 0 ? (record.read ?? []).map((path) => sanitise(path)) : [];
   if (read.length > 0) {
@@ -120,6 +140,12 @@ function block(record: AttemptRecord): string[] {
     const ordered = [...all.filter((reason) => reason.startsWith('The turn ')), ...all.filter((reason) => !reason.startsWith('The turn '))];
     const reasons = ordered.map((reason) => `- ${firstLine(reason)}`);
     if (reasons.length > 0) lines.push('Ended with:', ...bounded(reasons, MAX_LINES));
+  }
+  // What the tools refused, after how it ended: the reason nothing was built
+  // is often here, and it is what the next attempt must not send again.
+  const refused = shape.refused ? (record.refused ?? []).slice(0, MAX_LINES) : [];
+  if (refused.length > 0) {
+    lines.push('Refused:', ...refused.map((group) => `- ${refusalLine({ ...group, error: sanitise(group.error) }, REFUSAL_CHARS)}`));
   }
   const wrong = [
     ...record.lastBuild.map((problem) => `- ${problem.stage}: ${firstLine(problem.message)}`),
@@ -165,18 +191,19 @@ function size(lines: readonly string[]): number {
  * What a task's earlier attempts did, or `null` when it has none that were
  * attempts.
  *
- * Oldest first. The newest attempt is never cut; when the whole does not fit
- * in {@link ATTEMPTS_DOCUMENT_CHARS}, the older attempts are cut at a line
- * from the end, then the diagnosis goes, then what came back — each bounded so
- * that the newest attempt alone always fits. When the newest attempt changed
+ * Oldest first. When the whole does not fit in {@link ATTEMPTS_DOCUMENT_CHARS},
+ * the older attempts are cut at a line from the end, then the diagnosis goes,
+ * then what came back, then the newest attempt's `Refused:` lines, and last its
+ * `Changed:` paths are trimmed — each bounded so that the newest attempt alone
+ * always fits. When the newest attempt changed
  * nothing, {@link START_FROM_AN_EDIT} closes the document and is never cut.
  */
 export function attemptsDocument(input: AttemptsInput): string | null {
   const attempts = input.attempts.filter(isAttempt).sort((a, b) => a.attempt - b.attempt);
   const newest = attempts[attempts.length - 1];
   if (newest === undefined) return null;
-  const older = attempts.slice(0, -1).flatMap(block);
-  const last = block(newest);
+  const older = attempts.slice(0, -1).flatMap((record) => block(record));
+  let last = block(newest);
   const closing = newest.edited.length === 0 ? [START_FROM_AN_EDIT] : [];
   const back = cameBack(attempts);
   const diagnosis =
@@ -184,10 +211,15 @@ export function attemptsDocument(input: AttemptsInput): string | null {
       ? []
       : [`How the planning model read it: ${sanitise(input.diagnosis).replace(/\s+/g, ' ').trim().slice(0, 400)}`];
 
+  // The cut order, after the older attempts: the diagnosis, what came back,
+  // the newest attempt's refusals, then its changed paths trimmed.
   const budget = ATTEMPTS_DOCUMENT_CHARS - size(closing);
+  const over = (): boolean => size(last) + size(tail) > budget;
   let tail = [...back, ...diagnosis];
-  if (size(last) + size(tail) > budget) tail = back;
-  if (size(last) + size(tail) > budget) tail = [];
+  if (over()) tail = back;
+  if (over()) tail = [];
+  if (over()) last = block(newest, { ...WHOLE, refused: false });
+  if (over()) last = block(newest, { refused: false, paths: TRIMMED_PATHS });
   const room = budget - size(last) - size(tail);
   const kept: string[] = [];
   if (size(older) <= room) {
@@ -283,7 +315,7 @@ export function sourceReads(store: Pick<RunStore, 'getRun'>, runId: string): str
  * The input for a task's attempts document: every run of the task before
  * `currentRunId`, joined to how each ended by its attempt number, and the
  * planning model's diagnosis. Each store is read through its own handle;
- * `reads` is the run store's, absent where there is none.
+ * `reads` and `refusals` are the run store's, absent where there is none.
  */
 export function attemptsInput(
   knowledge: Knowledge,
@@ -291,6 +323,7 @@ export function attemptsInput(
   task: TaskRecord,
   currentRunId: string | null,
   reads?: (runId: string) => readonly string[],
+  refusals?: (runId: string) => readonly RefusalGroup[],
 ): AttemptsInput {
   const runs = intents.runsOf(task.id);
   const current = runs.find((run) => run.runId === currentRunId)?.attempt ?? Number.POSITIVE_INFINITY;
@@ -304,6 +337,7 @@ export function attemptsInput(
         ended: note === undefined ? null : { to: note.to, note: note.note },
         ...runRecord(knowledge, run.runId),
         ...(reads === undefined ? {} : { read: reads(run.runId) }),
+        ...(refusals === undefined ? {} : { refused: refusals(run.runId) }),
       };
     });
   const advice = task.advice as { diagnosis?: unknown } | null;

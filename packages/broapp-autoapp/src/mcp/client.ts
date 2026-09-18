@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import type { Socket } from 'bun';
 
 import type { ContractExport } from '../spec/types.ts';
-import type { ControlFile } from '../launcher/control.ts';
+import type { ControlFile, LauncherStatus } from '../launcher/control.ts';
 
 /** What an application looks like from outside it. */
 export interface Described {
@@ -29,6 +29,13 @@ export interface ControlClient {
    * one less than two seconds ago.
    */
   panel(): Promise<{ ok: true; url: string } | { ok: false; reason: string }>;
+  /** What the launcher is doing: its pid, how long it has run, what it serves, the backlog run. */
+  status(): Promise<LauncherStatus>;
+  /**
+   * Ask the launcher to stop, the way `SIGTERM` would. Resolves with what it
+   * was serving once it has answered; it goes on stopping after that.
+   */
+  stop(): Promise<{ readonly serving: readonly string[]; readonly run: number | null }>;
   invoke(params: {
     appId: string;
     route: string;
@@ -167,6 +174,22 @@ export async function connectControl(controlPath: string): Promise<ControlClient
       return reply['ok'] === true && typeof reply['url'] === 'string'
         ? { ok: true, url: reply['url'] }
         : { ok: false, reason: String(reply['reason'] ?? reply['message'] ?? 'unavailable') };
+    },
+
+    async status() {
+      const reply = await request({ type: 'status' });
+      if (reply['ok'] !== true) throw new Error(String(reply['message'] ?? 'the launcher would not say'));
+      return reply['output'] as LauncherStatus;
+    },
+
+    async stop() {
+      const reply = await request({ type: 'stop' });
+      if (reply['ok'] !== true) throw new Error(String(reply['message'] ?? 'the launcher would not stop'));
+      const output = reply['output'] as { serving?: unknown; run?: unknown };
+      return {
+        serving: Array.isArray(output.serving) ? output.serving.filter((id): id is string => typeof id === 'string') : [],
+        run: typeof output.run === 'number' ? output.run : null,
+      };
     },
 
     async invoke({ appId, route, input, client }) {

@@ -446,6 +446,15 @@ export const launcherContract = defineContract({
       output: s.object({ stopped: s.boolean() }),
       summary: 'Drain an application and shut it down.',
     },
+    'launcher.quit': {
+      // A person's route and nobody else's: no engineer tool reaches it, MCP
+      // reaches applications and never the launcher's own routes, and the
+      // route itself refuses every channel but `user`.
+      effect: 'write',
+      input: s.void(),
+      output: s.object({ stopping: s.boolean() }),
+      summary: 'Stop the launcher and every application it is serving.',
+    },
     'launcher.releasesList': {
       effect: 'read',
       input: appIdInput,

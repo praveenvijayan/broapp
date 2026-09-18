@@ -18,9 +18,9 @@ import type { Bridge } from 'brobridge';
 import { ENGINEER_INSTRUCTIONS } from '../engineer/instructions.ts';
 import { createCandidateStates, type CandidateStates } from '../engineer/state.ts';
 import { intentTools, type IntentTools } from '../engineer/intent-tools.ts';
-import { engineerTools, type TurnRecord } from '../engineer/tools.ts';
+import { createInputMemory, engineerTools, type TurnRecord } from '../engineer/tools.ts';
 import type { RunStore } from '../host/run-store.ts';
-import { createExecutor, type Executor, type IntentStore } from '../intent/index.ts';
+import { createExecutor, refusalsOf, type Executor, type IntentStore } from '../intent/index.ts';
 import { sourceReads } from '../knowledge/attempts.ts';
 import { createDistiller, pendingCases, type Distiller } from '../knowledge/distil.ts';
 import { recordContext, type Evidence } from '../knowledge/evidence.ts';
@@ -115,6 +115,8 @@ export interface CreateLauncherTabOptions {
    * about, and a question to the model about each would cost a call per run.
    */
   readonly distil?: boolean;
+  /** The launcher's stop path, for the panel's Quit. Absent, Quit is `unavailable`. */
+  readonly quit?: () => void;
 }
 
 /** Everything that mounts on the launcher's bridge. */
@@ -192,6 +194,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           ...(serving?.seed === undefined ? {} : { seed: serving.seed }),
           ...(options.intents === undefined ? {} : { intents: options.intents }),
           reads: (runId: string) => sourceReads(options.store, runId),
+          refusals: (runId: string) => refusalsOf(options.store.getRun(runId)?.steps ?? []),
         });
 
   if (knowledge !== undefined) {
@@ -239,6 +242,14 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           ...(knowledge === undefined ? {} : { log: knowledge.log }),
           logger: printed,
           confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
+          runs: options.store,
+          // The engineer's own cycle, built below; the host's one call for a
+          // turn that left edits unbuilt goes through it and its gate.
+          hostCycle: (input, envelope, signal) => {
+            const cycle = tools['candidate.cycle'];
+            if (cycle === undefined) return Promise.reject(new TypeError('the engineer has no candidate.cycle'));
+            return cycle.execute(input, envelope, signal);
+          },
           ...(options.run?.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: options.run.turnTimeoutMs }),
           ...(options.run?.maxAttempts === undefined ? {} : { maxAttempts: options.run.maxAttempts }),
           ...(options.run?.maxTurns === undefined ? {} : { maxTurns: options.run.maxTurns }),
@@ -292,6 +303,40 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ...(options.openBrowser === undefined ? {} : { openBrowser: options.openBrowser }),
     ...(options.install === undefined ? {} : { install: options.install }),
     ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
+    ...(options.quit === undefined ? {} : { quit: options.quit }),
+  });
+
+  /** What the tools remember of each turn's refusals; a turn is dropped when it ends. */
+  const inputs = createInputMemory();
+  const tools = engineerTools({
+    layout: options.layout,
+    supervisor: options.supervisor,
+    journal: options.journal,
+    // The same gate the tab's own clicks pass. One door, two directions.
+    gate: options.gate,
+    states,
+    logger: printed,
+    templates: options.templates,
+    versions: options.versions,
+    confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
+    ...(options.install === undefined ? {} : { install: options.install }),
+    ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
+    session,
+    inputs,
+    ...(planning === null ? {} : { intents: planning }),
+    ...(busy === undefined ? {} : { busy }),
+    ...(knowledge === undefined
+      ? {}
+      : {
+          knowledge: {
+            log: knowledge.log,
+            evidence: knowledge.evidence,
+            autoappVersion: AUTOAPP_VERSION,
+            turn: (runId: string) => turns.get(runId),
+            store: knowledge.store,
+            ...(serve === null ? {} : { serve }),
+          },
+        }),
   });
 
   const ai = createAi({
@@ -312,35 +357,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     ...(serve === null ? {} : { context: serve }),
     ...(options.contextBudgetChars === undefined ? {} : { contextBudgetChars: options.contextBudgetChars }),
-    tools: engineerTools({
-      layout: options.layout,
-      supervisor: options.supervisor,
-      journal: options.journal,
-      // The same gate the tab's own clicks pass. One door, two directions.
-      gate: options.gate,
-      states,
-      logger: printed,
-      templates: options.templates,
-      versions: options.versions,
-      confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
-      ...(options.install === undefined ? {} : { install: options.install }),
-      ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
-      session,
-      ...(planning === null ? {} : { intents: planning }),
-      ...(busy === undefined ? {} : { busy }),
-      ...(knowledge === undefined
-        ? {}
-        : {
-            knowledge: {
-              log: knowledge.log,
-              evidence: knowledge.evidence,
-              autoappVersion: AUTOAPP_VERSION,
-              turn: (runId: string) => turns.get(runId),
-              store: knowledge.store,
-              ...(serve === null ? {} : { serve }),
-            },
-          }),
-    }),
+    tools,
     ...(knowledge === undefined
       ? {}
       : {
@@ -378,6 +395,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     onRunEnd: (runId, status, summary, detail) => {
       turns.delete(runId);
       planning?.ended(runId);
+      inputs.ended(runId);
       if (knowledge !== undefined) {
         knowledge.log.event(
           'run',

@@ -464,6 +464,9 @@ describe.skipIf(!available)('the stdio server', () => {
       // launcher is serving, which is a question the `remove` command asks.
       serving: () => Promise.resolve(true),
       panel: () => Promise.resolve({ ok: false as const, reason: 'no panel in this test' }),
+      // The MCP server never asks either; they are here because the client has them.
+      status: () => Promise.reject(new Error('not asked in this test')),
+      stop: () => Promise.reject(new Error('not asked in this test')),
       invoke: ({ route, client: name }) => {
         calls.push({ route, client: name });
         return Promise.resolve({ ok: true as const, output: { route } });

@@ -144,6 +144,17 @@ process" (the address itself is not), and the launcher answers at most one
 `panel` request per two seconds, refusing the rest `unavailable`. `serving`
 still answers only whether, never where.
 
+**`status` and `stop`.** Two more requests behind the same secret.
+`{ type: "status" }` is read-only: the launcher's pid, when it started, which
+applications it serves (by id, never an address), and the backlog run in hand.
+`{ type: "stop" }` answers `{ stopping: true, serving, run }` and then runs the
+launcher's own stop path, the one Ctrl+C runs. Neither is new reach: a process
+holding the secret could already read `launcher.json`'s pid and signal it. The
+`stop` command never sends a signal itself; a control file whose pid is not
+alive is removed as stale. `launcher.quit`, the panel's Quit, is a person's
+route: it refuses every channel but `user`, no engineer tool reaches it, and MCP
+reaches only applications' routes, never the launcher's.
+
 **On Windows the mode bits are not enforced.** The file's protection there is
 the user profile directory's ACL. Anything that can read your profile can read
 the secret, and with it can reach the applications this launcher is serving —

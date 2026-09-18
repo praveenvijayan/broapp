@@ -19,6 +19,7 @@ import type { HostLogger } from 'broapp/host';
 import { INTERNAL_ERROR_MESSAGE, PublicError } from 'broapp/shared';
 import type { PublicErrorCode } from 'broapp/shared';
 
+import { LAUNCHER_PID_ENV } from '../child/watch.ts';
 import { parseMessage } from '../ipc/codec.ts';
 import { IPC_TIMEOUT_MS, IPC_VERSION, type Answer, type Ask, type Message } from '../ipc/messages.ts';
 
@@ -230,6 +231,8 @@ function childEnv(dataDir: string): Record<string, string> {
     BROAPP_DATA_DIR: dataDir,
     BROAPP_LIFECYCLE: 'background',
     BROAPP_OPEN_BROWSER: '0',
+    // So the child can tell when this launcher has gone, however it went.
+    [LAUNCHER_PID_ENV]: String(process.pid),
   };
   for (const name of ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'NODE_ENV']) {
     const value = process.env[name];

@@ -26,16 +26,18 @@
 import { jsonSchema, streamObject, type LanguageModel } from 'ai';
 import type { Ai, ChatEvent, InProcessQuestion } from 'broapp/ai/host';
 import { publicError } from 'broapp/host';
-import type { HostLogger } from 'broapp/host';
+import type { Envelope, HostLogger } from 'broapp/host';
 import { s } from 'broapp/shared';
 
 import type { CandidateStatus, CandidateStates } from '../engineer/state.ts';
+import type { RunStore } from '../host/run-store.ts';
 import { sourceRevision } from '../knowledge/ids.ts';
 import { sanitise, type EventLog } from '../knowledge/log.ts';
 import type { Layout } from '../spec/index.ts';
 
 import { modelFor, readTierModels, type TierModels } from './models.ts';
 import { exampleIdFor, renderPlan, validateGraph } from './plan.ts';
+import { refusalError, refusalLine, refusalsOf, type RefusalGroup } from './refusals.ts';
 import type { IntentStore } from './store.ts';
 import { NOT_AN_ATTEMPT, type StoredTaskStatus, type TaskRecord } from './types.ts';
 
@@ -79,6 +81,26 @@ export const TASK_MAX_TURNS = 4;
 export const TASK_IDLE_TIMEOUT_MS = 8 * 60_000;
 /** How many questions a builder may ask about one task. */
 export const MAX_QUESTIONS_PER_TASK = 2;
+
+/**
+ * The verdict's reason when no build of the workspace exists and none failed.
+ *
+ * A constant because the refusal sentences are placed after it: matched by
+ * value, never by re-reading the sentence.
+ */
+export const NOTHING_BUILT = 'Nothing was built.';
+
+/** The note on a task completed on the build the host made for its turn. */
+export const HOST_BUILT_COMPLETED = 'completed after the host built what the turn left unbuilt';
+
+/**
+ * The call id of the one `candidate.cycle` the host makes for a builder's turn.
+ *
+ * Its request id is `<runId>:host-build`, so the gate's record says under the
+ * turn's own run which call nobody's model made; its steps follow as
+ * `…:host-build.build`, `.preview` and `.check`.
+ */
+export const HOST_CALL_ID = 'host-build';
 
 /** Why a run stopped when a forwarded question was never answered. */
 export const QUESTION_EXPIRED = 'A question waited ten minutes without an answer.';
@@ -174,6 +196,38 @@ export function idleSentence(ms: number): string {
   return `The turn made no tool call for ${amount}.`;
 }
 
+/** `once`, or `<n> times`. */
+function times(n: number): string {
+  return n === 1 ? 'once' : `${String(n)} times`;
+}
+
+/** A sentence's last word, with the one full stop it needs. */
+function endSentence(text: string): string {
+  return /[.!?…]$/.test(text) ? text : `${text}.`;
+}
+
+/**
+ * What the tools refused, as sentences for a verdict that built nothing.
+ *
+ * One per refused group of `candidate.cycle` and `candidate.build`, at most
+ * three; then, when edits were refused, one sentence for all of them with the
+ * error they were refused with most often. What the builder got wrong, in the
+ * tool's own words — never a guess at why.
+ */
+export function refusalSentences(refusals: readonly RefusalGroup[]): string[] {
+  const sentences = refusals
+    .filter((group) => group.route === 'candidate.cycle' || group.route === 'candidate.build')
+    .slice(0, 3)
+    .map((group) => `${group.route} was refused ${times(group.count)}: ${endSentence(refusalError(group))}`);
+  const edits = refusals.filter((group) => group.route.startsWith('source.'));
+  const most = edits[0];
+  if (most !== undefined) {
+    const total = edits.reduce((sum, group) => sum + group.count, 0);
+    sentences.push(`${plural(total, 'edit was', 'edits were')} refused; most often: ${endSentence(refusalError(most))}`);
+  }
+  return sentences;
+}
+
 /**
  * Whether a task is finished, from evidence alone.
  *
@@ -192,10 +246,13 @@ export function verdictOf(
   revNow: string,
   ending: TurnEnding = {},
   required: readonly string[] = [],
+  refusals: readonly RefusalGroup[] = [],
 ): Verdict {
   const reasons: string[] = [];
   if (revNow === revBefore) reasons.push('The workspace did not change.');
-  if (status.releaseId === null && status.problems.length === 0) reasons.push('Nothing was built.');
+  // Nothing built is the one reason a refused build explains, so the refusals
+  // follow it and nothing else: a verdict with a build has its own evidence.
+  if (status.releaseId === null && status.problems.length === 0) reasons.push(NOTHING_BUILT, ...refusalSentences(refusals));
   if (status.problems.length > 0) reasons.push(`The build has ${plural(status.problems.length, 'problem', 'problems')}.`);
   if (status.editsSinceBuild) reasons.push('The workspace changed after the last build.');
   if (!status.checksVerified) reasons.push('The checks did not run on the build the preview is running.');
@@ -255,13 +312,30 @@ export const ADVICE = s.object({
 export type Advice = ReturnType<typeof ADVICE.parse>;
 
 const ADVICE_SYSTEM =
-  'You planned a backlog, and one of its tasks failed twice in the hands of a builder. Read the plan and why it was not completed, and advise the person. retry: nothing in the plan is wrong and another run may pass. revise: the plan asks for something that cannot pass as written. split: the task is two tasks. ask: the person has to decide something first; say what in the note. The diagnosis says what went wrong in one or two sentences; the note is what you would tell the person. Do not include paths from this machine.';
+  'You planned a backlog, and one of its tasks failed twice in the hands of a builder. Read the plan and why it was not completed, and advise the person. retry: nothing in the plan is wrong and another run may pass. revise: the plan asks for something that cannot pass as written. split: the task is two tasks. ask: the person has to decide something first; say what in the note. The diagnosis says what went wrong in one or two sentences; the note is what you would tell the person. When the builder\'s calls were refused for their input, the plan is not at fault and another model may be the answer; say so in the note. Do not include paths from this machine.';
 
 /** How long the advice question may take. */
 const ADVICE_TIMEOUT_MS = 60_000;
 
+/** What the tools refused in the last two attempts, for the advice question. */
+export interface AdviceRefusals {
+  readonly last: readonly RefusalGroup[];
+  readonly before: readonly RefusalGroup[];
+}
+
 /** The advice question, as the model reads it. */
-export function advicePrompt(task: TaskRecord, reasons: readonly string[], failures: readonly string[]): string {
+export function advicePrompt(
+  task: TaskRecord,
+  reasons: readonly string[],
+  failures: readonly string[],
+  refusals: AdviceRefusals = { last: [], before: [] },
+): string {
+  // Both attempts, because a builder that repeats the refusal its first
+  // attempt met is the sign that another model, not another plan, is needed.
+  const refused = [
+    ...refusals.last.map((group) => `- the last attempt: ${refusalLine(group)}`),
+    ...refusals.before.map((group) => `- the attempt before: ${refusalLine(group)}`),
+  ];
   return [
     '# The task',
     renderPlan(task),
@@ -269,6 +343,8 @@ export function advicePrompt(task: TaskRecord, reasons: readonly string[], failu
     ...reasons.map((reason) => `- ${reason}`),
     '# What the last change cycle still had wrong',
     ...(failures.length === 0 ? ['(nothing recorded)'] : failures.map((failure) => `- ${failure}`)),
+    '# What the tools refused',
+    ...(refused.length === 0 ? ['(nothing was refused)'] : refused),
     '# Your answer',
     'One JSON object and nothing else, matching this JSON Schema. `advice` is exactly one of: retry, revise, split, ask.',
     JSON.stringify(ADVICE.toJsonSchema()),
@@ -346,6 +422,18 @@ export interface CreateExecutorOptions {
    * relationship index here.
    */
   readonly onTaskEnded?: (task: TaskRecord) => void;
+  /**
+   * The launcher's run store, where the gate wrote every call of a builder's
+   * turn under its run id. Read for what the tools refused. Absent, nothing
+   * is read and the verdict, the advice and the attempts say nothing of it.
+   */
+  readonly runs?: Pick<RunStore, 'getRun'>;
+  /**
+   * The engineer's own `candidate.cycle`, for the one call the host makes when
+   * a turn ends with edits nothing built. It passes the gate like any call.
+   * Absent, the host builds nothing.
+   */
+  readonly hostCycle?: (input: unknown, envelope: Envelope, signal: AbortSignal) => Promise<unknown>;
 }
 
 /** The executor. One run per launcher, one task at a time. */
@@ -498,12 +586,24 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     }
   }
 
+  /** What the tools refused in one turn, from the run store; nothing without one. */
+  const refusedIn = (runId: string | undefined): RefusalGroup[] => {
+    if (runId === undefined || options.runs === undefined) return [];
+    try {
+      return refusalsOf(options.runs.getRun(runId)?.steps ?? []);
+    } catch (cause) {
+      logger.error(`[autoapp] could not read what the tools refused: ${String(cause instanceof Error ? cause.message : cause)}`);
+      return [];
+    }
+  };
+
   /** Ask the main model for advice on a failed task. Stores it, or nothing. */
-  async function advise(task: TaskRecord, reasons: readonly string[]): Promise<void> {
+  async function advise(task: TaskRecord, reasons: readonly string[], runIds: readonly string[]): Promise<void> {
     const failures = states.get(task.appId).cycle?.failures.map((failure) => failure.summary) ?? [];
+    const refusals = { last: refusedIn(runIds[runIds.length - 1]), before: refusedIn(runIds[runIds.length - 2]) };
     try {
       const model = await options.ai().model();
-      const answer = await askAdvice(model, advicePrompt(task, reasons, failures), AbortSignal.timeout(ADVICE_TIMEOUT_MS));
+      const answer = await askAdvice(model, advicePrompt(task, reasons, failures, refusals), AbortSignal.timeout(ADVICE_TIMEOUT_MS));
       store.setAdvice(task.id, { ...answer, at: Date.now() });
       note(`task ${task.slug}: the main model advises ${answer.advice}`, task.appId);
     } catch (cause) {
@@ -624,6 +724,56 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     }
   }
 
+  /**
+   * Build what a turn left unbuilt: one `candidate.cycle` with no hunks and no
+   * files, the tool's own "verify the workspace as it is".
+   *
+   * The same tool through the same gate, under the turn's run id, answered by
+   * the run's standing answer as the builder's own calls are. The host makes
+   * the call because a turn that edited correctly and stopped before building
+   * would otherwise be judged on no build at all; what it is judged on is still
+   * the build and the checks, never the builder's closing words. Its request
+   * id names it, and a log event says so. `true` when the cycle ran.
+   */
+  async function hostBuild(active: Active, runId: string, signal: AbortSignal): Promise<boolean> {
+    const hostCycle = options.hostCycle;
+    if (hostCycle === undefined) return false;
+    const appId = active.appId;
+    const where = `${appId} (intent ${String(active.intentId)})`;
+    note(`the host built what turn ${runId} left unbuilt: one candidate.cycle with no hunks, for ${where}`, appId, runId, HOST_CALL_ID);
+    try {
+      await hostCycle({ appId, message: 'Build the workspace as the turn left it', hunks: [] }, {
+        requestId: `${runId}:${HOST_CALL_ID}`,
+        channel: 'ai',
+        caller: `ai:${runId}`,
+        signal,
+        approver: {
+          ask: (question) => {
+            const approved = standingAnswer(appId, { tool: question.route, input: question.input }) === true;
+            note(
+              approved
+                ? `the run's standing answer approved ${question.route} for ${where}`
+                : `the run refused ${question.route} for ${where}: the host asks only for its own`,
+              appId,
+              runId,
+              question.requestId.slice(runId.length + 1),
+            );
+            return Promise.resolve(approved);
+          },
+        },
+      }, signal);
+      return true;
+    } catch (cause) {
+      note(
+        `the host could not build what turn ${runId} left: ${sanitise(String(cause instanceof Error ? cause.message : cause)).slice(0, 200)}`,
+        appId,
+        runId,
+        HOST_CALL_ID,
+      );
+      return false;
+    }
+  }
+
   /** Run one task to completed, failed, interrupted or waiting; `true` when the run goes on. */
   async function runTask(active: Active, first: TaskRecord): Promise<boolean> {
     const sourceDir = layout.app(active.appId).source;
@@ -730,6 +880,30 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         if (active.ending !== null) return finishEnded(active, task);
       }
 
+      // A turn that ended on its own with edits nothing built is built once,
+      // by the host. Never after an abort — the idle limit, the time limit or
+      // a stop may have cut a turn between two halves of an edit — and never
+      // for a provider ending or a question, which returned above. Unbuilt is
+      // `editsSinceBuild`, derived from a fresh revision as the verdict's is;
+      // a workspace never built counts when it changed since the task began.
+      let hostBuilt = false;
+      if (!controller.signal.aborted && !limit.aborted) {
+        const revEnd = sourceRevision(sourceDir);
+        const builtFromRev = states.get(active.appId).builtFromRev;
+        const unbuilt = builtFromRev === null ? revEnd !== (task.revBefore ?? revBefore) : builtFromRev !== revEnd;
+        if (unbuilt && options.hostCycle !== undefined) {
+          const building = new AbortController();
+          active.controller = building;
+          try {
+            hostBuilt = await hostBuild(active, runId, building.signal);
+          } finally {
+            active.controller = null;
+          }
+          task = store.task(task.id) ?? task;
+          if (active.ending !== null) return finishEnded(active, task);
+        }
+      }
+
       const revNow = sourceRevision(sourceDir);
       // `editsSinceBuild` is derived from a revision the states cache for a
       // moment; the verdict is taken the instant a turn ends, so it is derived
@@ -750,6 +924,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
           ...(error === undefined ? {} : { error }),
         },
         finishedExamples(active.appId),
+        refusedIn(runId),
       );
       task = store.recordResult(task.id, { passed: verdict.passed });
       if (verdict.completed) {
@@ -759,7 +934,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
           actualLines: changedLines(sourceDir, task.revBefore ?? revBefore, revNow),
         });
         store.setAdvice(task.id, null);
-        move(task, 'completed', 'a verified build passes an example for every criterion', runId);
+        move(task, 'completed', hostBuilt ? HOST_BUILT_COMPLETED : 'a verified build passes an example for every criterion', runId);
         return true;
       }
 
@@ -772,7 +947,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         task = move(task, 'failed', verdict.reasons.join(' '), runId);
         store.setFailure(task.id, { reasons: verdict.reasons, runIds, at: Date.now() });
         stopIntent(active, `${task.slug} failed after ${plural(turn, 'attempt', 'attempts')}.`);
-        await advise(task, verdict.reasons);
+        await advise(task, verdict.reasons, runIds);
         return false;
       }
       // Another attempt: written down as the failure it was, then queued again.

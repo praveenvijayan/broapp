@@ -11,7 +11,7 @@
  * file does is decide, record, and hand out addresses.
  */
 import { createGate, createHostApp, openBrowser as openSystemBrowser, publicError } from 'broapp/host';
-import type { Gate, HostApp, HostLogger } from 'broapp/host';
+import type { Envelope, Gate, HostApp, HostLogger } from 'broapp/host';
 import type { Bridge } from 'brobridge';
 
 import { startPreview } from '../engineer/preview.ts';
@@ -102,11 +102,24 @@ export interface CreateLauncherAppOptions {
   /** Creation's two spawns, injectable so a test reaches no registry and no git. */
   readonly install?: PrepareOptions['install'];
   readonly initGit?: PrepareOptions['initGit'];
+  /**
+   * Begin the launcher's stop path, the one Ctrl+C takes. `launcher.quit`
+   * calls it after its reply has gone. Absent, the route answers `unavailable`.
+   */
+  readonly quit?: () => void;
 }
+
+/** How long `launcher.quit` waits after answering before the launcher begins to stop. */
+export const QUIT_AFTER_MS = 250;
 
 /** The launcher's routes, ready to mount. */
 export interface LauncherApp {
   mount(bridge: Bridge): void;
+  /**
+   * Call one route as the bridge would, with the envelope given. For a test
+   * that has to show a route refuses a channel no tab can send.
+   */
+  invoke(route: string, input: unknown, envelope: Envelope): Promise<unknown>;
   /** Applications this launcher has started. */
   readonly children: readonly ChildHandle[];
 }
@@ -637,8 +650,20 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
     return { ok: true, previousRelease: result.previousRelease, opened };
   });
 
+  // The panel's Quit. The reply goes first: the stop closes this bridge, and a
+  // person pressing Quit is told the launcher stopped, not that a call failed.
+  host.operation('launcher.quit', (_input, context) => {
+    if (context.channel !== 'user') throw publicError.rejected('Only a person stops the launcher, from its panel.');
+    const quit = options.quit;
+    if (quit === undefined) throw publicError.unavailable('This launcher cannot be stopped from its panel.');
+    options.log?.event('log', 'the person pressed Quit in the panel');
+    setTimeout(quit, QUIT_AFTER_MS);
+    return { stopping: true };
+  });
+
   return {
     mount: (bridge: Bridge) => host.mount(bridge),
+    invoke: (route, input, envelope) => host.invoke(route as never, input as never, envelope),
     get children() {
       return supervisor.children;
     },

@@ -62,6 +62,30 @@ export interface StartControlOptions {
   readonly panel?: () => string | null;
   /** Injectable clock for the `panel` rate limit. */
   readonly now?: () => number;
+  /**
+   * What this launcher is doing, for the read-only `status` request and for
+   * the reply to `stop`. Absent, the answer is built from the supervisor.
+   */
+  readonly status?: () => LauncherStatus;
+  /**
+   * Begin the launcher's own stop path — the one `SIGTERM` runs. Called after
+   * the reply to `stop` has been written, so the caller hears what was serving
+   * before the connection goes. Absent, a `stop` request is refused.
+   */
+  readonly stop?: () => void;
+}
+
+/** What a running launcher says about itself. */
+export interface LauncherStatus {
+  readonly pid: number;
+  /** When this launcher started, in milliseconds. */
+  readonly startedAt: number;
+  /** The applications it serves, by id. */
+  readonly serving: readonly string[];
+  /** Whether this launcher has a panel (`open`), or serves one application (`serve <appId>`). */
+  readonly panel: boolean;
+  /** The backlog run in hand, if any. */
+  readonly run: { readonly intentId: number; readonly appId: string; readonly task: string | null } | null;
 }
 
 /** The one address anything may connect from. */
@@ -102,11 +126,44 @@ export function startControl(options: StartControlOptions): Control {
   const now = options.now ?? Date.now;
   /** When the last panel address was issued; `null` before the first. */
   let lastPanelAt: number | null = null;
+  const startedAt = now();
 
-  /** Answer one request. */
-  async function handle(request: Record<string, unknown>): Promise<Record<string, unknown>> {
+  /** What this launcher is doing, from its own answer or from its children. */
+  const status = (): LauncherStatus =>
+    options.status?.() ?? {
+      pid: process.pid,
+      startedAt,
+      serving: [...new Set(supervisor.children.filter((child) => child.mode === 'live').map((child) => child.appId))],
+      panel: options.panel !== undefined,
+      run: null,
+    };
+
+  /**
+   * Answer one request. `later` is run once the reply has been written: how
+   * `stop` answers before the process begins to stop.
+   */
+  async function handle(request: Record<string, unknown>, later: (then: () => void) => void): Promise<Record<string, unknown>> {
     const id = request['id'];
     const reply = (body: Record<string, unknown>): Record<string, unknown> => ({ v: 1, re: id, ...body });
+
+    if (request['type'] === 'status') {
+      // Read-only, and nothing in it is a credential: which applications, not
+      // where they are.
+      const now = status();
+      return reply({ ok: true, output: { ...now, serving: [...now.serving] } });
+    }
+
+    if (request['type'] === 'stop') {
+      // The same secret as every other request, and the same stop path as a
+      // signal: on Windows a console process is not sent `SIGTERM`, and this
+      // is how `broapp-autoapp stop` reaches it there.
+      const stop = options.stop;
+      if (stop === undefined) return reply({ ok: false, code: 'unavailable', message: 'This launcher cannot be stopped this way.' });
+      const now = status();
+      logger.warn('[autoapp] a local process asked the launcher to stop');
+      later(stop);
+      return reply({ ok: true, output: { stopping: true, serving: [...now.serving], run: now.run?.intentId ?? null } });
+    }
 
     if (request['type'] === 'describe') {
       const appId = String(request['appId'] ?? '');
@@ -272,8 +329,18 @@ export function startControl(options: StartControlOptions): Control {
             continue;
           }
 
-          void handle(message).then(
-            (reply) => socket.write(`${JSON.stringify(reply)}\n`),
+          let after: (() => void) | null = null;
+          void handle(message, (then) => {
+            after = then;
+          }).then(
+            (reply) => {
+              socket.write(`${JSON.stringify(reply)}\n`);
+              socket.flush();
+              const then: (() => void) | null = after;
+              // A turn of the loop later, so the reply leaves before anything
+              // it set in motion closes this socket.
+              if (then !== null) setTimeout(then, 0);
+            },
             (cause: unknown) => {
               logger.error(`[autoapp] a control request failed: ${String(cause)}`);
               socket.write(

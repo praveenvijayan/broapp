@@ -56,6 +56,9 @@ import {
   readWorkspaceFile,
   snapshot,
   type CandidateStates,
+  INPUT_EXAMPLES,
+  INPUT_SCHEMAS,
+  INTENT_TASK_INPUT,
 } from 'broapp-autoapp/engineer';
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
 import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
@@ -1478,4 +1481,21 @@ describe.skipIf(!available)('trying steps against a preview', () => {
     expect(second.checksInvalidated.length).toBeGreaterThan(0);
     await callTool(where, 'preview.stop', { appId: 'items' }, { approve: true });
   }, 120_000);
+});
+
+// 14c, 4.
+describe('the valid inputs a repeated refusal shows', () => {
+  test('every example parses with its own tool’s schema, and every structured tool has one', () => {
+    const schemas: Record<string, { parse(value: unknown): unknown }> = { ...INPUT_SCHEMAS, 'intent.task': INTENT_TASK_INPUT };
+    expect(Object.keys(INPUT_EXAMPLES).sort()).toEqual(['candidate.cycle', 'intent.task', 'source.change', 'source.edit']);
+    for (const [tool, example] of Object.entries(INPUT_EXAMPLES)) {
+      const schema = schemas[tool];
+      if (schema === undefined) throw new Error(`no schema for ${tool}`);
+      expect(() => schema.parse(example)).not.toThrow();
+    }
+    // Arrays shown as arrays: the mistake that started this.
+    const cycle = INPUT_EXAMPLES['candidate.cycle'] as { hunks: unknown; create: unknown };
+    expect(Array.isArray(cycle.hunks)).toBe(true);
+    expect(Array.isArray(cycle.create)).toBe(true);
+  });
 });

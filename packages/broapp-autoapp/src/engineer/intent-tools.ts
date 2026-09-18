@@ -185,7 +185,7 @@ const openInput = s.object({
 // wrong length or a label outside the list is a plan problem, answered with
 // `ok: false` and the field, so the model repairs it the way it repairs a failed
 // build; a schema refusal would read to it as the tool failing.
-const taskInput = s.object({
+export const INTENT_TASK_INPUT = s.object({
   intentId: s.number({ int: true, min: 1 }),
   words: s.string({ min: 1, max: 80 }),
   title: s.string({ max: 400 }),
@@ -360,11 +360,11 @@ export function intentTools(options: IntentToolsOptions): IntentTools {
     description: `Add one task to a draft intent, in the plan format. You give the slug's words, the title (imperative, 8 to 100 characters, no full stop), priority (high, medium, low), labels, blockedBy, estimatedLines, a summary of at most 400 characters, two to eight criteria and reasoning (low, medium, high); the host assigns the slug's number, the tier and the model. blockedBy and repaidBy name a task by its whole slug, such as 0001-add-tags, or by its words alone, such as add-tags; the host stores the whole slug. A task not added yet may be named, and is resolved at submit. A plan problem comes back as ok: false with each field named; fix those and call again. replaces: a slug, to rewrite a task still proposed.
 What a good split is:
 ${SPLIT_RULES}`,
-    inputSchema: taskInput.toJsonSchema(),
+    inputSchema: INTENT_TASK_INPUT.toJsonSchema(),
     effect: 'read',
     run: (input, _signal, envelope) => {
       builderRefused(envelope, 'intent.task');
-      const sent = parsed(taskInput, input);
+      const sent = parsed(INTENT_TASK_INPUT, input);
       // A stopped intent's failed task may be revised: that is one of the two
       // ways on from a stop. Anything else about a stopped intent is a person's.
       const found = store.get(sent.intentId);

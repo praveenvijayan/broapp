@@ -5,7 +5,7 @@
  * reaches `node:fs`, `bun:sqlite` and `Bun.spawn`, and it is the thing that
  * runs applications rather than something an application runs.
  */
-export { createLauncherApp, createLauncherGate, LAUNCHER_CONFIRM_TIMEOUT_MS, LAUNCHER_MAX_STEPS } from './app.ts';
+export { createLauncherApp, createLauncherGate, QUIT_AFTER_MS, LAUNCHER_CONFIRM_TIMEOUT_MS, LAUNCHER_MAX_STEPS } from './app.ts';
 export type { CreateLauncherAppOptions, LauncherApp } from './app.ts';
 
 export { appIds, listApps, serving } from './apps.ts';
@@ -35,7 +35,7 @@ export { connectToChild } from './client.ts';
 export { keepServing } from './keepalive.ts';
 export type { KeepServingOptions } from './keepalive.ts';
 export { startControl } from './control.ts';
-export type { Control, ControlFile, StartControlOptions } from './control.ts';
+export type { Control, ControlFile, LauncherStatus, StartControlOptions } from './control.ts';
 
 export { createApplication } from './create.ts';
 export type { CreateOptions, CreateResult } from './create.ts';

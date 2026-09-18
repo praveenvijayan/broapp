@@ -107,7 +107,12 @@ jobs:
       # only a Windows path can test honestly; and the file opens and closes
       # both stores and a launcher tab, where Windows has refused cleanup
       # before (`EBUSY`, report 12j).
-      - run: bun test tests/autoapp-spike.test.ts tests/autoapp-spec.test.ts tests/autoapp-activation.test.ts tests/autoapp-mcp.test.ts tests/autoapp-create.test.ts tests/autoapp-knowledge.test.ts tests/autoapp-task-context.test.ts
+      # `autoapp-stop` is here because stopping is where the platforms differ
+      # most: a Windows console process is not sent `SIGTERM`, so `stop` has to
+      # arrive over the control connection; a hard kill is `taskkill /F` there
+      # and `SIGKILL` elsewhere; and whether a child is told its parent died,
+      # and what `kill(pid, 0)` answers, are each the operating system's.
+      - run: bun test tests/autoapp-spike.test.ts tests/autoapp-spec.test.ts tests/autoapp-activation.test.ts tests/autoapp-mcp.test.ts tests/autoapp-create.test.ts tests/autoapp-knowledge.test.ts tests/autoapp-task-context.test.ts tests/autoapp-stop.test.ts
       # Drives the compiled binary end to end — import, serve, the control
       # connection, build, activate, a crash past the switch, and recovery.
       # This is the step that catches a packaging fault the module tests

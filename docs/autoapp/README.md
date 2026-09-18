@@ -32,6 +32,17 @@ unzip notes-starter.zip
 The binaries are unsigned; the other targets, and what macOS and Windows say
 about an unsigned binary, are in [Packaging and offline](packaging.md).
 
+## Stopping it
+
+Closing the launcher's tab stops nothing: the launcher and every application it
+serves keep running, and its terminal says so. **Quit** at the foot of the rail,
+`broapp-autoapp stop` from any terminal (Windows too) and Ctrl+C are one stop:
+every application it serves stops, a running backlog task is interrupted without
+spending its attempt, and the control file goes. `broapp-autoapp status` says
+whether a launcher runs over this root and what it serves. A child also stops on
+its own within seconds of its launcher dying, however it died; children left by
+a launcher from before this are not found.
+
 ## Read next
 
 1. [Design](design.md) — the seven parts, the gate, and how a candidate release becomes the current one.

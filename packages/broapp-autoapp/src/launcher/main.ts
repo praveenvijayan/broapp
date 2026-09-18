@@ -26,8 +26,9 @@ import type { RunningApp } from 'broapp/host';
 
 import { createCandidateStates } from '../engineer/state.ts';
 import { createRunStore } from '../host/run-store.ts';
-import { openIntents, type IntentStore } from '../intent/index.ts';
-import { connectControl, type ControlClient } from '../mcp/client.ts';
+import { processAlive } from '../child/watch.ts';
+import { openIntents, type Executor, type IntentStore } from '../intent/index.ts';
+import { connectControl, readControlFile, type ControlClient } from '../mcp/client.ts';
 import {
   createEventLog,
   createEvidence,
@@ -57,7 +58,7 @@ import {
 import { activate } from './activate.ts';
 import { appIds } from './apps.ts';
 import { buildCandidate } from './candidate.ts';
-import { startControl, type Control } from './control.ts';
+import { startControl, type Control, type ControlFile, type LauncherStatus } from './control.ts';
 import { openJournal, type Journal } from './journal.ts';
 import { keepServing } from './keepalive.ts';
 import { recover, restoreServing } from './recover.ts';
@@ -120,7 +121,12 @@ Usage:
   broapp-autoapp build <appId>
   broapp-autoapp activate <appId> <releaseId>
   broapp-autoapp releases <appId>
-  broapp-autoapp status <appId>
+  broapp-autoapp status [<appId>]       With an application: its release, grants and
+                                        activations. Without: whether a launcher is
+                                        running over this root, and what it serves.
+  broapp-autoapp stop                   Stop the launcher running over this root, and
+                                        every application it serves. Its panel's Quit
+                                        and Ctrl+C in its terminal do the same.
   broapp-autoapp mcp <appId>            Serve one application over MCP, on stdio
   broapp-autoapp knowledge list [--provisional|--confirmed|--review|--method]
   broapp-autoapp knowledge show <id>
@@ -140,7 +146,8 @@ Environment:
   BROAPP_DATA_DIR  Override where the launcher keeps everything.
 
 An application runs as its own child process, as trusted local code: crash
-isolated from the launcher, not permission isolated from you.`;
+isolated from the launcher, not permission isolated from you. Closing the
+panel's tab stops nothing; an application stays up until the launcher stops.`;
 
 /**
  * The operating system's browser opener, or one that opens nothing.
@@ -159,16 +166,49 @@ const browser: (url: string) => Promise<boolean> =
 /** How long a child gets to stop before it is killed. */
 const STOP_DEADLINE_MS = 10_000;
 
+/**
+ * The launcher's one stop path.
+ *
+ * `SIGINT`, `SIGTERM`, the control connection's `stop` and the panel's Quit
+ * all come here, so there is one way the launcher stops however it is asked.
+ * With the panel running, `graceful` is its own shutdown — the backlog run
+ * stopped and given its deadline, the AI layer closed, every child stopped,
+ * the stores closed, the control file removed — and the process then ends as
+ * the command returns. Without it (`serve <appId>`), the children are stopped
+ * and the process exits.
+ */
+interface StopPath {
+  /** Stop. Safe to call more than once; every caller gets the same stop. */
+  stop(): Promise<void>;
+  /** Set what stopping runs first. */
+  graceful(shutdown: () => Promise<void>): void;
+}
+
+/** How long a stop waits for the command to return before exiting anyway. */
+const EXIT_GRACE_MS = 5_000;
+
 /** Register the handlers that make sure no child outlives the launcher. */
-function stopChildrenOnExit(supervisor: Supervisor): void {
-  let stopping = false;
-  const stop = (): void => {
-    if (stopping) return;
-    stopping = true;
-    void supervisor.stopAll(STOP_DEADLINE_MS).then(() => process.exit(0));
+function stopChildrenOnExit(supervisor: Supervisor): StopPath {
+  let stopping: Promise<void> | null = null;
+  let graceful: (() => Promise<void>) | null = null;
+  const stop = (): Promise<void> => {
+    if (stopping !== null) return stopping;
+    const shutdown = graceful;
+    stopping =
+      shutdown === null
+        ? supervisor.stopAll(STOP_DEADLINE_MS).then(() => process.exit(0))
+        : shutdown()
+            .catch((cause: unknown) => console.error(`the launcher did not stop cleanly: ${String(cause instanceof Error ? cause.message : cause)}`))
+            .then(() => supervisor.stopAll(STOP_DEADLINE_MS))
+            .then(() => {
+              // The command returns now and `main` ends the process; this is
+              // only for a return that never comes, and holds nothing open.
+              setTimeout(() => process.exit(0), EXIT_GRACE_MS).unref?.();
+            });
+    return stopping;
   };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
+  process.on('SIGINT', () => void stop());
+  process.on('SIGTERM', () => void stop());
   // The synchronous last resort. `exit` cannot await anything, so this kills
   // rather than drains — and it is the only handler that runs on Windows, where
   // a console process is not delivered `SIGTERM` the way a POSIX one is. A
@@ -179,8 +219,14 @@ function stopChildrenOnExit(supervisor: Supervisor): void {
   // handler does not cover: the launcher finished its work while a child it
   // started is still alive.
   process.on('beforeExit', () => {
-    if (supervisor.children.length > 0) stop();
+    if (supervisor.children.length > 0) void stop();
   });
+  return {
+    stop,
+    graceful(shutdown) {
+      graceful = shutdown;
+    },
+  };
 }
 
 /** Read one line from stdin, for the grant prompt. */
@@ -215,6 +261,7 @@ async function serve(
   appId: string,
   open: boolean,
   recording: Recording | null,
+  exit: StopPath,
 ): Promise<number> {
   for (const recovered of await recover({
     layout: root,
@@ -241,6 +288,7 @@ async function serve(
     // No panel runs here, so there is no address to give; the request is
     // answered with the sentence that says how to get one.
     panel: () => null,
+    stop: () => void exit.stop(),
     ...loggerOf(recording),
   });
   process.on('exit', () => control?.stop());
@@ -285,7 +333,9 @@ async function openLauncher(
   open: boolean,
   recording: Recording | null,
   restore: boolean,
+  exit: StopPath,
 ): Promise<number> {
+  const startedAt = Date.now();
   for (const recovered of await recover({
     layout: root,
     journal,
@@ -307,6 +357,24 @@ async function openLauncher(
 
   // Set once the tab's bridge is serving; the panel's addresses come from it.
   let running: RunningApp | null = null;
+  // Set once the tab exists; `status` reads the backlog run from it.
+  let executor: Executor | null = null;
+
+  /** What this launcher is doing, for `status` and the reply to `stop`. */
+  const status = (): LauncherStatus => {
+    const active = executor?.active() ?? null;
+    const taskId = active === null ? null : (executor?.progress(active.intentId).run?.taskId ?? null);
+    return {
+      pid: process.pid,
+      startedAt,
+      serving: servingIds(supervisor),
+      panel: true,
+      run:
+        active === null
+          ? null
+          : { ...active, task: taskId === null ? null : (recording?.intents.task(taskId)?.slug ?? null) },
+    };
+  };
 
   // The door an MCP server comes in by. Only the launcher's own long-running
   // commands open it, and it is removed when they stop.
@@ -314,6 +382,8 @@ async function openLauncher(
     layout: root,
     supervisor,
     panel: () => running?.launchUrl() ?? null,
+    status,
+    stop: () => void exit.stop(),
     ...loggerOf(recording),
   });
 
@@ -351,6 +421,8 @@ async function openLauncher(
     templates,
     versions: VERSIONS,
     openBrowser: browser,
+    // The panel's Quit: the same stop as Ctrl+C.
+    quit: () => void exit.stop(),
     providers: [anthropic(), ollama(), openai(), customServer()],
     // The offline tier tests need a launcher whose AI layer cannot reach the
     // network, and severing an interface in CI is not something a test may do.
@@ -361,6 +433,10 @@ async function openLauncher(
       : {}),
   });
 
+  executor = tab.executor;
+  // Whether a panel was open a moment ago, for the line a closed one earns.
+  let panelWatch: ReturnType<typeof setInterval> | null = null;
+
   running = await startApp({
     page,
     appName: 'Autoapp',
@@ -370,6 +446,7 @@ async function openLauncher(
     register: (bridge) => tab.mount(bridge),
     isBusy: () => tab.ai.activeStreams > 0,
     onShutdown: async () => {
+      if (panelWatch !== null) clearInterval(panelWatch);
       supervisor.setPanel(null);
       // A backlog run is stopped first and given the deadline a child gets:
       // its turn writes its transcript and its task's move before the stores
@@ -411,7 +488,137 @@ async function openLauncher(
     },
   }));
 
+  // Ctrl+C, `stop` and Quit all run this tab's own shutdown first.
+  const stoppable = running;
+  exit.graceful(() => stoppable.stop('requested'));
+  panelWatch = watchPanel(stoppable, () => {
+    const ids = servingIds(supervisor);
+    const line = `Still running, serving ${ids.length === 0 ? 'no application' : ids.join(', ')}. \`broapp-autoapp stop\` ends it.`;
+    if (recording === null) console.log(line);
+    else recording.log.warn(line);
+  });
+
   return await running.done;
+}
+
+/** The applications a supervisor serves live, each once. */
+function servingIds(supervisor: Supervisor): string[] {
+  return [...new Set(supervisor.children.filter((child) => child.mode === 'live').map((child) => child.appId))];
+}
+
+/** How long the panel must stay closed before it counts as closed: a reload is not a closure. */
+const PANEL_CLOSED_MS = 3_000;
+
+/**
+ * Say, once per closure, that the launcher outlives its panel.
+ *
+ * A person who closes the tab has stopped nothing: the launcher and every
+ * application it serves go on, which is meant — an application is used with
+ * the panel closed — and was invisible. There is no idle exit; this is the
+ * line that says how to stop it.
+ */
+function watchPanel(running: RunningApp, closed: () => void): ReturnType<typeof setInterval> {
+  let seen = false;
+  let since: number | null = null;
+  const timer = setInterval(() => {
+    if (running.attached) {
+      seen = true;
+      since = null;
+      return;
+    }
+    if (!seen) return;
+    since ??= Date.now();
+    if (Date.now() - since < PANEL_CLOSED_MS) return;
+    seen = false;
+    since = null;
+    closed();
+  }, 1_000);
+  timer.unref?.();
+  return timer;
+}
+
+/** A duration as a person says it. */
+function lasted(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return `${String(Math.max(1, Math.round(ms / 1_000)))} seconds`;
+  if (minutes < 60) return `${String(minutes)} minute${minutes === 1 ? '' : 's'}`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${String(hours)} hour${hours === 1 ? '' : 's'}${rest === 0 ? '' : ` ${String(rest)} minute${rest === 1 ? '' : 's'}`}`;
+}
+
+/** How long `stop` waits for a launcher to be gone. */
+const STOP_WAIT_MS = 15_000;
+
+/**
+ * `stop` — ask the launcher running over this root to stop.
+ *
+ * Never a signal of its own: the launcher is asked over its control
+ * connection, which works on Windows too, and stops by the path Ctrl+C takes.
+ * A control file naming a pid that is not alive is a launcher that died
+ * without removing it, and is removed.
+ */
+async function stopLauncher(root: Layout): Promise<number> {
+  let file: ControlFile;
+  try {
+    file = readControlFile(root.control);
+  } catch {
+    console.log('No launcher is running over this root.');
+    return 0;
+  }
+  if (!processAlive(file.pid)) {
+    rmSync(root.control, { force: true });
+    console.log(`The control file named pid ${String(file.pid)}, which is not running; it was stale and is removed.`);
+    console.log('No launcher is running over this root.');
+    return 0;
+  }
+  let answer: { readonly serving: readonly string[] };
+  let client: ControlClient | null = null;
+  try {
+    client = await withTimeout(connectControl(root.control), JOIN_TIMEOUT_MS);
+    answer = await withTimeout(client.stop(), JOIN_TIMEOUT_MS);
+  } catch (cause) {
+    console.error(
+      `The launcher, pid ${String(file.pid)}, did not answer: ${String(cause instanceof Error ? cause.message : cause)}. Nothing was stopped.`,
+    );
+    return 1;
+  } finally {
+    client?.close();
+  }
+  const deadline = Date.now() + STOP_WAIT_MS;
+  while (processAlive(file.pid)) {
+    if (Date.now() >= deadline) {
+      console.error(`It did not stop within 15 seconds; its pid is ${String(file.pid)}.`);
+      return 1;
+    }
+    await Bun.sleep(200);
+  }
+  console.log(`Stopped. It was serving: ${answer.serving.length === 0 ? 'nothing' : answer.serving.join(', ')}.`);
+  return 0;
+}
+
+/** `status` with no application — whether a launcher runs over this root, and what it does. */
+async function launcherStatus(root: Layout): Promise<number> {
+  let client: ControlClient | null = null;
+  let status: LauncherStatus;
+  try {
+    client = await withTimeout(connectControl(root.control), JOIN_TIMEOUT_MS);
+    status = await withTimeout(client.status(), JOIN_TIMEOUT_MS);
+  } catch {
+    console.log('No launcher is running over this root.');
+    return 0;
+  } finally {
+    client?.close();
+  }
+  console.log(`A launcher is running over this root: pid ${String(status.pid)}, for ${lasted(Date.now() - status.startedAt)}.`);
+  console.log(`${status.panel ? 'With its panel' : 'Serving one application, without a panel'}.`);
+  console.log(`Serving: ${status.serving.length === 0 ? 'nothing' : status.serving.join(', ')}.`);
+  console.log(
+    status.run === null
+      ? 'Backlog: no run.'
+      : `Backlog: intent ${String(status.run.intentId)} on ${status.run.appId} is running${status.run.task === null ? '' : `, on ${status.run.task}`}.`,
+  );
+  return 0;
 }
 
 /**
@@ -689,6 +896,11 @@ async function main(): Promise<number> {
   // panel. Over a root that already has a launcher, that launcher is asked for
   // a panel address before this process opens the journal or knowledge, so a
   // second launcher is never started beside the first.
+  // Asked of a running launcher over its control connection, before this
+  // process opens anything a running launcher has open.
+  if (command === 'stop') return await stopLauncher(root);
+  if (command === 'status' && positional(argv, 1) === undefined) return await launcherStatus(root);
+
   const wantsPanel = command === undefined || command === 'open' || (command === 'serve' && positional(argv, 1) === undefined);
   if (wantsPanel) {
     const joined = await joinRunning(root, !argv.includes('--no-open'));
@@ -720,22 +932,22 @@ async function main(): Promise<number> {
     }
   }
   const supervisor = createSupervisor(loggerOf(recording));
-  stopChildrenOnExit(supervisor);
+  const exit = stopChildrenOnExit(supervisor);
 
   try {
     switch (command) {
       case undefined:
       case 'open':
-        return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'), recording, !argv.includes('--no-restore'));
+        return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'), recording, !argv.includes('--no-restore'), exit);
 
       case 'serve': {
         const appId = positional(argv, 1);
         // `serve` with no application is the launcher's own tab, which is the
         // ordinary way in: from there a person opens whichever they want.
         if (appId === undefined) {
-          return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'), recording, !argv.includes('--no-restore'));
+          return await openLauncher(root, journal, supervisor, !argv.includes('--no-open'), recording, !argv.includes('--no-restore'), exit);
         }
-        return await serve(root, journal, supervisor, appId, !argv.includes('--no-open'), recording);
+        return await serve(root, journal, supervisor, appId, !argv.includes('--no-open'), recording, exit);
       }
 
       case 'create': {
@@ -853,7 +1065,7 @@ async function main(): Promise<number> {
 
       case 'status': {
         const appId = positional(argv, 1);
-        if (appId === undefined) return usage('status <appId>');
+        if (appId === undefined) return usage('status [<appId>]');
         const current = readCurrent(root, appId);
         console.log(`current: ${current ?? 'none'}`);
         const grants = readGrants(root, appId);
@@ -896,6 +1108,11 @@ function usage(line: string): number {
 main().then(
   (code) => {
     process.exitCode = code;
+    // The launcher's own commands end here once their shutdown has run and
+    // the stores are closed: nothing a provider or a socket left behind may
+    // keep a stopped launcher alive.
+    const command = process.argv[2];
+    if (command === undefined || command === 'open' || command === 'serve') process.exit(code);
   },
   (cause: unknown) => {
     console.error(String(cause instanceof Error ? cause.message : cause));

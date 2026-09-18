@@ -59,6 +59,9 @@ export type { TierInput } from './tier.ts';
 export { INTENTS_FILE, LAUNCHER_STOPPED, openIntents } from './store.ts';
 export type { IntentDetail, IntentStore, IntentSummary, NewIntent, OpenIntentsOptions, TaskResult, TaskWithEvents } from './store.ts';
 
+export { INPUT_REFUSAL, NO_MATCH, refusalError, refusalLine, refusalsOf } from './refusals.ts';
+export type { RefusableStep, RefusalGroup, RefusalKind } from './refusals.ts';
+
 export { DEFAULT_TIER_MODELS, INTENT_MODELS_FILE, modelFor, readTierModels, writeTierModels } from './models.ts';
 export type { TierModels } from './models.ts';
 
@@ -69,14 +72,18 @@ export {
   builderMessage,
   createExecutor,
   DECIDE,
+  HOST_BUILT_COMPLETED,
+  HOST_CALL_ID,
   idleSentence,
   INTENT_APPROVES,
   INTENT_REFUSES,
   MAX_QUESTIONS_PER_TASK,
+  NOTHING_BUILT,
   nothingDoneStopped,
   providerStopped,
   QUESTION_EXPIRED,
   reasonsFromNote,
+  refusalSentences,
   RUN_FINISHED,
   standingAnswer,
   TASK_IDLE_TIMEOUT_MS,
@@ -87,6 +94,7 @@ export {
 } from './executor.ts';
 export type {
   Advice,
+  AdviceRefusals,
   CreateExecutorOptions,
   Executor,
   RunProgress,

@@ -30,6 +30,7 @@ import { attachedOnly } from '../host/autoapp.ts';
 
 import { assertAppInstance, assertAppModule, type AppInstance } from './module.ts';
 import { createPanelRoute, withPanel } from './panel.ts';
+import { LAUNCHER_PID_ENV, LAUNCHER_WATCH_MS, processAlive } from './watch.ts';
 
 /** Eight hours: Brobridge's default session cookie lifetime. */
 const SUPERVISED_LAUNCH_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
@@ -46,6 +47,9 @@ const EXIT = {
 
 /** How often a drain re-checks whether the application has gone quiet. */
 const DRAIN_POLL_MS = 100;
+
+/** How long a child whose launcher has gone gets to drain before it exits. */
+const ORPHAN_DRAIN_MS = 5_000;
 
 let counter = 0;
 function nextId(): string {
@@ -182,6 +186,35 @@ export async function runChild(argv: readonly string[]): Promise<number> {
 
   // Questions this child has asked the launcher, by id, waiting for `answer`.
   const asked = new Map<string, (answer: Answer) => void>();
+
+  // A child does not outlive its launcher, however the launcher died. A
+  // launcher that stops cleanly sends `shutdown`; one killed outright, crashed
+  // or closed with its terminal sends nothing, and a child that never hears
+  // from it again holds a port and a data directory nobody supervises. Two
+  // signals, because neither is promised everywhere: the IPC channel closing
+  // (`disconnect`, which Bun delivers on macOS when the parent is SIGKILLed),
+  // and the launcher's pid, looked at every few seconds. Either drains the
+  // application as a `shutdown` would, gives it five seconds, and exits.
+  let orphaned = false;
+  const leave = (why: string): void => {
+    // A child already stopping was told to by its launcher, and closes the
+    // channel itself on its way out: that is not the launcher going.
+    if (orphaned || child.state === 'stopping') return;
+    orphaned = true;
+    logger.warn(`[autoapp] ${appId ?? 'a child'} is stopping: ${why}`);
+    child.state = 'stopping';
+    const drained = child.running?.stop('requested') ?? Promise.resolve();
+    void Promise.race([drained.catch(() => undefined), Bun.sleep(ORPHAN_DRAIN_MS)]).then(() => process.exit(0));
+  };
+  process.on('disconnect', () => leave('its launcher closed the channel'));
+  const launcherPid = Number(process.env[LAUNCHER_PID_ENV] ?? '');
+  if (Number.isInteger(launcherPid) && launcherPid > 0) {
+    const watch = setInterval(() => {
+      if (!processAlive(launcherPid)) leave(`its launcher, pid ${String(launcherPid)}, is gone`);
+    }, LAUNCHER_WATCH_MS);
+    // The IPC channel is what keeps a child running; the watch must not.
+    watch.unref?.();
+  }
 
   let finish: (code: number) => void = () => undefined;
   const exiting = new Promise<number>((resolve) => {

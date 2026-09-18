@@ -19,6 +19,7 @@ import { canonicalJson, publicError } from 'broapp/host';
 import type { Envelope, Gate, HostLogger } from 'broapp/host';
 import { isPublicError, isValidationError, s, type Schema } from 'broapp/shared';
 
+import { INPUT_REFUSAL, NO_MATCH } from '../intent/refusals.ts';
 import { showLesson } from '../knowledge/cli.ts';
 import { exampleHash, type Evidence, type OpenEpisode } from '../knowledge/evidence.ts';
 import { origin as originOf, sourceRevision, type FullOrigin } from '../knowledge/ids.ts';
@@ -97,6 +98,11 @@ export interface EngineerToolsOptions {
    * or `null`: the executor's `busy`. Absent, nothing is ever busy.
    */
   readonly busy?: (appId: string, runId: string | null) => string | null;
+  /**
+   * What the tools remember of a turn's refusals. The tab passes one and
+   * drops a turn from it when the turn ends; absent, the tools keep their own.
+   */
+  readonly inputs?: InputMemory;
 }
 
 /** The tools that write to an application, refused while a backlog run works on it from another turn. */
@@ -368,7 +374,7 @@ export function parsed<T>(schema: Schema<T>, input: unknown): T {
     return schema.parse(input);
   } catch (cause) {
     if (isValidationError(cause)) {
-      throw publicError.invalidInput(`the input is not what this tool takes: ${cause.message}`);
+      throw publicError.invalidInput(`${INPUT_REFUSAL}: ${cause.message}`);
     }
     throw cause;
   }
@@ -385,6 +391,186 @@ function bounded(output: unknown): { output: unknown; truncated?: boolean } {
   const text = sanitise(canonicalJson(redact(output)));
   if (text.length <= TRIAL_OUTPUT_CHARS) return { output: JSON.parse(text) as unknown };
   return { output: `${text.slice(0, TRIAL_OUTPUT_CHARS)}…`, truncated: true };
+}
+
+/** `source.change`'s input. At module level so its example can be held to it. */
+const changeInput = s.object({
+  appId: s.string({ min: 1, max: 40 }),
+  message: s.string({ min: 1, max: 500 }),
+  changes: s.array(
+    s.object({
+      path: s.string({ min: 1, max: 400 }),
+      content: s.optional(s.string({ max: 200_000 })),
+      delete: s.optional(s.boolean()),
+    }),
+    { min: 1, max: 100 },
+  ),
+});
+
+/** `source.edit`'s input. */
+const editInput = s.object({
+  appId: s.string({ min: 1, max: 40 }),
+  message: s.string({ min: 1, max: 500 }),
+  hunks: s.array(
+    s.object({
+      path: s.string({ min: 1, max: 400 }),
+      find: s.string({ min: 1, max: 20_000 }),
+      replace: s.string({ max: 20_000 }),
+    }),
+    { min: 1, max: 50 },
+  ),
+});
+
+/** `candidate.cycle`'s input. */
+const cycleInput = s.object({
+  appId: s.string({ min: 1, max: 40 }),
+  message: s.string({ min: 1, max: 500 }),
+  hunks: s.array(
+    s.object({
+      path: s.string({ min: 1, max: 400 }),
+      find: s.string({ min: 1, max: 20_000 }),
+      replace: s.string({ max: 20_000 }),
+    }),
+    { max: 50 },
+  ),
+  create: s.optional(
+    s.array(s.object({ path: s.string({ min: 1, max: 400 }), content: s.string({ max: 200_000 }) }), { max: 20 }),
+  ),
+});
+
+/**
+ * The schemas the engineer's structured tools parse their input with, by tool.
+ * `intent.task`'s is `INTENT_TASK_INPUT`, beside its tool.
+ */
+export const INPUT_SCHEMAS = {
+  'source.edit': editInput,
+  'source.change': changeInput,
+  'candidate.cycle': cycleInput,
+} as const;
+
+/**
+ * One valid input per tool that takes structured input, shown to a builder
+ * whose call was refused twice for the same reason.
+ *
+ * A hosted model sent `create` as a string three times running on 2026-09-18,
+ * each time told `create: expected an array`, and never once shown what an
+ * array of files looks like. Minimal and real: the fields the tool reads,
+ * every required one present, arrays as arrays. A test parses each with its
+ * tool's own schema, so an example cannot drift from the tool it describes.
+ */
+export const INPUT_EXAMPLES: Readonly<Record<string, unknown>> = {
+  'source.edit': {
+    appId: 'notes',
+    message: 'Add a done column',
+    hunks: [{ path: 'src/host/db.ts', find: 'title TEXT NOT NULL', replace: 'title TEXT NOT NULL,\n  done INTEGER NOT NULL DEFAULT 0' }],
+  },
+  'source.change': {
+    appId: 'notes',
+    message: 'Add the second migration',
+    changes: [{ path: 'migrations/002.sql', content: 'ALTER TABLE notes ADD COLUMN done INTEGER NOT NULL DEFAULT 0;' }],
+  },
+  'candidate.cycle': {
+    appId: 'notes',
+    message: 'Add a done column',
+    hunks: [{ path: 'src/host/db.ts', find: '…', replace: '…' }],
+    create: [{ path: 'migrations/002.sql', content: '…' }],
+  },
+  'intent.task': {
+    intentId: 1,
+    words: 'done-column',
+    title: 'Add a done column',
+    priority: 'medium',
+    labels: ['migration', 'host'],
+    blockedBy: [],
+    estimatedLines: 40,
+    summary: 'A done flag on every note, stored in a new column.',
+    criteria: [{ text: 'notes.list returns done for every note', failure: false }],
+    reasoning: 'low',
+  },
+};
+
+/** What a second identical input refusal adds. */
+export function withExample(message: string, tool: string): string {
+  const example = INPUT_EXAMPLES[tool];
+  return example === undefined ? message : `${message.replace(/\.?$/, '.')} A valid input looks like: ${JSON.stringify(example)}`;
+}
+
+/** What a second hunk that matched nothing in one file adds. */
+export const READ_AGAIN = 'Read the file again before another hunk: what you remember of it is not what is on disk.';
+
+/**
+ * What the tools remember of one turn's refusals, so a repeat can say more.
+ *
+ * Per run id: the last input error each tool was refused with, and how many
+ * hunks matched nothing in each file. Nothing changes for a first refusal;
+ * the second identical one shows a valid input, the second miss in a file
+ * says to read it again. Dropped when the turn ends, as the serving's turns
+ * are.
+ */
+export interface InputMemory {
+  /** The message a refusal goes back to the model with, having noted it. */
+  refused(runId: string, tool: string, message: string): string;
+  /** Forget a turn. */
+  ended(runId: string): void;
+}
+
+/** Build an {@link InputMemory}. */
+export function createInputMemory(): InputMemory {
+  const turns = new Map<string, { inputs: Map<string, string>; misses: Map<string, number> }>();
+  return {
+    refused(runId, tool, message) {
+      let turn = turns.get(runId);
+      if (turn === undefined) {
+        turn = { inputs: new Map(), misses: new Map() };
+        turns.set(runId, turn);
+        // A turn that never ends — a caller without `ended` — still costs a bounded amount.
+        if (turns.size > REPEAT_TURNS) {
+          const oldest = turns.keys().next().value;
+          if (oldest !== undefined) turns.delete(oldest);
+        }
+      }
+      if (message.startsWith(INPUT_REFUSAL)) {
+        const again = turn.inputs.get(tool) === message;
+        turn.inputs.set(tool, message);
+        return again ? withExample(message, tool) : message;
+      }
+      const path = /^not found in (.+?): /.exec(message)?.[1];
+      if (message.startsWith(NO_MATCH) && path !== undefined) {
+        const misses = (turn.misses.get(path) ?? 0) + 1;
+        turn.misses.set(path, misses);
+        return misses === 2 ? `${message} ${READ_AGAIN}` : message;
+      }
+      return message;
+    },
+    ended(runId) {
+      turns.delete(runId);
+    },
+  };
+}
+
+/**
+ * Hand every refusal through the memory on its way back to the model.
+ *
+ * Outside the gate: the record keeps the refusal as the tool said it, so the
+ * same error groups as one; only what the model reads gains the example.
+ */
+function rememberingRefusals(tools: Record<string, GuardedTool>, memory: InputMemory): void {
+  for (const [name, tool] of Object.entries(tools)) {
+    const inner = tool.execute;
+    tools[name] = {
+      ...tool,
+      execute: async (input, envelope, signal) => {
+        try {
+          return await inner(input, envelope, signal);
+        } catch (cause) {
+          const runId = runIdOf(envelope);
+          if (runId === null || !isPublicError(cause) || cause.code !== 'invalid_input') throw cause;
+          const message = memory.refused(runId, name, cause.message);
+          throw message === cause.message ? cause : publicError.invalidInput(message);
+        }
+      },
+    };
+  }
 }
 
 /** Build the engineer's tools. */
@@ -765,18 +951,6 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     },
   });
 
-  const changeInput = s.object({
-    appId: s.string({ min: 1, max: 40 }),
-    message: s.string({ min: 1, max: 500 }),
-    changes: s.array(
-      s.object({
-        path: s.string({ min: 1, max: 400 }),
-        content: s.optional(s.string({ max: 200_000 })),
-        delete: s.optional(s.boolean()),
-      }),
-      { min: 1, max: 100 },
-    ),
-  });
   tools['source.change'] = guardedTool(gate, {
     name: 'source.change',
     description:
@@ -840,18 +1014,6 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     },
   });
 
-  const editInput = s.object({
-    appId: s.string({ min: 1, max: 40 }),
-    message: s.string({ min: 1, max: 500 }),
-    hunks: s.array(
-      s.object({
-        path: s.string({ min: 1, max: 400 }),
-        find: s.string({ min: 1, max: 20_000 }),
-        replace: s.string({ max: 20_000 }),
-      }),
-      { min: 1, max: 50 },
-    ),
-  });
   tools['source.edit'] = guardedTool(gate, {
     name: 'source.edit',
     description:
@@ -1137,21 +1299,6 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     },
   });
 
-  const cycleInput = s.object({
-    appId: s.string({ min: 1, max: 40 }),
-    message: s.string({ min: 1, max: 500 }),
-    hunks: s.array(
-      s.object({
-        path: s.string({ min: 1, max: 400 }),
-        find: s.string({ min: 1, max: 20_000 }),
-        replace: s.string({ max: 20_000 }),
-      }),
-      { max: 50 },
-    ),
-    create: s.optional(
-      s.array(s.object({ path: s.string({ min: 1, max: 400 }), content: s.string({ max: 200_000 }) }), { max: 20 }),
-    ),
-  });
   /**
    * The host's change cycle: patch, build, and — when the build passes —
    * preview and check, in one call.
@@ -1513,6 +1660,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   }
   if (options.busy !== undefined) lockWhileRunning(tools, options.busy);
   if (intents !== undefined) Object.assign(tools, intents.tools);
+  rememberingRefusals(tools, options.inputs ?? createInputMemory());
 
   if (options.confirmTimeoutMs !== undefined) tellingExpiry(tools, options.confirmTimeoutMs);
   return tools;

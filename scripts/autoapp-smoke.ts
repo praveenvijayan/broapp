@@ -265,6 +265,79 @@ async function panelLink(): Promise<void> {
   }
 }
 
+/**
+ * `open --no-open`, then `stop`: the launcher is gone, and `status` says so.
+ *
+ * `stop` asks over the control connection rather than by signal, so this is
+ * the same on Windows, where a console process is not sent `SIGTERM`.
+ */
+async function stopStep(): Promise<void> {
+  rmSync(controlPath(), { force: true });
+  const env = { NODE_ENV: 'test', AUTOAPP_TEST_NO_BROWSER: '1', AUTOAPP_TEST_NO_NETWORK: '1' };
+  const panel = Bun.spawn({
+    cmd: [launcher, 'open', '--no-open', '--no-restore'],
+    env: { ...process.env, BROAPP_DATA_DIR: root, ...env },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  let output = '';
+  for (const stream of [panel.stdout, panel.stderr] as ReadableStream<Uint8Array>[]) {
+    void (async () => {
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        output += decoder.decode(value, { stream: true });
+      }
+    })();
+  }
+  try {
+    if (!(await until(() => output.includes('Open this address if your browser does not:'), 30_000))) {
+      fail('stop', `the launcher did not print its address:\n${output}`);
+      return;
+    }
+    // Spawned, not `spawnSync`: this process is the launcher's parent, and a
+    // parent whose loop is held cannot reap it, so `stop` would watch a zombie
+    // keep the pid alive for its whole fifteen seconds.
+    const stopping = Bun.spawn({
+      cmd: [launcher, 'stop'],
+      env: { ...process.env, BROAPP_DATA_DIR: root, ...env },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [code, stdout, stderr] = await Promise.all([
+      stopping.exited,
+      new Response(stopping.stdout as ReadableStream<Uint8Array>).text(),
+      new Response(stopping.stderr as ReadableStream<Uint8Array>).text(),
+    ]);
+    if (code !== 0 || !stdout.includes('Stopped. It was serving:')) {
+      fail('stop', `stop said: ${stdout.trim()} ${stderr.trim()}`);
+      return;
+    }
+    const exited = await Promise.race([panel.exited, after(15_000, null)]);
+    if (exited === null) {
+      fail('stop', `the launcher, pid ${String(panel.pid)}, was still running after stop`);
+      return;
+    }
+    if (exited !== 0) {
+      fail('stop', `the launcher exited ${String(exited)}, not 0`);
+      return;
+    }
+    const status = run(['status'], env);
+    if (status.stdout.trim() !== 'No launcher is running over this root.') {
+      fail('stop', `status afterwards said: ${status.stdout.trim()}`);
+      return;
+    }
+    ok('stop', `exit ${String(exited)}; status: nothing is running`);
+  } catch (cause) {
+    fail('stop', String(cause instanceof Error ? cause.message : cause));
+  } finally {
+    if (panel.exitCode === null) panel.kill('SIGKILL');
+    await Promise.race([panel.exited, after(5_000, null)]);
+  }
+}
+
 async function main(): Promise<number> {
   if (!existsSync(launcher)) {
     console.error(`the launcher is not built: ${launcher}`);
@@ -467,6 +540,9 @@ async function main(): Promise<number> {
   // own tab. With no browser to hand it to (`AUTOAPP_TEST_NO_BROWSER`), the
   // address goes to the launcher's terminal, which is where this reads it.
   await panelLink();
+
+  // 6b. Stopping: `open`, then `stop`, then `status`.
+  await stopStep();
 
   // 7. A workspace outside this repository, through the compiled binary.
   //

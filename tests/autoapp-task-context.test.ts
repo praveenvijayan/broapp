@@ -18,7 +18,7 @@ import { createGate } from 'broapp/host';
 import type { HostLogger } from 'broapp/host';
 import { createRunStore } from 'broapp-autoapp/host';
 import { ENGINEER_INSTRUCTIONS, createCandidateStates } from 'broapp-autoapp/engineer';
-import { builderMessage, NOT_AN_ATTEMPT, openIntents, type IntentStore, type TaskInput } from 'broapp-autoapp/intent';
+import { builderMessage, NOT_AN_ATTEMPT, openIntents, type IntentStore, type RefusalGroup, type TaskInput } from 'broapp-autoapp/intent';
 import {
   ATTEMPTS_DOCUMENT_CHARS,
   START_FROM_AN_EDIT,
@@ -550,6 +550,95 @@ describe('14b: an attempt that changed nothing', () => {
   });
 });
 
+describe('14c: what the tools refused, in the attempts document', () => {
+  const refused = (route: string, count: number, error: string): RefusalGroup => ({ route, kind: 'input', count, error });
+  const attempt = (n: number, over: Partial<AttemptRecord> = {}): AttemptRecord => ({
+    attempt: n,
+    ended: { to: 'failed', note: `attempt ${String(n)}: Nothing was built. candidate.cycle was refused 3 times: create: expected an array.` },
+    edited: ['src/host/db.ts'],
+    lastBuild: [],
+    lastCheck: [],
+    ...over,
+  });
+
+  test('each earlier attempt says what was refused, the top three, after how it ended; none recorded, no line', () => {
+    const input = 'the input is not what this tool takes';
+    const text =
+      attemptsDocument({
+        attempts: [
+          attempt(1, {
+            refused: [
+              refused('candidate.cycle', 3, `${input}: create: expected an array`),
+              refused('source.edit', 2, `${input}: message: expected a string ${'more words '.repeat(20)}`),
+              refused('source.change', 1, `${input}: changes: expected an array`),
+              refused('preview.try', 1, `${input}: steps: expected an array`),
+            ],
+          }),
+        ],
+        diagnosis: null,
+      }) ?? '';
+    const lines = text.split('\n');
+    const at = lines.indexOf('Refused:');
+    expect(at).toBeGreaterThan(lines.indexOf('Ended with:'));
+    expect(lines[at + 1]).toBe('- candidate.cycle ×3: create: expected an array');
+    expect(lines[at + 2]).toStartWith('- source.edit ×2: message: expected a string more words');
+    expect(lines[at + 3]).toBe('- source.change ×1: changes: expected an array');
+    expect(text).not.toContain('preview.try');
+    // The error is cut at 120 characters.
+    expect((lines[at + 2] ?? '').length).toBeLessThanOrEqual('- source.edit ×2: '.length + 120);
+    expect(attemptsDocument({ attempts: [attempt(1)], diagnosis: null })).not.toContain('Refused:');
+    expect(attemptsDocument({ attempts: [attempt(1, { refused: [] })], diagnosis: null })).not.toContain('Refused:');
+  });
+
+  test('over the cap: the diagnosis goes, then what came back, then Refused, and only then are Changed paths trimmed', () => {
+    const problem = { stage: 'views', message: 'views: the table names a column nobody returns' };
+    const shaped = (width: number): { text: string; newest: string } => {
+      // Words, not one letter repeated: a long run of one would be redacted as an id.
+      const paths = Array.from({ length: 8 }, (_, index) => `src/${'dir-'.repeat(width)}file-${String(index)}.ts`);
+      const refusals = [1, 2, 3].map((k) => refused(`source.edit`, 4 - k, `the input is not what this tool takes: hunks[${String(k)}].find: ${'is not text '.repeat(10)}`));
+      const text =
+        attemptsDocument({
+          attempts: [attempt(1, { lastBuild: [problem] }), attempt(2, { edited: paths, lastBuild: [problem], refused: refusals })],
+          diagnosis: `The builder sent a string where an array is asked. ${'and said so again '.repeat(17)}`,
+        }) ?? '';
+      return { text, newest: text.slice(text.indexOf('Attempt 2')) };
+    };
+    const first = (test: (text: string) => boolean): number => {
+      for (let width = 1; width < 400; width += 1) if (test(shaped(width).text)) return width;
+      throw new Error('never');
+    };
+    const diagnosisGone = first((text) => !text.includes('How the planning model read it'));
+    const cameBackGone = first((text) => !text.includes('Came back:'));
+    const refusedGone = first((text) => !text.includes('Refused:'));
+    const pathsTrimmed = first((text) => /Changed: .* and 5 more/.test(text));
+    expect(diagnosisGone).toBeLessThan(cameBackGone);
+    expect(cameBackGone).toBeLessThan(refusedGone);
+    expect(refusedGone).toBeLessThan(pathsTrimmed);
+    // At each step what is left is whole, and the document is inside the cap.
+    for (const width of [diagnosisGone, cameBackGone, refusedGone, pathsTrimmed]) {
+      expect(shaped(width).text.length).toBeLessThanOrEqual(ATTEMPTS_DOCUMENT_CHARS);
+    }
+    expect(shaped(refusedGone - 1).newest).toContain('Refused:');
+    expect(shaped(refusedGone).newest).toContain('file-7.ts');
+  });
+
+  test('from the run store, through the executor: attempt 2 is told what attempt 1’s tools refused', async () => {
+    const { directory } = newRoot();
+    const refusedCycle = (then: readonly FakeStep[]): FakeStep => ({
+      kind: 'tool',
+      name: 'candidate.cycle',
+      input: { appId: 'items', message: 'add the examples', hunks: [], create: 'migrations/004.sql' },
+      then,
+    });
+    const w = await world(directory, [refusedCycle([refusedCycle([text('done')])]), text('nothing this time'), text('not advice')]);
+    const { id, slugs } = submitted(w.intents, [plan('only-part')]);
+    await w.tab.executor?.start(id, 'the test');
+    await w.tab.executor?.idle();
+    const second = delivered(w.knowledge, `intent-${String(id)}-${slugs[0] ?? ''}-a2`);
+    expect(second.attempts).toContain('Refused:\n- candidate.cycle ×2: create: expected an array');
+  }, 120_000);
+});
+
 // ── 4 and 5. Through the executor ──────────────────────────────────────────
 
 interface World {
@@ -636,7 +725,7 @@ function text(words: string): FakeStep {
   return { kind: 'text', chunks: [words] };
 }
 
-/** Add one example per criterion with `source.edit`, and build nothing: the verdict fails. */
+/** Add the first criterion's example with `source.edit` and stop: the host builds it, and the verdict fails on the second. */
 function editOnly(slug: string, then: readonly FakeStep[] = [text('done')]): FakeStep {
   return {
     kind: 'tool',
@@ -720,7 +809,9 @@ describe('a retry is told what the attempts before it did', () => {
     await c.tab.executor?.idle();
     const message = c.prompts()[0] ?? '';
     expect(message).toContain('The last attempt ended with:');
-    expect(message).toContain('Nothing was built.');
+    // Attempt 1 left one example of two; the host built what it left (14c), so
+    // how it ended is the missing example rather than a missing build.
+    expect(message).toContain(`No example named ${slug}-c2 was run.`);
     expect(message).not.toContain('provider');
     const third = delivered(c.knowledge, `intent-${String(id)}-${slug}-a3`);
     expect(third.refs[1]).toBe('attempts:items');
