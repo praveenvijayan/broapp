@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 
-import { useAiModels } from 'broapp/ai/react';
+import { useAiModels, useAiSettings } from 'broapp/ai/react';
 import type { AiContract, AiModelsHook } from 'broapp/ai/react';
 import { useOperation } from 'broapp/react';
 import { countdown, isUrgent } from 'broapp/shared';
@@ -135,6 +135,25 @@ function toolModels(models: readonly Model[]): Model[] {
   return models.filter((model) => model.capabilities.tools);
 }
 
+/** A model as the list names it, or its id when the list has not got it. */
+function modelName(modelId: string, models: readonly Model[]): string {
+  return models.find((model) => model.modelId === modelId)?.label ?? modelId;
+}
+
+/**
+ * What a select's empty choice runs on, by name: the tier's model when the tier
+ * has one, otherwise the model chosen in Settings. A person choosing a model
+ * has to see which one they would be choosing instead of.
+ */
+export function inheritedModel(
+  tier: { readonly name: string; readonly model: string | null } | null,
+  settingsModel: string | null,
+  models: readonly Model[],
+): string {
+  if (tier !== null && tier.model !== null) return `${tier.name} tier: ${modelName(tier.model, models)}`;
+  return settingsModel === null ? 'Settings model' : `Settings: ${modelName(settingsModel, models)}`;
+}
+
 /** A model `<select>`, keeping the current value even when the list has not got it. */
 function ModelSelect({
   label,
@@ -180,13 +199,15 @@ function ModelSelect({
 export interface TierModelsBlockProps {
   readonly value: TierModels | null;
   readonly models: readonly Model[];
+  /** The model chosen in Settings, which a tier with none runs on. */
+  readonly settingsModel?: string | null;
   readonly unreadable: boolean;
   readonly error: string | null;
   onChange(next: TierModels): void;
 }
 
 /** The three tier models, collapsed until somebody wants them. */
-export function TierModelsBlock({ value, models, unreadable, error, onChange }: TierModelsBlockProps): React.ReactElement {
+export function TierModelsBlock({ value, models, settingsModel = null, unreadable, error, onChange }: TierModelsBlockProps): React.ReactElement {
   const tiers = ['light', 'standard', 'deep'] as const;
   return (
     <details className="launcher__intent-tiers">
@@ -204,7 +225,7 @@ export function TierModelsBlock({ value, models, unreadable, error, onChange }: 
               {tier}
               <ModelSelect
                 disabled={false}
-                first="Settings model"
+                first={inheritedModel(null, settingsModel, models)}
                 label={`Model for ${tier} tasks`}
                 models={models}
                 onChange={(modelId) => onChange({ ...value, [tier]: modelId })}
@@ -340,6 +361,8 @@ export interface TaskRowProps {
   /** Answer the task's question, or the advice that asks. */
   onAnswer?(answer: string): void;
   readonly tierModel: string | null;
+  /** The model chosen in Settings, which a task with no other model runs on. */
+  readonly settingsModel?: string | null;
   readonly models: readonly Model[];
   readonly unreadable: boolean;
   readonly open: boolean;
@@ -355,6 +378,7 @@ export function TaskRow({
   run = null,
   onAnswer,
   tierModel,
+  settingsModel = null,
   models,
   unreadable,
   open,
@@ -379,7 +403,7 @@ export function TaskRow({
         </span>
         <ModelSelect
           disabled={!MODEL_EDITABLE.has(task.stored)}
-          first={tierModel === null ? 'Settings model' : `${task.tier} tier: ${tierModel}`}
+          first={inheritedModel({ name: task.tier, model: tierModel }, settingsModel, models)}
           label={`Model for ${task.slug}`}
           models={models}
           onChange={onModel}
@@ -557,6 +581,7 @@ export interface IntentDetailViewProps {
   onAnswer?(taskId: number, answer: string): void;
   onConfirm?(question: Question, approve: boolean): void;
   readonly tierModels: TierModels | null;
+  readonly settingsModel?: string | null;
   readonly models: readonly Model[];
   readonly unreadable: boolean;
   readonly withdrawError: string | null;
@@ -571,6 +596,7 @@ export interface IntentDetailViewProps {
 export function IntentDetailView({
   detail,
   tierModels,
+  settingsModel = null,
   models,
   unreadable,
   withdrawError,
@@ -727,6 +753,7 @@ export function IntentDetailView({
             onModel={(modelId) => onModel(task.id, modelId)}
             onToggle={() => setOpenTask(openTask === task.id ? null : task.id)}
             open={renderTask !== undefined && openTask === task.id}
+            settingsModel={settingsModel}
             task={task}
             tierModel={tierModels === null ? null : tierModels[task.tier]}
             unreadable={unreadable}
@@ -877,6 +904,7 @@ function LiveIntentPanel({ appId, onClose, turnActive }: { appId: string; onClos
   const tierGet = useOperation<LauncherContract, 'launcher.intentModelsGet'>('launcher.intentModelsGet');
   const tierSet = useOperation<LauncherContract, 'launcher.intentModelsSet'>('launcher.intentModelsSet');
   const models = useAiModels();
+  const settingsModel = useAiSettings().settings?.modelId ?? null;
   const [reload, setReload] = useState(0);
   const [opened, setOpened] = useState<number | null>(null);
 
@@ -901,6 +929,7 @@ function LiveIntentPanel({ appId, onClose, turnActive }: { appId: string; onClos
           error={tierSet.error?.message ?? tierGet.error?.message ?? null}
           models={models.models}
           onChange={(next) => void tierSet.run(next).then(refresh)}
+          settingsModel={settingsModel}
           unreadable={models.error !== null}
           value={tiers}
         />
@@ -925,6 +954,7 @@ function LiveIntentPanel({ appId, onClose, turnActive }: { appId: string; onClos
                   models={models.models}
                   onChanged={refresh}
                   reload={reload}
+                  settingsModel={settingsModel}
                   tierModels={tiers}
                   unreadable={models.error !== null}
                 />
@@ -941,6 +971,7 @@ function LiveIntentDetail({
   id,
   reload,
   tierModels,
+  settingsModel,
   models,
   unreadable,
   onChanged,
@@ -948,6 +979,7 @@ function LiveIntentDetail({
   id: number;
   reload: number;
   tierModels: TierModels | null;
+  settingsModel: string | null;
   models: readonly Model[];
   unreadable: boolean;
   onChanged(): void;
@@ -988,6 +1020,7 @@ function LiveIntentDetail({
       onRun={() => void start.run({ id }).then(onChanged)}
       onStop={() => void stop.run({ id }).then(onChanged)}
       runError={start.error?.message ?? stop.error?.message ?? answer.error?.message ?? confirm.error?.message ?? null}
+      settingsModel={settingsModel}
       tierModels={tierModels}
       unreadable={unreadable}
       withdrawError={withdraw.error?.message ?? null}

@@ -51,7 +51,7 @@ import {
 } from 'broapp-autoapp/launcher';
 import { layout, type Layout } from 'broapp-autoapp/spec';
 
-import { BACKLOG_EMPTY, IntentPanel } from '../packages/broapp-autoapp/src/launcher/ui/IntentPanel.tsx';
+import { BACKLOG_EMPTY, IntentPanel, TierModelsBlock, inheritedModel } from '../packages/broapp-autoapp/src/launcher/ui/IntentPanel.tsx';
 import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
 import { harness, type Harness } from './harness.ts';
 
@@ -660,4 +660,29 @@ describe('the launcher tab', () => {
     expect(refused).toContain('This launcher keeps no backlog.');
     expect(refused).toContain('role="alert"');
   }, 60_000);
+
+  test('an empty model choice names the model it runs on', () => {
+    const model = (modelId: string, label: string) =>
+      ({ modelId, label, capabilities: { tools: true } }) as Parameters<typeof inheritedModel>[2][number];
+    const models = [model('big-1', 'Big One'), model('small-1', 'Small One')];
+    expect(inheritedModel(null, null, models)).toBe('Settings model');
+    expect(inheritedModel(null, 'big-1', models)).toBe('Settings: Big One');
+    expect(inheritedModel({ name: 'deep', model: null }, 'big-1', models)).toBe('Settings: Big One');
+    expect(inheritedModel({ name: 'deep', model: 'small-1' }, 'big-1', models)).toBe('deep tier: Small One');
+    // A model the list has not got is still named, by its id.
+    expect(inheritedModel(null, 'gone-9', models)).toBe('Settings: gone-9');
+
+    const markup = renderToString(
+      createElement(TierModelsBlock, {
+        value: { light: null, standard: null, deep: null },
+        models,
+        settingsModel: 'big-1',
+        unreadable: false,
+        error: null,
+        onChange: () => undefined,
+      }),
+    );
+    expect(markup).toContain('Settings: Big One');
+    expect(markup).not.toContain('>Settings model<');
+  });
 });

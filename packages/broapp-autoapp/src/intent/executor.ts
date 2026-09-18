@@ -546,6 +546,20 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     };
   }
 
+  /**
+   * The model a turn with no id of its own runs on, for a task's history: the
+   * one chosen in Settings, by name. A history that says "the Settings model"
+   * cannot say which model that was once Settings has changed.
+   */
+  async function settingsModelName(): Promise<string> {
+    try {
+      const id = (await options.ai().registry.settings()).modelId;
+      return id === null ? 'the Settings model' : `the Settings model, ${id}`;
+    } catch {
+      return 'the Settings model';
+    }
+  }
+
   /** Run one task to completed, failed, interrupted or waiting; `true` when the run goes on. */
   async function runTask(active: Active, first: TaskRecord): Promise<boolean> {
     const sourceDir = layout.app(active.appId).source;
@@ -577,7 +591,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       const runId = `intent-${String(active.intentId)}-${task.slug}-a${String(turnNumber)}`;
       const revBefore = sourceRevision(sourceDir);
       if (task.revBefore === null) task = store.recordResult(task.id, { revBefore });
-      task = move(task, 'in-progress', `turn ${String(turnNumber)} on ${modelId ?? 'the Settings model'}`, runId);
+      task = move(task, 'in-progress', `turn ${String(turnNumber)} on ${modelId ?? (await settingsModelName())}`, runId);
       runIds.push(runId);
       const controller = new AbortController();
       active.controller = controller;

@@ -607,6 +607,11 @@ describe('a backlog run', () => {
     ]);
     // The first ran on the Settings model (no id sent), the second on its own.
     expect(w.asked).toEqual(['fake-1', 'fake-deep']);
+    // And each task's history names the model its turn ran on.
+    const startedOn = (slug: string): string =>
+      detail?.tasks.find((task) => task.slug === slug)?.events.find((event) => event.to === 'in-progress')?.note ?? '';
+    expect(startedOn(slugs[0] ?? '')).toBe('turn 1 on the Settings model, fake-1');
+    expect(startedOn(slugs[1] ?? '')).toBe('turn 1 on fake-deep');
     // Every move and the start and finish were written down.
     const log = w.knowledge.db.query<{ message: string }, []>("SELECT message FROM events WHERE kind = 'log' ORDER BY id").all();
     expect(log.some((row) => row.message.includes(`intent ${String(id)} started by the test`))).toBe(true);
