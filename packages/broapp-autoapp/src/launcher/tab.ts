@@ -82,10 +82,16 @@ export interface CreateLauncherTabOptions {
    */
   readonly intents?: IntentStore;
   /**
-   * How a backlog run is paced: a builder's turn limit and attempts per task.
+   * How a backlog run is paced: a builder's turn and idle limits, and attempts
+   * and turns per task.
    * The launcher uses the executor's own; tests shorten them.
    */
-  readonly run?: { readonly turnTimeoutMs?: number; readonly maxAttempts?: number };
+  readonly run?: {
+    readonly turnTimeoutMs?: number;
+    readonly maxAttempts?: number;
+    readonly maxTurns?: number;
+    readonly idleTimeoutMs?: number;
+  };
   /** The AI layer's document budget. Tests shrink it to watch a document being cut. */
   readonly contextBudgetChars?: number;
   /** Which application is selected. Defaults to `session.json` in `dataDir`. */
@@ -223,6 +229,8 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
           ...(options.run?.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: options.run.turnTimeoutMs }),
           ...(options.run?.maxAttempts === undefined ? {} : { maxAttempts: options.run.maxAttempts }),
+          ...(options.run?.maxTurns === undefined ? {} : { maxTurns: options.run.maxTurns }),
+          ...(options.run?.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.run.idleTimeoutMs }),
         });
   const busy = executor === null ? undefined : (appId: string, runId: string | null) => executor.busy(appId, runId);
 

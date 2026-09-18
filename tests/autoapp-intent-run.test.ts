@@ -31,6 +31,7 @@ import {
 } from 'broapp-autoapp/engineer';
 import {
   DECIDE,
+  idleSentence,
   INTENT_APPROVES,
   INTENT_REFUSES,
   LAUNCHER_STOPPED,
@@ -141,7 +142,11 @@ function git(cwd: string, ...args: string[]): void {
 interface WorldOptions {
   readonly confirmTimeoutMs?: number;
   readonly maxAttempts?: number;
+  readonly maxTurns?: number;
   readonly turnTimeoutMs?: number;
+  readonly idleTimeoutMs?: number;
+  /** The fake model's delay between chunks, so a turn can be slow without a tool call. */
+  readonly chunkDelayMs?: number;
 }
 
 interface World {
@@ -181,6 +186,7 @@ async function world(script: readonly FakeStep[], options: WorldOptions = {}): P
   const gate = createGate({ appId: 'launcher', releaseId: 'launcher', confirmTimeoutMs, recorder: runs.recorder(), logger: quiet });
   const fake = createFakeAdapter({
     script,
+    ...(options.chunkDelayMs === undefined ? {} : { chunkDelayMs: options.chunkDelayMs }),
     models: [
       { provider: 'fake', modelId: 'fake-1', label: 'Fake 1', capabilities: { tools: true, vision: false, structuredOutput: true } },
       { provider: 'fake', modelId: 'fake-deep', label: 'Fake deep', capabilities: { tools: true, vision: false, structuredOutput: true } },
@@ -216,6 +222,8 @@ async function world(script: readonly FakeStep[], options: WorldOptions = {}): P
     run: {
       turnTimeoutMs: options.turnTimeoutMs ?? 120_000,
       ...(options.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts }),
+      ...(options.maxTurns === undefined ? {} : { maxTurns: options.maxTurns }),
+      ...(options.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.idleTimeoutMs }),
     },
   });
   closers.push(
@@ -307,6 +315,23 @@ function cycle(slug: string, ids: readonly string[] = ['c1', 'c2'], then: readon
       message: `examples for ${slug}`,
       hunks: [{ path: 'autoapp.json', find: '"acceptance": [', replace: `"acceptance": [${examples}` }],
     },
+    then,
+  );
+}
+
+/** A cycle with no hunks: build, preview and check the workspace as it is. */
+function verify(then: readonly FakeStep[] = [text('done')]): FakeStep {
+  return tool('candidate.cycle', { appId: 'items', message: 'verify', hunks: [] }, then);
+}
+
+/** Add one example per criterion id with `source.edit`, and build nothing. */
+function editOnly(slug: string, ids: readonly string[], then: readonly FakeStep[] = [text('done')]): FakeStep {
+  const examples = ids
+    .map((id) => `\n    { "id": "${slug}-${id}", "title": "${slug} ${id}", "steps": [{ "route": "items.list", "input": null }] },`)
+    .join('');
+  return tool(
+    'source.edit',
+    { appId: 'items', message: `examples for ${slug}`, hunks: [{ path: 'autoapp.json', find: '"acceptance": [', replace: `"acceptance": [${examples}` }] },
     then,
   );
 }
@@ -481,6 +506,27 @@ describe('verdictOf', () => {
     expect(reasonsOf({ ...passing, checks: [] }, 'rev-1', { timedOut: true })).toContain('The turn ran out of time.');
     // The model's closing words are not an input: there is nowhere to put them.
     expect(verdictOf.length).toBe(4);
+  });
+
+  test('an example of a finished task that is gone is named; present and passing, it is completed', () => {
+    const earlier = ['0003-author-column-c1', '0003-author-column-c2'];
+    const gone = verdictOf(task, passing, 'rev-1', 'rev-2', {}, earlier);
+    expect(gone.completed).toBe(false);
+    expect(gone.reasons).toEqual([
+      'The example 0003-author-column-c1, from a finished task, is gone.',
+      'The example 0003-author-column-c2, from a finished task, is gone.',
+    ]);
+    const kept = { ...passing, checks: [...passing.checks, ...earlier.map((id) => ({ id, title: id, passed: true }))] };
+    expect(verdictOf(task, kept, 'rev-1', 'rev-2', {}, earlier)).toEqual({ completed: true, reasons: [], passed: ['c1', 'c2'] });
+  });
+
+  test('the idle sentence names the limit in minutes, or in seconds below one', () => {
+    expect(idleSentence(8 * 60_000)).toBe('The turn made no tool call for 8 minutes.');
+    expect(idleSentence(60_000)).toBe('The turn made no tool call for 1 minute.');
+    expect(idleSentence(1_500)).toBe('The turn made no tool call for 2 seconds.');
+    expect(verdictOf(task, { ...passing, checks: [] }, 'rev-1', 'rev-2', { idleMs: 8 * 60_000 }).reasons).toContain(
+      'The turn made no tool call for 8 minutes.',
+    );
   });
 });
 
@@ -896,6 +942,148 @@ describe('a backlog run', () => {
     expect((await refusal(executor.start(another, 'the test'))).message).toContain('already working on items');
     executor.stop(id, 'the test');
     await executor.idle();
+  }, 60_000);
+});
+
+// ── 13d. Fix-ups to the run ─────────────────────────────────────────────────
+
+describe('13d: holding a run to its earlier examples, and letting progress earn a turn', () => {
+  const three = plan('three-part', {
+    criteria: [
+      { text: 'items.list returns the items', failure: false },
+      { text: 'An empty list reads as empty, never as an error', failure: true },
+      { text: 'items.list returns a count', failure: false },
+    ],
+  });
+  const reasonsOf = (w: World, taskId: number): string[] => (w.intents.task(taskId)?.failure as { reasons: string[] } | null)?.reasons ?? [];
+
+  // 2.
+  test('a task that removes a finished task’s example is not completed, and the reason names it', async () => {
+    const renamed = tool('candidate.cycle', {
+      appId: 'items',
+      message: 'take over the first part’s examples',
+      hunks: [
+        { path: 'autoapp.json', find: '"id": "0001-first-part-c1", "title": "0001-first-part c1"', replace: '"id": "0002-second-part-c1", "title": "0002-second-part c1"' },
+        { path: 'autoapp.json', find: '"id": "0001-first-part-c2", "title": "0001-first-part c2"', replace: '"id": "0002-second-part-c2", "title": "0002-second-part c2"' },
+      ],
+    });
+    const w = await world([cycle('0001-first-part'), renamed, text('not advice')], { maxAttempts: 1 });
+    const { id, slugs } = submitted(w.intents, [plan('first-part'), plan('second-part', { blockedBy: ['first-part'] })]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+
+    const [first, second] = w.intents.runOrder(id);
+    expect(first?.stored).toBe('completed');
+    expect(second?.stored).toBe('failed');
+    // Its own examples ran and passed; the first task's are what is missing.
+    expect(second?.criteria.map((criterion) => criterion.passed)).toEqual([true, true]);
+    expect(reasonsOf(w, second?.id ?? 0)).toEqual([
+      `The example ${slugs[0] ?? ''}-c1, from a finished task, is gone.`,
+      `The example ${slugs[0] ?? ''}-c2, from a finished task, is gone.`,
+    ]);
+    // The builder was told not to.
+    expect(prompts(w.fake).some((prompt) => prompt.includes('Do not remove or rename an acceptance example that is already there.'))).toBe(true);
+  }, 240_000);
+
+  // 3.
+  test('a second attempt that only builds and checks what the first edited completes', async () => {
+    const w = await world([editOnly('0001-only-part', ['c1', 'c2']), verify()]);
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(task?.stored).toBe('completed');
+    expect(task?.attempts).toBe(2);
+    // The second turn's own revision did not move; the task's did.
+    expect(task?.revAfter).not.toBe(task?.revBefore);
+    expect(w.intents.get(id)?.intent.status).toBe('done');
+  }, 240_000);
+
+  // 4.
+  test('passing 0, then 2, then 3 of 3: the third attempt happens without a person and completes', async () => {
+    const w = await world([text('nothing yet'), cycle('0001-three-part', ['c1', 'c2']), cycle('0001-three-part', ['c3'])]);
+    const { id } = submitted(w.intents, [three]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const detail = w.intents.get(id);
+    const task = detail?.tasks[0];
+    expect(detail?.intent.status).toBe('done');
+    expect(task?.stored).toBe('completed');
+    expect(task?.runIds).toHaveLength(3);
+    expect(task?.events.map((event) => event.note)).toContain('another attempt: it got further (2 of 3)');
+  }, 240_000);
+
+  test('passing 1, then 1: no progress, and the run stops after two', async () => {
+    const w = await world([cycle('0001-three-part', ['c1']), verify(), text('not advice')]);
+    const { id } = submitted(w.intents, [three]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(task?.stored).toBe('failed');
+    expect(task?.runIds).toHaveLength(2);
+    expect(w.intents.get(id)?.intent.stopReason).toBe(`${task?.slug ?? ''} failed after 2 attempts.`);
+  }, 240_000);
+
+  test('four turns is the ceiling, however much each one improves', async () => {
+    const five = plan('five-part', {
+      criteria: ['a', 'b', 'c', 'd', 'e'].map((letter) => ({ text: `items.list answers ${letter}`, failure: letter === 'e' })),
+    });
+    const w = await world([
+      text('nothing yet'),
+      cycle('0001-five-part', ['c1']),
+      cycle('0001-five-part', ['c2']),
+      cycle('0001-five-part', ['c3']),
+      text('not advice'),
+      cycle('0001-five-part', ['c4', 'c5']),
+    ]);
+    const { id } = submitted(w.intents, [five]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(task?.stored).toBe('failed');
+    expect(task?.runIds).toHaveLength(4);
+    expect(task?.criteria.map((criterion) => criterion.passed)).toEqual([true, true, true, false, false]);
+    const events = w.intents.get(id)?.tasks[0]?.events ?? [];
+    expect(events.filter((event) => event.note.startsWith('another attempt: it got further'))).toHaveLength(2);
+  }, 300_000);
+
+  // 5.
+  test('a turn silent past the idle limit is ended with the idle sentence', async () => {
+    const silent: FakeStep = { kind: 'text', chunks: Array.from({ length: 12 }, () => 'thinking ') };
+    const w = await world([silent, text('not advice')], { maxAttempts: 1, idleTimeoutMs: 400, chunkDelayMs: 150 });
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(task?.stored).toBe('failed');
+    expect(reasonsOf(w, task?.id ?? 0)).toContain(idleSentence(400));
+    expect(w.fake.aborted).toBeGreaterThan(0);
+  }, 60_000);
+
+  test('a turn waiting on a forwarded question is not ended by the idle limit', async () => {
+    const w = await world([editEmpty('Answered late', [text('done')]), text('not advice')], {
+      maxAttempts: 1,
+      idleTimeoutMs: 400,
+      confirmTimeoutMs: 10_000,
+    });
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    const client = await connect(w.tab);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    const question = await until(async () => (await client.call('launcher.intentGet', { id })).run?.question ?? null);
+    await Bun.sleep(1_200);
+    expect((await client.call('ai.chatConfirm', { runId: question.runId, callId: question.callId, approve: true })).accepted).toBe(true);
+    await executor.idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(readFileSync(join(w.root.app('empty').source, 'autoapp.json'), 'utf8')).toContain('"name": "Answered late"');
+    expect(task?.stored).toBe('failed');
+    expect(reasonsOf(w, task?.id ?? 0)).not.toContain(idleSentence(400));
   }, 60_000);
 });
 

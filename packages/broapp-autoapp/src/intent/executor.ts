@@ -62,6 +62,21 @@ export const INTENT_REFUSES: readonly string[] = ['release.activate', 'apps.crea
 export const TASK_TURN_TIMEOUT_MS = 20 * 60_000;
 /** How many attempts a task gets in one run before the run stops on it. */
 export const TASK_MAX_ATTEMPTS = 2;
+/**
+ * How many turns a task gets in one run, however much each one improves.
+ *
+ * An attempt that passes more criteria than any before it in the run is not
+ * counted against {@link TASK_MAX_ATTEMPTS}; this is what bounds that.
+ */
+export const TASK_MAX_TURNS = 4;
+/**
+ * How long a builder's turn may go without a tool call before it is ended.
+ *
+ * 13c's by-hand run spent twenty minutes on twelve reads and no edit. The
+ * clock stops while a tool runs and while a question waits for the person:
+ * what it measures is the model holding the turn in silence.
+ */
+export const TASK_IDLE_TIMEOUT_MS = 8 * 60_000;
 /** How many questions a builder may ask about one task. */
 export const MAX_QUESTIONS_PER_TASK = 2;
 
@@ -104,6 +119,8 @@ export interface Verdict {
 /** How the turn ended, for the reasons a verdict gives. */
 export interface TurnEnding {
   readonly timedOut?: boolean;
+  /** The idle limit that ended the turn, in milliseconds, when one did. */
+  readonly idleMs?: number;
   /** The sentence a turn that could not start or failed on the provider gave. */
   readonly error?: string;
 }
@@ -112,14 +129,25 @@ function plural(n: number, one: string, many: string): string {
   return `${String(n)} ${n === 1 ? one : many}`;
 }
 
+/** The sentence a turn ended by the idle limit gets. */
+export function idleSentence(ms: number): string {
+  const minutes = ms / 60_000;
+  const amount = Number.isInteger(minutes)
+    ? plural(minutes, 'minute', 'minutes')
+    : plural(Math.max(1, Math.round(ms / 1_000)), 'second', 'seconds');
+  return `The turn made no tool call for ${amount}.`;
+}
+
 /**
  * Whether a task is finished, from evidence alone.
  *
- * Completed needs every one of: the workspace revision moved; the last build
- * has no problems; nothing was edited after it; its checks ran on the preview
- * that is running now; every check passed, so no earlier task's example
- * regressed; and for each criterion an example named `<slug>-<id>` ran. The
- * model's closing words are not an input.
+ * Completed needs every one of: the workspace revision moved since before the
+ * task's first turn; the last build has no problems; nothing was edited after
+ * it; its checks ran on the preview that is running now; every check passed, so
+ * no earlier task's example regressed; every example in `required` — those of
+ * the application's finished tasks — is still there, so none was removed to
+ * make that true; and for each criterion an example named `<slug>-<id>` ran.
+ * The model's closing words are not an input.
  */
 export function verdictOf(
   task: Pick<TaskRecord, 'slug' | 'criteria'>,
@@ -127,6 +155,7 @@ export function verdictOf(
   revBefore: string,
   revNow: string,
   ending: TurnEnding = {},
+  required: readonly string[] = [],
 ): Verdict {
   const reasons: string[] = [];
   if (revNow === revBefore) reasons.push('The workspace did not change.');
@@ -139,6 +168,9 @@ export function verdictOf(
   if (failed.length > 5) reasons.push(`${plural(failed.length - 5, 'more example', 'more examples')} failed.`);
 
   const byId = new Map(status.checks.map((check) => [check.id, check]));
+  for (const id of required) {
+    if (!byId.has(id)) reasons.push(`The example ${id}, from a finished task, is gone.`);
+  }
   const passed: string[] = [];
   for (const criterion of task.criteria) {
     const id = exampleIdFor(task.slug, criterion.id);
@@ -148,6 +180,7 @@ export function verdictOf(
   }
   if (reasons.length > 0) {
     if (ending.timedOut === true) reasons.push('The turn ran out of time.');
+    if (ending.idleMs !== undefined) reasons.push(idleSentence(ending.idleMs));
     if (ending.error !== undefined) reasons.push(`The turn ended with an error: ${ending.error}`);
   }
   return { completed: reasons.length === 0, reasons, passed };
@@ -161,7 +194,7 @@ export function builderMessage(
   const ids = task.criteria.map((criterion) => exampleIdFor(task.slug, criterion.id));
   const parts = [
     `Application: ${task.appId}`,
-    `Build this one task and nothing else. Add one acceptance example to autoapp.json for each criterion, with exactly these ids: ${ids.join(', ')}. Use candidate.cycle until every check passes, then stop. Do not request activation. Do not plan or change the backlog.`,
+    `Build this one task and nothing else. Add one acceptance example to autoapp.json for each criterion, with exactly these ids: ${ids.join(', ')}. Do not remove or rename an acceptance example that is already there. Use candidate.cycle until every check passes, then stop. Do not request activation. Do not plan or change the backlog.`,
     'If the plan leaves a real choice open that changes what you build, call intent.ask once with one question rather than guessing. Do not ask about anything the plan or the application already answers.',
     '',
     renderPlan(task).trimEnd(),
@@ -267,6 +300,10 @@ export interface CreateExecutorOptions {
   readonly confirmTimeoutMs?: number;
   readonly turnTimeoutMs?: number;
   readonly maxAttempts?: number;
+  /** Turns a task may take in one run, however much each improves. */
+  readonly maxTurns?: number;
+  /** How long a turn may go without a tool call. */
+  readonly idleTimeoutMs?: number;
 }
 
 /** The executor. One run per launcher, one task at a time. */
@@ -309,6 +346,32 @@ interface Active {
   run: RunProgress | null;
   questions: RunQuestion[];
   ending: Ending | null;
+  /** The calls of this turn whose tool is running now. */
+  inFlight: Set<string>;
+  /** The turn's idle clock, while a turn runs. */
+  clock: IdleClock | null;
+}
+
+/** A clock that ends a turn after a stretch with no tool call. */
+interface IdleClock {
+  /** Start the stretch again, or hold it while `paused` says so. */
+  arm(): void;
+  disarm(): void;
+}
+
+function idleClock(ms: number, paused: () => boolean, onIdle: () => void): IdleClock {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const disarm = (): void => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+  return {
+    arm() {
+      disarm();
+      if (!paused()) timer = setTimeout(onIdle, ms);
+    },
+    disarm,
+  };
 }
 
 /** Whether a tool's output says one of its steps' questions expired. */
@@ -329,6 +392,8 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
   const mapping = options.mapping ?? ((): TierModels => readTierModels(store.dataDir));
   const turnTimeoutMs = options.turnTimeoutMs ?? TASK_TURN_TIMEOUT_MS;
   const maxAttempts = options.maxAttempts ?? TASK_MAX_ATTEMPTS;
+  const maxTurns = options.maxTurns ?? TASK_MAX_TURNS;
+  const idleTimeoutMs = options.idleTimeoutMs ?? TASK_IDLE_TIMEOUT_MS;
   const confirmTimeoutMs = options.confirmTimeoutMs ?? 600_000;
 
   let current: Active | null = null;
@@ -391,6 +456,18 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     }
   }
 
+  /** The example ids of every task of `appId` already completed, which a later task may not lose. */
+  function finishedExamples(appId: string): string[] {
+    const ids: string[] = [];
+    for (const intent of store.list({ appId, limit: Number.MAX_SAFE_INTEGER })) {
+      for (const task of store.runOrder(intent.id)) {
+        if (task.stored !== 'completed') continue;
+        for (const criterion of task.criteria) ids.push(exampleIdFor(task.slug, criterion.id));
+      }
+    }
+    return ids;
+  }
+
   /** The stand-in: answer, refuse, or bring the question to the person. */
   function answerFor(active: Active, runId: string) {
     return (question: InProcessQuestion): StandingAnswer => {
@@ -413,6 +490,8 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         askedAt: now,
         expiresAt: question.expiresAt ?? now + confirmTimeoutMs,
       });
+      // The person's time to answer is not the model's silence.
+      active.clock?.arm();
       note(`the run put ${question.tool} to the person for ${where}`, active.appId, runId, question.callId);
       return 'defer';
     };
@@ -429,6 +508,15 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       } else if (event.type === 'confirm' && run !== null) {
         active.run = { ...run, approvals: run.approvals + 1 };
       }
+      // A running tool is not the model's silence either: the clock holds
+      // while one runs, and starts again when its result goes back.
+      if (event.type === 'tool-call') {
+        active.inFlight.add(callId);
+        active.clock?.arm();
+      } else if (event.type === 'tool-result') {
+        active.inFlight.delete(callId);
+        active.clock?.arm();
+      }
       if (event.type === 'tool-result' && event.tool === 'intent.ask' && active.ending?.kind === 'asked') {
         // The question is in; the turn has nothing left to do.
         active.controller?.abort(new Error('the builder asked the person'));
@@ -444,6 +532,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       });
       if (settled.length === 0) return;
       active.questions = active.questions.filter((question) => !settled.includes(question));
+      active.clock?.arm();
       if (event.type !== 'tool-result') return;
       // A refusal that arrives at the deadline is the deadline, not a person's
       // no: a person's Deny comes before the window closes.
@@ -463,7 +552,12 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     let task = first;
     let lastReasons: readonly string[] = [];
     const runIds: string[] = [];
-    for (let attempt = 1; ; attempt += 1) {
+    // Attempts that count against `maxAttempts`, and the most criteria any
+    // attempt of this run has passed: an attempt that gets further than every
+    // one before it is not counted, up to `maxTurns` turns.
+    let counted = 0;
+    let best: number | null = null;
+    for (let turn = 1; ; turn += 1) {
       const modelId = modelFor(task, mapping());
       if (modelId !== null) {
         const list = await offered();
@@ -490,9 +584,21 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       active.runId = runId;
       active.taskId = task.id;
       active.questions = [];
+      active.inFlight = new Set();
       active.run = { taskId: task.id, attempt: turnNumber, startedAt: Date.now(), lastTool: null, lastToolAt: null, approvals: 0 };
 
       const limit = AbortSignal.timeout(turnTimeoutMs);
+      let idle = false;
+      const clock = idleClock(
+        idleTimeoutMs,
+        () => active.inFlight.size > 0 || active.questions.length > 0,
+        () => {
+          idle = true;
+          controller.abort(new Error(idleSentence(idleTimeoutMs)));
+        },
+      );
+      active.clock = clock;
+      clock.arm();
       let error: string | undefined;
       try {
         const result = await options.ai().turn(
@@ -501,6 +607,9 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         );
         error = result.error;
       } finally {
+        clock.disarm();
+        active.clock = null;
+        active.inFlight = new Set();
         active.controller = null;
         active.runId = null;
         active.run = null;
@@ -516,10 +625,21 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       // here from the revision just read.
       const builtFrom = states.get(active.appId).builtFromRev;
       const status = { ...states.status(active.appId), editsSinceBuild: builtFrom !== null && builtFrom !== revNow };
-      const verdict = verdictOf(task, status, revBefore, revNow, {
-        timedOut: limit.aborted,
-        ...(error === undefined ? {} : { error }),
-      });
+      // Against the revision before the task's first turn, not this one's: an
+      // attempt that only builds what the last one edited has still changed
+      // the workspace for this task.
+      const verdict = verdictOf(
+        task,
+        status,
+        task.revBefore ?? revBefore,
+        revNow,
+        {
+          timedOut: limit.aborted,
+          ...(idle ? { idleMs: idleTimeoutMs } : {}),
+          ...(error === undefined ? {} : { error }),
+        },
+        finishedExamples(active.appId),
+      );
       task = store.recordResult(task.id, { passed: verdict.passed });
       if (verdict.completed) {
         task = store.recordResult(task.id, {
@@ -533,16 +653,24 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       }
 
       lastReasons = verdict.reasons;
-      if (attempt >= maxAttempts) {
+      const got = verdict.passed.length;
+      const further = best !== null && got > best;
+      best = Math.max(best ?? got, got);
+      if (!further) counted += 1;
+      if (counted >= maxAttempts || turn >= maxTurns) {
         task = move(task, 'failed', verdict.reasons.join(' '), runId);
         store.setFailure(task.id, { reasons: verdict.reasons, runIds, at: Date.now() });
-        stopIntent(active, `${task.slug} failed after ${plural(attempt, 'attempt', 'attempts')}.`);
+        stopIntent(active, `${task.slug} failed after ${plural(turn, 'attempt', 'attempts')}.`);
         await advise(task, verdict.reasons);
         return false;
       }
       // Another attempt: written down as the failure it was, then queued again.
-      task = move(task, 'failed', `attempt ${String(attempt)}: ${verdict.reasons.join(' ')}`, runId);
-      task = move(task, 'in-queue', 'another attempt');
+      task = move(task, 'failed', `attempt ${String(turn)}: ${verdict.reasons.join(' ')}`, runId);
+      task = move(
+        task,
+        'in-queue',
+        further ? `another attempt: it got further (${String(got)} of ${String(task.criteria.length)})` : 'another attempt',
+      );
     }
   }
 
@@ -658,6 +786,8 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         run: null,
         questions: [],
         ending: null,
+        inFlight: new Set(),
+        clock: null,
       };
       current = active;
       loop = drive(active).finally(() => {

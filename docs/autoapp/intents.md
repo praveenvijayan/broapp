@@ -225,23 +225,34 @@ measured what a local model does with one long open-ended turn.
 4. The builder's message starts `Application: <appId>`, which is how the turn's
    documents are chosen, says to build this one task with one example per
    criterion under exactly the ids `<slug>-c<n>`, to use `candidate.cycle`
-   until every check passes, and not to activate or plan. Then the plan, then
-   any answers the person gave, then why the last attempt was not completed.
+   until every check passes, not to remove or rename an example already there,
+   and not to activate or plan. Then the plan, then any answers the person
+   gave, then why the last attempt was not completed.
 5. During the turn the executor answers the gate for the person, as described
    in [security.md](security.md#a-run-answers-for-the-person). A question it
    does not cover waits in the panel.
-6. When the turn ends, however it ended, the verdict decides.
-7. Completed: the next task. Not completed: a second attempt with the reasons.
-   Failed twice: the run stops.
+6. When the turn ends, however it ended, the verdict decides. A turn that
+   makes no tool call for eight minutes is ended first (the clock holds while a
+   tool runs and while a question waits for the person), and the verdict says
+   so: "The turn made no tool call for 8 minutes." The twenty-minute limit
+   stays.
+7. Completed: the next task. Not completed: another attempt with the reasons.
+   Two attempts that do not complete stop the run, but an attempt that passed
+   more criteria than every earlier one of this run is not counted, and its
+   history says "another attempt: it got further (5 of 6)". Four turns a task
+   is the ceiling, however much each improves.
 8. Every task completed: the intent is `done`. Nothing is activated. The panel
    says to open the preview, look, and activate from the Candidate panel, and
    lists every task's runbook lines under "For you to check by hand".
 
 A task is **completed** only when all of these hold after its turn: the
-workspace revision moved; the last build has no problems; nothing was edited
-after it; its checks ran on the preview that is running now; every check passed,
-so no earlier task's example regressed; and for every criterion an example
-named `<slug>-c<n>` ran. Otherwise each condition that did not hold is a
+workspace revision moved since before the task's first turn (so an attempt that
+only builds what the last one edited counts); the last build has no problems;
+nothing was edited after it; its checks ran on the preview that is running now;
+every check passed, so no earlier task's example regressed; every example of the
+application's completed tasks is still among the checks ("The example
+0004-author-column-c2, from a finished task, is gone."), so none was removed to
+make that true; and for every criterion an example named `<slug>-c<n>` ran. Otherwise each condition that did not hold is a
 sentence ("No example named 0007-add-tags-c2 was run.", "The turn ran out of
 time."). A completed task records `rev_after`, `release_id` and `actual_lines`
 (from `git diff --shortstat`), and each criterion whose example passed is drawn
@@ -249,7 +260,7 @@ time."). A completed task records `rev_after`, `release_id` and `actual_lines`
 the backlog's **A verdict as strong as its examples** row says what would
 strengthen it.
 
-**Failure policy: stop.** After the second failed attempt the task is `failed`
+**Failure policy: stop.** After the second counted attempt, or the fourth turn, the task is `failed`
 with its reasons and run ids, the intent is `stopped`, and later tasks stay
 `in-queue`. The workspace is left as the attempt left it, so the person and the
 engineer can look; nothing is reset. The main model is then asked one
