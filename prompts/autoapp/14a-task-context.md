@@ -25,6 +25,11 @@ After this prompt:
    fixed rules, and the `search` event records why each document was included.
 5. One measurement says whether any of it helps a retry.
 
+Before any of that, Step 0 closes three faults the review of 13d found in how a
+failed turn is recorded and shown. They come first because the attempts document
+is built from those records: a turn the provider killed must not be written
+down as an attempt the builder made.
+
 Nothing here ranks by outcome, learns a weight, or embeds text. `scoring.ts`
 says an outcome is association and never promotes or ranks a lesson; report 12d
 watched two unrelated lessons credited `resolved`. That rule stands.
@@ -53,6 +58,13 @@ watched two unrelated lessons credited `resolved`. That rule stands.
 - `packages/broapp-autoapp/src/knowledge/scoring.ts`: the header, and
   `problemSignature`.
 - `packages/broapp-autoapp/src/engineer/state.ts`: `CycleProgress.failures`.
+- For Step 0: report 13d's "Found, not changed here" and "Open questions";
+  `packages/broapp/src/ai/host/run.ts` — `safeMessage` (line ~441) and the
+  `case 'error'` branch (line ~840), to read, not to change;
+  `executor.ts` `followerFor` and `finishEnded`; `launcher/tab.ts` where `logger`
+  is handed to `createAi` and `engineerTools`; `launcher/ui/App.tsx` where
+  `selected` is set and `IntentPanel` is mounted; `IntentPanel.tsx`
+  `LiveIntentPanel`, `usePolling`, `shouldPoll`.
 
 ## Fixed decisions for this prompt
 
@@ -76,6 +88,68 @@ watched two unrelated lessons credited `resolved`. That rule stands.
 | Why a document was included | The `search` event gains `why: { ref, reason }[]`, reasons from a closed list: `application`, `backlog`, `attempts`, `pinned`, `related:<file>`, `words`. Add `why` to `ALLOWED.search` with `ref` and `reason` kept. `delivered` writes it from what the turn's entry recorded at `search`. The Knowledge panel is not changed here. |
 | Nothing new for the model to call | No tool, no instruction line. The host assembles the pack at the start of the turn. 08c, 12j and the three-run evaluation all say the same thing about this model: what it is handed helps, what it has to go and fetch mostly does not get fetched. |
 | Not in scope | Outcome-weighted ranking or any learned weight; embeddings, `sqlite-vec`, or any vector search (the trigger for those is a measured retrieval miss caused by wording, not a corpus size — add that sentence to `docs/autoapp/backlog.md`); tags written by a model; near-duplicate detection (content hashes and case signatures match exact normalised text only); showing `why` or links in the Knowledge panel; validating `locks` at plan time; scheduling by `locks`; a graph tool for the engineer; merging the two stores. |
+
+## Step 0 — three corrections from the review of 13d, before anything else
+
+Each with its test, listed in your report under their own heading. None changes
+`packages/broapp`.
+
+1. **A turn the provider killed is not an attempt.** In 13d's by-hand run the
+   OpenRouter key ran out of credit. Both turns died at the provider with no
+   tool call, were judged as a builder that tried and missed ("The example
+   …-c6 failed."), used both attempts and stopped the run with a reason that
+   says nothing about the provider; the advice question then failed the same
+   way. The AI layer already says what happened: `run.ts` emits a chat event
+   `{ type: 'error', code: 'provider' }` and ends the turn `failed`, and a turn
+   that could not start returns `InProcessTurnResult.error`. In `followerFor`,
+   record the first `error` event on the active run (`active.providerError =
+   event.message`). After the turn, when that is set **or** `result.error` is set:
+   no verdict is taken; the task moves `in-progress → interrupted` (13c made that
+   move give the attempt back) with the note "the AI provider failed: <message>";
+   the intent is stopped with "The AI provider returned an error while building
+   <slug>. Nothing was judged. The launcher's log has the detail."; `advise` is
+   not called; the run does not go on to the next task, because the next turn
+   would meet the same provider. A new `Ending` kind, `provider`, handled in
+   `finishEnded`, is the natural shape. The message shown is the AI layer's
+   reduced one: the raw provider text never reaches the store or the panel.
+   One more guard in the same place: a turn that ends `failed` with zero
+   `tool-call` events and no provider error recorded is treated the same way,
+   with the note "the turn ended before the model did anything", because a
+   verdict over a turn that did nothing only re-reads the last attempt's state.
+   Both notes start with a fixed prefix exported from `executor.ts`
+   (`NOT_AN_ATTEMPT`), and Steps 1 and 2 honour it: `attemptNotes` marks such a
+   row, the attempts document leaves it out entirely, and `lastReasons` is never
+   seeded from it — the builder is told about attempts, and this was not one.
+   Add that case to test 3 and test 5 below.
+2. **The launcher's log does not print what the knowledge log redacts.** The
+   same failure printed OpenRouter's raw error to stderr through `safeMessage`'s
+   `logger.error`, including a settings URL carrying the key's identifier; the
+   knowledge log's copy of the line had it `<redacted>`. The common rules say a
+   secret is never logged, and an identifier that names a key is close enough.
+   In `tab.ts`, wrap the `HostLogger` handed to `createAi`, `engineerTools` and
+   the executor so every line passes through `sanitise` (`knowledge/log.ts`)
+   before it is printed: one function, `sanitisedLogger(logger): HostLogger`,
+   beside `sanitise`. Do not change `safeMessage`: that a provider's raw error
+   is logged with its stack is the AI layer's decision and a person debugging
+   needs it; what it may not carry out of the process is a credential or its
+   name. If `sanitise` does not already redact the shape you find in 13d's
+   report (read how the knowledge copy came to be redacted), extend it there,
+   with a test on that exact shape and no real key in the fixture.
+3. **The Backlog panel is empty on its first open** until Refresh. Seen in 13b
+   with a turn running and again in 13d on a fresh launcher with none, so 13c's
+   explanation (the draft did not exist yet) does not cover it. The review read
+   `LiveIntentPanel` and `useOperation` and found nothing wrong: the list is
+   requested on mount and the newest call wins. **Diagnose before you fix.**
+   Reproduce it on the compiled launcher over a scratch root seeded with one
+   intent (13a's report says how), open the panel as the first action after the
+   page loads, and find out which it is: the request is made with an `appId`
+   that is not the seeded application's (what `selected` holds at that moment,
+   against `session`); the request is made before the bridge is ready and its
+   answer is dropped; `list.data` arrives and a render path shows the empty
+   sentence anyway; or something else. Write the cause in the report in two
+   sentences, fix that cause and only that, and add a test that fails without
+   the fix. If you cannot reproduce it in three tries, say so, change nothing,
+   and leave a `backlog.md` row with what you tried.
 
 ## Step 1 — task identity
 
@@ -126,6 +200,22 @@ bun run --cwd packages/broapp-autoapp build:launcher
 bun run scripts/autoapp-smoke.ts
 bun run check
 ```
+
+In `tests/autoapp-intent-run.test.ts`, for Step 0:
+
+- a. A builder's turn whose fake adapter fails at the provider before any tool
+  call: task `interrupted`, `attempts` unchanged, intent `stopped` with the
+  provider sentence, no advice asked (the fake records no second model call),
+  the next task still `in-queue`, and no `failed` row in `task_events`.
+- b. The same when `ai.turn` cannot start (no provider configured).
+- c. A turn that ends `failed` with no tool call and no error event: `interrupted`
+  with the "before the model did anything" note.
+- d. A provider failure **after** tool calls that edited the workspace is still
+  an interruption, and the edits are left in place.
+- e. `sanitisedLogger` redacts the shape from 13d's report on `error` and `warn`
+  and leaves an ordinary line unchanged.
+- f. The panel test the diagnosis calls for, or the report's statement that it
+  could not be reproduced.
 
 New `tests/autoapp-task-context.test.ts`:
 
@@ -189,6 +279,13 @@ do not tune the task until it does.
 
 ## Acceptance criteria
 
+- A turn that failed at the provider, could not start, or ended before the model
+  did anything interrupts its task without costing an attempt, stops the run
+  with a sentence that says so, asks no advice, and is never written down as a
+  failed attempt.
+- Nothing the launcher prints carries what the knowledge log redacts.
+- The Backlog panel shows its intents on first open, or the report says why the
+  fault could not be reproduced.
 - A spoke turn's task is found from its run id by equality, with no parsing, and
   its application no longer depends on the message's first line.
 - A second or later attempt is given what earlier attempts changed, how each
@@ -208,8 +305,9 @@ do not tune the task until it does.
 `prompts/autoapp/reports/14a-task-context.md`: the by-hand table with its
 caveats; the index's counts per `rel` and the skipped locks on the real store;
 the rebuild time; every existing assertion you changed; what `query.limit` is
-and whether the refs fit; and anything in this prompt's decisions that the code
-contradicted.
+and whether the refs fit; anything in this prompt's decisions that the code
+contradicted; and for Step 0, the panel fault's cause in two sentences and the
+redaction shape you tested.
 
 ## Commit
 
@@ -224,6 +322,10 @@ restart is told the same. A rebuildable index links tasks, runs, files,
 cases and lessons with the row each link came from; a task's lessons come
 from its own words and from shared files by fixed rules, and the search
 event says why each document was there. Nothing is ranked by outcome.
+
+First, three faults from the last run: a turn the provider killed interrupts
+its task instead of costing it an attempt, the launcher's own log is redacted
+as the knowledge log is, and the Backlog panel shows its list on first open.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 ```
