@@ -36,7 +36,7 @@ import { sanitise, type EventLog } from '../knowledge/log.ts';
 import type { Layout } from '../spec/index.ts';
 
 import { modelFor, readTierModels, type TierModels } from './models.ts';
-import { exampleIdFor, renderPlan, validateGraph } from './plan.ts';
+import { exampleIdFor, FAILURE_MARK, renderPlan, validateGraph } from './plan.ts';
 import { refusalError, refusalLine, refusalsOf, type RefusalGroup } from './refusals.ts';
 import type { IntentStore } from './store.ts';
 import { NOT_AN_ATTEMPT, type StoredTaskStatus, type TaskRecord } from './types.ts';
@@ -285,6 +285,13 @@ export function verdictOf(
 }
 
 /** What the builder of one task is told: one message, no history. */
+/**
+ * How a builder is told to read a failure criterion. Without it, 14b's builder
+ * stopped twice to say two criteria contradicted each other, having no way to
+ * write the example for the one that is refused.
+ */
+export const FAILURE_SENTENCE = `A criterion marked ${FAILURE_MARK} is not in conflict with the others: its example is a step with \`fails\`, showing the route refuses, and the others show what happens when it does not.`;
+
 export function builderMessage(
   task: TaskRecord,
   lastReasons: readonly string[] = [],
@@ -292,7 +299,7 @@ export function builderMessage(
   const ids = task.criteria.map((criterion) => exampleIdFor(task.slug, criterion.id));
   const parts = [
     `Application: ${task.appId}`,
-    `Build this one task and nothing else. Add one acceptance example to autoapp.json for each criterion, with exactly these ids: ${ids.join(', ')}. Do not remove or rename an acceptance example that is already there. Use candidate.cycle until every check passes, then stop. Do not request activation. Do not plan or change the backlog.`,
+    `Build this one task and nothing else. Add one acceptance example to autoapp.json for each criterion, with exactly these ids: ${ids.join(', ')}. Do not remove or rename an acceptance example that is already there. ${FAILURE_SENTENCE} Use candidate.cycle until every check passes, then stop. Do not request activation. Do not plan or change the backlog.`,
     'If the plan leaves a real choice open that changes what you build, call intent.ask once with one question rather than guessing. Do not ask about anything the plan or the application already answers.',
     '',
     renderPlan(task).trimEnd(),

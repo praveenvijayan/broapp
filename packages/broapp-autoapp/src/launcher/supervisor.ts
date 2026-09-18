@@ -16,7 +16,7 @@ import type { Subprocess } from 'bun';
 import { join } from 'node:path';
 
 import type { HostLogger } from 'broapp/host';
-import { INTERNAL_ERROR_MESSAGE, PublicError } from 'broapp/shared';
+import { INTERNAL_ERROR_MESSAGE, PublicError, isPublicError } from 'broapp/shared';
 import type { PublicErrorCode } from 'broapp/shared';
 
 import { LAUNCHER_PID_ENV } from '../child/watch.ts';
@@ -160,6 +160,29 @@ let messageCounter = 0;
 function nextId(): string {
   messageCounter += 1;
   return `l${String(messageCounter)}`;
+}
+
+/**
+ * Marks an error `invoke` threw because the route itself answered with one,
+ * as opposed to the call never being answered: a timeout, or a child that
+ * died. Both are `PublicError`s by the time a caller sees them, and an
+ * acceptance step asserting a refusal must tell them apart — a child that
+ * stopped did not refuse anything.
+ */
+const ROUTE_ANSWERED = 'routeAnswered';
+
+/** The error `invoke` throws when the route answered with a refusal. */
+export function refusedByRoute(code: PublicErrorCode, message: string): PublicError {
+  return Object.assign(new PublicError(code, message), { [ROUTE_ANSWERED]: true });
+}
+
+/**
+ * The refusal a route answered an `invoke` with, or `null` when the error is
+ * anything else. `internal` is returned as it came, for the caller to judge.
+ */
+export function routeRefusal(cause: unknown): { code: string; message: string } | null {
+  if (!isPublicError(cause) || (cause as { [ROUTE_ANSWERED]?: unknown })[ROUTE_ANSWERED] !== true) return null;
+  return { code: cause.code, message: cause.message };
 }
 
 /** A promise that rejects when the deadline passes, without holding the process open. */
@@ -516,10 +539,7 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
           );
           if (reply.type !== 'invoke') throw new Error('the child answered invoke with something else');
           if (reply.ok === true) return reply.output;
-          throw new PublicError(
-            (reply.code ?? 'internal') as PublicErrorCode,
-            reply.message ?? INTERNAL_ERROR_MESSAGE,
-          );
+          throw refusedByRoute((reply.code ?? 'internal') as PublicErrorCode, reply.message ?? INTERNAL_ERROR_MESSAGE);
         },
 
         async drain(deadlineMs: number): Promise<boolean> {

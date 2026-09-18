@@ -45,10 +45,19 @@ import {
   releasePageBytes,
   type AppSpec,
   type Layout,
+  type RouteStep,
 } from '../spec/index.ts';
 
 import type { IntentTools } from './intent-tools.ts';
-import { CHECK_STEP_TIMEOUT_MS, coverage, runAcceptance, stepFailure, UNVERIFIED_BY_CHECKS, viewStepFailure } from './check.ts';
+import {
+  caughtFailure,
+  CHECK_STEP_TIMEOUT_MS,
+  coverage,
+  runAcceptance,
+  stepFailure,
+  UNVERIFIED_BY_CHECKS,
+  viewStepFailure,
+} from './check.ts';
 import { REFERENCE_TOPICS, specReference } from './reference.ts';
 import { startPreview } from './preview.ts';
 import { MAX_REPAIR_ATTEMPTS, previewIdOf, type CandidateStates, type CheckResult, type CycleProgress } from './state.ts';
@@ -1143,6 +1152,12 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     input: s.optional(s.unknown()),
     expect: s.optional(s.unknown()),
     match: s.optional(s.unknown()),
+    fails: s.optional(
+      s.object({
+        code: s.optional(s.string({ min: 1, max: 40 })),
+        message: s.optional(s.string({ min: 1, max: 200 })),
+      }),
+    ),
     view: s.optional(
       s.object({
         page: s.string({ min: 1, max: 100 }),
@@ -1199,6 +1214,15 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
             `step ${String(index)}: ${route} has effect ${declared.effect}; preview.try runs read routes only. Put a write in an acceptance example and run it with candidate.check.`,
           );
         }
+        // Judged by the same functions `runAcceptance` uses, so a step that
+        // passes here passes there, refusals included.
+        const trial: RouteStep = {
+          route,
+          input: step.input,
+          ...(step.expect === undefined ? {} : { expect: step.expect }),
+          ...(step.match === undefined ? {} : { match: step.match }),
+          ...(step.fails === undefined ? {} : { fails: step.fails }),
+        };
         let output: unknown;
         try {
           output = await preview.invoke({
@@ -1210,10 +1234,11 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
             as: 'check',
           });
         } catch (cause) {
-          results.push({ step: index, passed: false, detail: String(cause instanceof Error ? cause.message : cause) });
+          const detail = caughtFailure(trial, cause);
+          results.push({ step: index, passed: detail === null, ...(detail === null ? {} : { detail }) });
           continue;
         }
-        const detail = stepFailure({ route, input: step.input, expect: step.expect, match: step.match }, output);
+        const detail = stepFailure(trial, output);
         results.push({ step: index, passed: detail === null, ...(detail === null ? {} : { detail }), ...bounded(output) });
       }
       return { releaseId, previewId: previewIdOf(preview), results, verification: 'none: a trial is not a check' };

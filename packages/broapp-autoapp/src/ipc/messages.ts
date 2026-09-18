@@ -171,6 +171,15 @@ export type Message =
 export const IPC_TIMEOUT_MS = 5_000;
 
 /**
+ * Why a candidate under activation refuses every write: it is started paused,
+ * because the data it is checked on becomes the live data. The launcher reads
+ * this back to tell a paused gate's refusal from a route's own — an example
+ * that says a write is refused must not pass because nothing was allowed to
+ * write at all.
+ */
+export const CHECKING_PAUSE_REASON = 'the application is being checked';
+
+/**
  * The most a single message may weigh.
  *
  * A lifecycle message is a handful of short fields. A bound is here so that a

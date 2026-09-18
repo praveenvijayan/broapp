@@ -109,7 +109,7 @@ One or two sentences: what this is and why it exists.
 
 ## Acceptance criteria
 - [ ] <observable, testable outcome>
-- [ ] <what the person sees when it fails: a clear message, never a raw error>
+- [ ] (when it goes wrong) <the route that refuses, and what the person is told>
 - [ ] Every criterion above has exactly one test named after it
 
 ## Non-functional
@@ -123,6 +123,10 @@ One or two sentences: what this is and why it exists.
 ```
 
 - `repaid_by: <slug>` follows `stub:` only on a stub.
+- A criterion with `failure: true` renders with `(when it goes wrong)` before
+  its text. Its example is a route step with `fails`, which passes only when the
+  route refuses (see the `acceptance` topic); the builder's message says so, so
+  a builder does not read it as contradicting the other criteria.
 - A task with a `no_failure_path` reason renders `- [ ] No failure path:
   <reason>` in place of a failure criterion.
 - The host writes the last criterion. Criterion `c2` of task `0007-add-tags`
@@ -301,10 +305,10 @@ changed, how it ended, what was still wrong, what came back, and the planning
 model's diagnosis, read from the knowledge log's events for each run id in
 `task_runs`. An earlier attempt that edited nothing also says what it read (at
 most six paths, from the launcher's run store, which already records every
-`source.read`), and when the newest earlier attempt changed nothing the
-document ends with the one line in it that tells the builder what to do: "The
-last attempt read these and changed nothing. Do not read them again: make the
-first edit the plan calls for, then use candidate.cycle." Each earlier attempt
+`source.read`). The document says what happened and never what to do: 14b
+closed it with an instruction to start from an edit when the newest attempt
+changed nothing, both retries given it began by reading a file it named, and
+14d took it out. Each earlier attempt
 also says what its tools refused (**Refused:**, the three largest groups), so a
 builder whose every cycle was refused for its input is not left to send the same
 call again.

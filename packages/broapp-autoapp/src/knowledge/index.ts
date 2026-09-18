@@ -32,7 +32,7 @@ export type { EvidenceEntry, IndexedSymbol, Orientation, SymbolIndex, TaskEviden
 export { BACKLOG_DOCUMENT_CHARS, backlogDocument, createServe } from './serve.ts';
 export type { WhyReason } from './serve.ts';
 
-export { ATTEMPTS_DOCUMENT_CHARS, START_FROM_AN_EDIT, attemptsDocument, attemptsInput, editedPaths, runRecord, sourceReads } from './attempts.ts';
+export { ATTEMPTS_DOCUMENT_CHARS, attemptsDocument, attemptsInput, editedPaths, runRecord, sourceReads } from './attempts.ts';
 export type { AttemptCheck, AttemptProblem, AttemptRecord, AttemptsInput } from './attempts.ts';
 
 export {
@@ -120,3 +120,6 @@ export { SESSION_FILE, openSession } from './session.ts';
 export type { Session } from './session.ts';
 
 export { AUTOAPP_VERSION } from './version.ts';
+
+export { DEFAULT_TASK_CONTEXT, readTaskContext, TASK_CONTEXT_FILE } from './task-context.ts';
+export type { TaskContextSwitches } from './task-context.ts';

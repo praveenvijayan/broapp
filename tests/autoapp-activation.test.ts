@@ -32,6 +32,7 @@ import {
   type Journal,
   type Supervisor,
 } from 'broapp-autoapp/launcher';
+import { runAcceptance } from 'broapp-autoapp/engineer';
 import { fromTransportError } from 'broapp/shared';
 import {
   layout,
@@ -156,6 +157,23 @@ function grantAll(where: World, releaseId: string, capabilities: unknown[] = [])
     grantedAt: Date.now(),
     capabilities: capabilities as never,
   });
+}
+
+/** What activation's check does: `runAcceptance` over a paused candidate of the release. */
+async function runAcceptancePaused(where: World, releaseId: string): Promise<{ passed: boolean; detail?: string }[]> {
+  const app = where.root.app('items');
+  const candidate = await where.supervisor.start({
+    appId: 'items',
+    releaseDir: app.release(releaseId),
+    releaseId,
+    dataDir: mkdtempSync(join(where.directory, 'paused-')),
+    mode: 'live',
+    paused: true,
+  });
+  const spec = readRelease(where.root, 'items', releaseId);
+  const results = await runAcceptance(candidate, spec.acceptance, spec.views);
+  await candidate.shutdown(5_000);
+  return results;
 }
 
 /** Count the rows in one items database, without migrating it. */
@@ -580,6 +598,85 @@ describe.skipIf(!available)('activation', () => {
     expect(result.ok ? 'activated' : `${result.phase}: ${result.reason}`).toBe('activated');
     if (result.ok) await result.child.shutdown(5_000);
   }, 60_000);
+
+  test('an example with $is and fails gets the same answer from a preview check and from activation', async () => {
+    const where = makeWorld();
+    const app = where.root.app('items');
+    const path = join(app.source, 'autoapp.json');
+    const write = async (acceptance: unknown[]): Promise<string> => {
+      const manifest = JSON.parse(await Bun.file(path).text()) as { acceptance: unknown[] };
+      manifest.acceptance = acceptance;
+      writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+      const releaseId = await build(where);
+      grantAll(where, releaseId);
+      return releaseId;
+    };
+    /** What `candidate.check` does: `runAcceptance` over a preview of the release. */
+    const previewCheck = async (releaseId: string): Promise<{ passed: boolean; detail?: string }[]> => {
+      const preview = await where.supervisor.start({
+        appId: 'items',
+        releaseDir: app.release(releaseId),
+        releaseId,
+        dataDir: mkdtempSync(join(where.directory, 'preview-')),
+        mode: 'preview',
+      });
+      const spec = readRelease(where.root, 'items', releaseId);
+      const results = await runAcceptance(preview, spec.acceptance, spec.views);
+      await preview.shutdown(5_000);
+      return results;
+    };
+    const activation = async (releaseId: string): Promise<string> => {
+      const result = await activate({
+        layout: where.root,
+        supervisor: where.supervisor,
+        journal: where.journal,
+        appId: 'items',
+        releaseId,
+        logger: { warn: () => undefined, error: () => undefined },
+      });
+      if (result.ok) await result.child.shutdown(5_000);
+      return result.ok ? 'activated' : `${result.phase}: ${result.reason}`;
+    };
+
+    // Activation checks a paused candidate, so only reads run there: refused
+    // by the route's own input schema, then a list whose contents the example
+    // gives only by kind.
+    const holds = await write([
+      {
+        id: 'refused-then-listed',
+        title: 'A list with input is refused, and the list is still there',
+        steps: [
+          { route: 'items.list', input: { page: 2 }, fails: { code: 'invalid_input' } },
+          { route: 'items.list', input: null, match: { items: { $is: 'array' }, count: { $is: 'number' } } },
+        ],
+      },
+    ]);
+    expect((await previewCheck(holds)).map((result) => result.passed)).toEqual([true]);
+    expect(await activation(holds)).toBe('activated');
+
+    // The same shapes, wrong: a read that succeeds where the example says it is
+    // refused, a count that is a number where it says a string, and a write
+    // said to be refused. The preview runs the write and it succeeds; the
+    // paused candidate refuses it before the route sees it. Neither is the
+    // route refusing, so both fail it.
+    const wrong = await write([
+      { id: 'not-refused', title: 'The list is refused', steps: [{ route: 'items.list', input: null, fails: {} }] },
+      { id: 'wrong-kind', title: 'The count is a string', steps: [{ route: 'items.list', input: null, match: { count: { $is: 'string' } } }] },
+      { id: 'write-refused', title: 'Adding is refused', steps: [{ route: 'items.add', input: { label: 'x' }, fails: {} }] },
+    ]);
+    const checked = await previewCheck(wrong);
+    expect(checked.map((result) => result.passed)).toEqual([false, false, false]);
+    expect(checked[0]?.detail).toContain('items.list succeeded with');
+    expect(checked[0]?.detail).toContain('but the example says it is refused');
+    expect(checked[1]?.detail).toMatch(/count: expected a string, got \d+/);
+    expect(checked[2]?.detail).toContain('items.add succeeded with');
+    const paused = await runAcceptancePaused(where, wrong);
+    expect(paused.map((result) => result.passed)).toEqual([false, false, false]);
+    expect(paused[2]?.detail).toContain('activation checks a paused candidate');
+    const refused = await activation(wrong);
+    expect(refused).toStartWith('checked:');
+    expect(refused).toContain('not-refused');
+  }, 120_000);
 
   test('a drain that times out leaves the previous release serving', async () => {
     const where = makeWorld();

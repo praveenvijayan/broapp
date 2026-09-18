@@ -163,7 +163,11 @@ and is offered to start the preview again. See [learning.md](learning.md).
 
 An acceptance example in `autoapp.json` is a list of steps. A **route step**
 calls a route on a preview of the candidate and compares the output, whole
-(`expect`) or in part (`match`). A **view step** asserts that a page, or a
+(`expect`) or in part (`match`, where `{"$is": "number"}` and the other kinds
+say what a value is without saying what it equals), or asserts with `fails`
+that the route refuses, by code and by words; a crash is never a refusal.
+Activation checks a paused candidate, which refuses every write, so an example
+that writes passes a preview and not an activation. A **view step** asserts that a page, or a
 component on it, is declared in the candidate's view specification, or is not,
 and what it declares. The first proves the host; the second proves what the
 page is told to draw. Neither renders a page, and every check report says so

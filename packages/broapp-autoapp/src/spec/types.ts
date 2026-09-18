@@ -12,7 +12,8 @@
  * natural, because the `s` validator has no unions. `ChatEvent` in the AI layer
  * has the same shape for the same reason.
  */
-import type { Effect, JsonSchema } from 'broapp/shared';
+import { publicError } from 'broapp/shared';
+import type { Effect, JsonSchema, PublicErrorCode } from 'broapp/shared';
 
 import type { ViewsSpec } from '../views/types.ts';
 
@@ -108,9 +109,50 @@ export interface RouteStep {
    * array must have the same length and match element by element, and anything
    * else must be equal. For outputs that carry values an example cannot know in
    * advance, such as timestamps and ids, so a step can still say what must be
-   * there.
+   * there: leave the key out, or say its kind with a {@link Matcher}.
    */
   readonly match?: unknown;
+  /**
+   * The route must refuse, rather than succeed. `code`, when given, is the
+   * public error's code; `message`, when given, is contained in its message.
+   * `{}` asserts only that it refuses. A crash is never a refusal. A step with
+   * `fails` carries neither `expect` nor `match`.
+   */
+  readonly fails?: RefusalAssertion;
+}
+
+/**
+ * The codes a route refuses with: every public code but `internal`, which is
+ * what a crash becomes and never a refusal.
+ *
+ * Read from `broapp/shared`'s own constructors rather than typed out a second
+ * time, so a code added there is a code an example may name here.
+ */
+export const REFUSAL_CODES: readonly PublicErrorCode[] = Object.values(publicError).map((make) => make('').code);
+
+/** What a refusing route step asserts about the refusal. */
+export interface RefusalAssertion {
+  readonly code?: string;
+  readonly message?: string;
+}
+
+/**
+ * The kinds a {@link Matcher} may name, and nothing else.
+ *
+ * No ranges, patterns, lengths or "non-empty": each of those is a way for an
+ * example to pass on the wrong output. The list grows when a real task needs
+ * it, which is why every other `$` key is reserved rather than ignored.
+ */
+export const MATCHER_KINDS = ['string', 'number', 'boolean', 'array', 'object', 'null', 'any'] as const;
+export type MatcherKind = (typeof MATCHER_KINDS)[number];
+
+/**
+ * Inside a `match`, `{ "$is": "number" }` stands for "this key is there and
+ * holds a finite number", whatever the number is. Under `expect` it is a
+ * literal object like any other.
+ */
+export interface Matcher {
+  readonly $is: MatcherKind;
 }
 
 /**
@@ -138,6 +180,39 @@ export type AcceptanceStep = RouteStep | ViewStep;
 /** Whether a step is about the view specification rather than a route. */
 export function isViewStep(step: AcceptanceStep): step is ViewStep {
   return 'view' in step && step.view !== undefined;
+}
+
+/** Whether a value inside a `match` is a matcher: an object whose one key is `$is`, naming a known kind. */
+export function isMatcher(value: unknown): value is Matcher {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  const kind: unknown = (value as { $is?: unknown }).$is;
+  return keys.length === 1 && keys[0] === '$is' && (MATCHER_KINDS as readonly unknown[]).includes(kind);
+}
+
+/**
+ * Whether a present value is of a matcher's kind. `number` is a finite number,
+ * because a `NaN` or an `Infinity` in an output is a bug an example should see;
+ * `object` is a plain object, not an array and not `null`; `any` is anything,
+ * `null` included.
+ */
+export function hasKind(value: unknown, kind: MatcherKind): boolean {
+  switch (kind) {
+    case 'string':
+      return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'array':
+      return Array.isArray(value);
+    case 'object':
+      return typeof value === 'object' && value !== null && !Array.isArray(value);
+    case 'null':
+      return value === null;
+    case 'any':
+      return true;
+  }
 }
 
 /** Something the application is supposed to be able to do, written down. */

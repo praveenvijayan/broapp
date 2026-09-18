@@ -20,7 +20,9 @@ import {
   isGranted,
   layout,
   listReleases,
+  MATCHER_KINDS,
   parseSpec,
+  REFUSAL_CODES,
   readCurrent,
   readGrants,
   readRelease,
@@ -673,5 +675,70 @@ describe('view steps', () => {
     );
     // Unless the step says the page must not be there, which is what it is for.
     expect(() => parseSpec(minimalSpec(example([{ view: { page: 'archive', exists: false } }])))).not.toThrow();
+  });
+});
+
+describe('14d: matchers and refusals in an example', () => {
+  const example = (steps: unknown[]): Partial<AppSpec> => ({
+    acceptance: [{ id: 'm1', title: 'Says a kind or a refusal', steps: steps as never }],
+  });
+  /** Every issue parseSpec finds, path joined, or [] when it accepts the specification. */
+  const issuesOf = (steps: unknown[]): string[] => {
+    try {
+      parseSpec(JSON.parse(JSON.stringify(minimalSpec(example(steps)))));
+      return [];
+    } catch (cause) {
+      const issues = (cause as ValidationError).issues;
+      return issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`);
+    }
+  };
+
+  test('a matcher inside match round-trips, nested in an object and in an array element', () => {
+    const step = { route: 'notes.list', input: {}, match: { notes: [{ id: { $is: 'number' }, tags: { $is: 'array' } }], at: { $is: 'any' } } };
+    const parsed = parseSpec(JSON.parse(JSON.stringify(minimalSpec(example([step])))));
+    expect(parsed.acceptance[0]?.steps[0]).toEqual(step);
+    expect(issuesOf([{ view: { page: 'notes', match: { title: { $is: 'string' } } } }])).toEqual([]);
+  });
+
+  test('a misspelt kind, a second key beside $is and any other $ key are refused with the step path', () => {
+    expect(issuesOf([{ route: 'notes.list', input: {}, match: { n: { $is: 'numbr' } } }])).toEqual([
+      'acceptance.0.steps.0.match.n.$is: "numbr" is not a kind; use one of string, number, boolean, array, object, null, any',
+    ]);
+    expect(issuesOf([{ route: 'notes.list', input: {}, match: { n: { $is: 'number', x: 1 } } }])[0]).toMatch(
+      /^acceptance\.0\.steps\.0\.match\.n: a matcher is an object with exactly one key, \$is; .*use expect$/,
+    );
+    expect(issuesOf([{ route: 'notes.list', input: {}, match: { items: [{ n: { $gt: 3 } }] } }])[0]).toMatch(
+      /^acceptance\.0\.steps\.0\.match\.items\.0\.n\.\$gt: \$gt is reserved/,
+    );
+    expect(issuesOf([{ view: { page: 'notes', match: { $is: 'thing' } } }])[0]).toMatch(/^acceptance\.0\.steps\.0\.view\.match\.\$is: /);
+  });
+
+  test('the same objects under expect and under input are literals, and are not refused', () => {
+    for (const odd of [{ $is: 'numbr' }, { $is: 'number', x: 1 }, { $gt: 3 }]) {
+      expect(issuesOf([{ route: 'notes.list', input: {}, expect: { n: odd } }])).toEqual([]);
+      expect(issuesOf([{ route: 'notes.list', input: { n: odd } }])).toEqual([]);
+    }
+  });
+
+  test('fails round-trips, and is refused beside expect or match, on a view step, with an unknown code, or with an unknown field', () => {
+    const step = { route: 'notes.list', input: { bad: true }, fails: { code: 'invalid_input', message: 'expected' } };
+    const parsed = parseSpec(JSON.parse(JSON.stringify(minimalSpec(example([step])))));
+    expect(parsed.acceptance[0]?.steps[0]).toEqual(step);
+    expect(issuesOf([{ route: 'notes.list', input: {}, fails: {} }])).toEqual([]);
+    expect(issuesOf([{ route: 'notes.list', input: {}, fails: {}, expect: {} }])[0]).toMatch(/steps\.0\.fails: .*neither expect nor match/);
+    expect(issuesOf([{ route: 'notes.list', input: {}, fails: {}, match: {} }])[0]).toMatch(/steps\.0\.fails: .*neither expect nor match/);
+    expect(issuesOf([{ view: { page: 'notes' }, fails: {} }])[0]).toMatch(/steps\.0\.fails: a view step cannot assert a refusal/);
+    expect(issuesOf([{ route: 'notes.list', input: {}, fails: { code: 'teapot' } }])[0]).toMatch(
+      /steps\.0\.fails\.code: "teapot" is not a code a route refuses with/,
+    );
+    // `internal` is what a crash becomes, so no example can ask for it.
+    expect(issuesOf([{ route: 'notes.list', input: {}, fails: { code: 'internal' } }])[0]).toMatch(/fails\.code: "internal" is not/);
+    expect(issuesOf([{ route: 'notes.list', input: {}, fails: { reason: 'x' } }])[0]).toMatch(/unknown field "reason"/);
+    expect(issuesOf([{ route: 'notes.list', input: {}, fails: { message: 'x'.repeat(201) } }])).not.toEqual([]);
+  });
+
+  test('the refusal codes are read from broapp/shared, not typed out again', () => {
+    expect([...REFUSAL_CODES].sort()).toEqual(['conflict', 'invalid_input', 'not_found', 'rejected', 'unavailable']);
+    expect(MATCHER_KINDS).toEqual(['string', 'number', 'boolean', 'array', 'object', 'null', 'any']);
   });
 });

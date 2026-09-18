@@ -299,6 +299,19 @@ A turn with no task is served exactly as before. A replay or an evaluation can
 turn the second tier off (`corpus.related: false`) and the attempts document
 off (`documents.attempts: false`). Nothing here ranks by outcome.
 
+**Turning them off.** What is known is little. 14a's one retry
+([report](../../prompts/autoapp/reports/14a-task-context.md#the-by-hand-run))
+and 14b's ten replays
+([report](../../prompts/autoapp/reports/14b-task-context-fixups.md#the-measurement)),
+on one local 27B model, show no run in which the attempts document or the
+related lessons helped a retry, and none in which they were shown to harm one;
+nothing was measured on any other model. So both stay on, and a person can turn
+either off without a rebuild: `task-context.json` in the launcher's data
+directory, `{ "attempts": false, "related": false }`, read like
+`intent-models.json` for every turn, where a missing or unreadable file, or a
+field that is not `false`, means on. A value a replay or an evaluation sets in
+code wins over the file. There is no panel control.
+
 **Why each document was there.** The `search` event carries `why`, one entry per
 delivered document and per lesson whose line reached the model, each with a
 reason from a closed list: `application`, `backlog`, `attempts`, `pinned`,

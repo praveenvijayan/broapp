@@ -22,7 +22,7 @@ import type { Approver, Gate, HostLogger, RunningApp } from 'broapp/host';
 import { fromTransportError } from 'broapp/shared';
 
 import { parseMessage } from '../ipc/codec.ts';
-import { IPC_TIMEOUT_MS, IPC_VERSION, type Answer, type Message } from '../ipc/messages.ts';
+import { CHECKING_PAUSE_REASON, IPC_TIMEOUT_MS, IPC_VERSION, type Answer, type Message } from '../ipc/messages.ts';
 import { layout, readRelease } from '../spec/index.ts';
 import { createRunStore, type RunStore } from '../host/run-store.ts';
 
@@ -254,7 +254,7 @@ export async function runChild(argv: readonly string[]): Promise<number> {
     child.gate = gate;
     // An activation starts its candidate paused: it has to be checked against
     // the migrated data before anything is allowed to change it.
-    if (paused === 'paused') gate.pause('the application is being checked');
+    if (paused === 'paused') gate.pause(CHECKING_PAUSE_REASON);
 
     const instance = assertAppInstance(
       await module.start({

@@ -40,6 +40,7 @@ export type {
 export {
   ambiguousReference,
   exampleIdFor,
+  FAILURE_MARK,
   LAST_CRITERION,
   makeSlug,
   MAX_TASKS_PER_INTENT,
@@ -70,6 +71,7 @@ export {
   advicePrompt,
   ASKED_NEXT,
   builderMessage,
+  FAILURE_SENTENCE,
   createExecutor,
   DECIDE,
   HOST_BUILT_COMPLETED,

@@ -34,6 +34,7 @@ import type { BuildProblem } from '../launcher/candidate.ts';
 import type { Layout } from '../spec/index.ts';
 
 import { attemptsDocument, attemptsInput } from './attempts.ts';
+import type { TaskContextSwitches } from './task-context.ts';
 import { sourceRevision, type FullOrigin } from './ids.ts';
 import { stagesFor } from './links.ts';
 import type { EventLog } from './log.ts';
@@ -158,6 +159,12 @@ export interface CreateServeInput {
    * Present, each earlier attempt says what was refused.
    */
   readonly refusals?: (runId: string) => readonly RefusalGroup[];
+  /**
+   * The person's switches for a task's turn, read again for every turn. A
+   * value given in code, in `documents.attempts` or `corpus.related`, wins
+   * over them: a replay or an evaluation says what it measures.
+   */
+  readonly taskContext?: () => TaskContextSwitches;
 }
 
 /** The most a backlog document may be. */
@@ -343,6 +350,16 @@ export function createServe(input: CreateServeInput): Serve {
   }
 
   const turns = new Map<string, Turn>();
+
+  /** This turn's two switches: code first, then the person's file, then on. */
+  function taskSwitches(): TaskContextSwitches {
+    let file: TaskContextSwitches | undefined;
+    const read = (): TaskContextSwitches => (file ??= input.taskContext?.() ?? { attempts: true, related: true });
+    return {
+      attempts: documents.attempts ?? read().attempts,
+      related: input.corpus?.related ?? read().related,
+    };
+  }
   /**
    * Which turn asked for a ref most recently.
    *
@@ -506,13 +523,13 @@ export function createServe(input: CreateServeInput): Serve {
    * no lesson twice: pinned; at most {@link TURN_RELATED} sharing a file; then
    * the task's own words, a lesson about a stage its labels point at first.
    */
-  function taskLessons(task: TaskRecord, appId: string, routes: ReadonlySet<string>): ChosenLesson[] {
+  function taskLessons(task: TaskRecord, appId: string, routes: ReadonlySet<string>, related: boolean): ChosenLesson[] {
     const chosen: ChosenLesson[] = [];
     const take = (lesson: LessonHit, reason: WhyReason): void => {
       if (chosen.length < TURN_LESSONS && !chosen.some((held) => held.id === lesson.id)) chosen.push({ ...lesson, reason });
     };
     for (const lesson of pinnedLessons(appId)) take(lesson, 'pinned');
-    if (input.corpus?.related !== false) {
+    if (related) {
       for (const lesson of relatedLessons(appId, task.slug, TURN_RELATED)) take(lesson, `related:${lesson.file}`);
     }
     const text = taskText(task);
@@ -589,8 +606,9 @@ export function createServe(input: CreateServeInput): Serve {
           (evidence?.entries ?? []).filter((entry) => entry.kind === 'route').map((entry) => entry.name),
         );
         const lessons: ChosenLesson[] = [];
+        const switches = task === null ? null : taskSwitches();
         if (appId !== null && task !== null) {
-          lessons.push(...taskLessons(task, appId, routes));
+          lessons.push(...taskLessons(task, appId, routes, switches?.related !== false));
         } else if (appId !== null) {
           const matched = findLessons(query.text, appId, TURN_CANDIDATES).filter((lesson) =>
             strongMatch(lesson, words, routes),
@@ -603,7 +621,7 @@ export function createServe(input: CreateServeInput): Serve {
           }
         }
         const attempts =
-          appId === null || task === null || input.intents === undefined || documents.attempts === false
+          appId === null || task === null || input.intents === undefined || switches?.attempts === false
             ? null
             : attemptsDocument(attemptsInput(knowledge, input.intents, task, query.runId ?? null, input.reads, input.refusals));
         const why = new Map<string, WhyReason>();

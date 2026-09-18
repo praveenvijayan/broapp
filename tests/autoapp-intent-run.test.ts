@@ -41,6 +41,10 @@ import {
   HOST_CALL_ID,
   NOTHING_BUILT,
   refusalsOf,
+  FAILURE_MARK,
+  FAILURE_SENTENCE,
+  builderMessage,
+  renderPlan,
   idleSentence,
   INTENT_APPROVES,
   INTENT_REFUSES,
@@ -491,6 +495,34 @@ describe('step 0: corrections from the review of 13b', () => {
     const sentence = 'never how the code is\n  written; how it is written goes in `testNotes`.';
     expect(SPLIT_RULES).toContain(sentence);
     expect(specReference('intents')).toContain(sentence);
+  });
+
+  test('14d: a plan marks its failure criterion, the builder is told how to write its example, and the split rules say both', () => {
+    const dir = mkdtempSync(join(runRoot, 'intent-run-failure-'));
+    scratch.push(dir);
+    const intents = openIntents(dir);
+    closers.push(() => intents.close());
+    const { id, slugs } = submitted(intents, [plan('empty-list')]);
+    const task = intents.runOrder(id)[0];
+    if (task === undefined) throw new Error('no task');
+    const rendered = renderPlan(task);
+    expect(rendered).toContain('- [ ] items.list returns the items\n');
+    expect(rendered).toContain(`- [ ] ${FAILURE_MARK} An empty list reads as empty, never as an error\n`);
+    const message = builderMessage(task);
+    expect(message).toContain(FAILURE_SENTENCE);
+    expect(FAILURE_SENTENCE).toBe(
+      'A criterion marked (when it goes wrong) is not in conflict with the others: its example is a step with `fails`, showing the route refuses, and the others show what happens when it does not.',
+    );
+    // After the ids, and before the plan it explains.
+    expect(message.indexOf(FAILURE_SENTENCE)).toBeGreaterThan(message.indexOf(`${slugs[0] ?? ''}-c2`));
+    expect(message.indexOf(FAILURE_SENTENCE)).toBeLessThan(message.indexOf(FAILURE_MARK, message.indexOf('## Acceptance criteria')));
+    for (const text of [SPLIT_RULES, specReference('intents')]) {
+      expect(text).toContain('A failure criterion names the route that refuses and what the person is told.');
+      expect(text.replace(/\s+/g, ' ')).toContain(
+        'A criterion about a value nobody can know in advance, such as a time or an id, says what kind of value it is, not what it equals.',
+      );
+      expect(text.replace(/\s+/g, ' ')).toContain('what a route returns or refuses, or what a page declares');
+    }
   });
 
   test('the panel reads again while a turn runs, while the open draft is being written, or while a run goes', () => {

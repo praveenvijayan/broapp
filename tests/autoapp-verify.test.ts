@@ -12,8 +12,10 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { ChildHandle } from 'broapp-autoapp/launcher';
+import { refusedByRoute, routeRefusal, type ChildHandle } from 'broapp-autoapp/launcher';
+import { PublicError } from 'broapp/shared';
 import {
+  contains,
   coverage,
   DESIGN_CHECK,
   DESIGN_RULES,
@@ -26,7 +28,7 @@ import {
   UNVERIFIED_BY_CHECKS,
   viewStepFailure,
 } from 'broapp-autoapp/engineer';
-import type { AcceptanceExample } from 'broapp-autoapp/spec';
+import type { AcceptanceExample, RouteStep } from 'broapp-autoapp/spec';
 import type { ViewsSpec } from '../packages/broapp-autoapp/src/views/types.ts';
 
 const views: ViewsSpec = {
@@ -278,5 +280,116 @@ describe('where a step diverges', () => {
     const partial = stepFailure({ route: 'items.list', input: null, match: { items: [{ label: 'a' }] } }, { items: [] });
     expect(partial).toMatch(/\(match; differs at items\.length\)/);
     expect(stepFailure({ route: 'items.list', input: null, match: { count: 0 } }, { items: [], count: 0 })).toBeNull();
+  });
+});
+
+describe('14d: an example can say "some number" and "this is refused"', () => {
+  const kinds = ['string', 'number', 'boolean', 'array', 'object', 'null', 'any'] as const;
+  const samples: Record<(typeof kinds)[number], unknown> = {
+    string: 'a',
+    number: 5,
+    boolean: false,
+    array: [],
+    object: {},
+    null: null,
+    // Every JSON value has one of the six other kinds; `any` takes each of them.
+    any: undefined,
+  };
+
+  test('$is under match: each kind against its own and every other', () => {
+    for (const kind of kinds) {
+      for (const [other, value] of Object.entries(samples).filter(([name]) => name !== 'any')) {
+        const wanted = kind === 'any' || other === kind;
+        expect({ kind, other, passed: contains({ v: value }, { v: { $is: kind } }) }).toEqual({ kind, other, passed: wanted });
+      }
+    }
+    // `any` needs the key there, and takes a null in it.
+    expect(contains({ v: null }, { v: { $is: 'any' } })).toBe(true);
+    expect(contains({}, { v: { $is: 'any' } })).toBe(false);
+    expect(contains({}, { v: { $is: 'null' } })).toBe(false);
+    // A number is finite.
+    expect(contains({ v: Number.NaN }, { v: { $is: 'number' } })).toBe(false);
+    expect(contains({ v: Number.POSITIVE_INFINITY }, { v: { $is: 'number' } })).toBe(false);
+  });
+
+  test('$is nested in an object and in an array element; the array-length rule unchanged', () => {
+    const wanted = { items: [{ id: { $is: 'number' }, title: 'Milk' }] };
+    expect(contains({ items: [{ id: 7, title: 'Milk', doneAt: 1 }] }, wanted)).toBe(true);
+    expect(contains({ items: [{ id: '7', title: 'Milk' }] }, wanted)).toBe(false);
+    expect(contains({ items: [] }, wanted)).toBe(false);
+    expect(contains({ items: [{ id: 7, title: 'Milk' }, { id: 8, title: 'Milk' }] }, wanted)).toBe(false);
+    expect(contains({ a: { b: { c: [1, 2] } } }, { a: { b: { c: { $is: 'array' } } } })).toBe(true);
+  });
+
+  test('expect never reads $is: it compares literally', () => {
+    const step = { route: 'r.x', input: null, expect: { n: { $is: 'number' } } };
+    expect(stepFailure(step, { n: 5 })).toContain('(expect; differs at n)');
+    expect(stepFailure(step, { n: { $is: 'number' } })).toBeNull();
+  });
+
+  test('a matcher miss names the path, the kind wanted and the value got, cut at 80', () => {
+    const step = { route: 'notes.markDone', input: { id: 1 }, match: { note: { doneAt: { $is: 'number' } } } };
+    const detail = stepFailure(step, { note: { doneAt: '2026-09-18' } }) ?? '';
+    expect(detail).toContain('differs at note.doneAt: expected a number, got "2026-09-18"');
+    expect(divergence({ a: 'x'.repeat(200) }, { a: { $is: 'array' } }, 'match')).toBe(`a: expected an array, got "${'x'.repeat(78)}…`);
+    expect(divergence({ a: 1 }, { a: { $is: 'null' } }, 'match')).toBe('a: expected null, got 1');
+    // A missing key is still named as the path alone.
+    expect(divergence({}, { a: { $is: 'any' } }, 'match')).toBe('a');
+  });
+
+  /** A child that answers each route from a table: a value, a route's refusal, or a crash. */
+  const childOf = (answers: Record<string, () => unknown>): ChildHandle =>
+    ({
+      invoke: async ({ route }: { route: string }) => {
+        const answer = answers[route];
+        if (answer === undefined) throw new Error(`no answer for ${route}`);
+        return answer();
+      },
+    }) as unknown as ChildHandle;
+  const refusing = childOf({
+    'items.add': () => {
+      throw refusedByRoute('invalid_input', 'title: must be at least 1 character');
+    },
+    'items.list': () => ({ items: [], count: 0 }),
+    'items.crash': () => {
+      throw refusedByRoute('internal', 'The application could not complete that operation.');
+    },
+    'items.gone': () => {
+      // What the supervisor throws when the child dies: not the route's answer.
+      throw new PublicError('unavailable', 'the application stopped (exit code 1)');
+    },
+  });
+  const one = async (steps: RouteStep[]): Promise<{ passed: boolean; detail?: string }> => {
+    const [result] = await runAcceptance(refusing, [{ id: 'e', title: 'e', steps }]);
+    return result ?? { passed: false, detail: 'no result' };
+  };
+
+  test('fails: a refusing route passes, by code and by words, and each mismatch says why', async () => {
+    expect(await one([{ route: 'items.add', input: { title: '' }, fails: {} }])).toEqual({ id: 'e', title: 'e', passed: true } as never);
+    expect((await one([{ route: 'items.add', input: {}, fails: { code: 'invalid_input', message: 'title' } }])).passed).toBe(true);
+    expect((await one([{ route: 'items.list', input: null, fails: {} }])).detail).toBe(
+      'items.list succeeded with {"items":[],"count":0}, but the example says it is refused',
+    );
+    expect((await one([{ route: 'items.add', input: {}, fails: { code: 'conflict' } }])).detail).toBe(
+      'items.add was refused with invalid_input, but the example says conflict (title: must be at least 1 character)',
+    );
+    expect((await one([{ route: 'items.add', input: {}, fails: { message: 'Title' } }])).detail).toContain('which does not contain "Title"');
+    expect((await one([{ route: 'items.crash', input: {}, fails: {} }])).detail).toBe(
+      'items.crash failed with an internal error, which is not a refusal',
+    );
+    expect((await one([{ route: 'items.gone', input: {}, fails: {} }])).detail).toMatch(/failed with an internal error, which is not a refusal/);
+    // A step with no `fails` is refused the way it always was.
+    expect((await one([{ route: 'items.add', input: {} }])).detail).toBe('title: must be at least 1 character');
+    expect(routeRefusal(new PublicError('invalid_input', 'x'))).toBeNull();
+  });
+
+  test('a refusal does not stop the example: refused, and the list is unchanged, is two steps', async () => {
+    const refusedThenListed: RouteStep[] = [
+      { route: 'items.add', input: { title: '' }, fails: { code: 'invalid_input' } },
+      { route: 'items.list', input: null, match: { count: 0, items: { $is: 'array' } } },
+    ];
+    expect((await one(refusedThenListed)).passed).toBe(true);
+    const listChanged: RouteStep[] = [refusedThenListed[0]!, { route: 'items.list', input: null, match: { count: 1 } }];
+    expect((await one(listChanged)).detail).toContain('differs at count');
   });
 });

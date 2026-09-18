@@ -6,10 +6,13 @@
  * makes it safe for the launcher, the engineer and the MCP adapter to read a
  * release they have not decided to run yet.
  */
-export { APP_ID_PATTERN, SPEC_VERSION } from './types.ts';
+export { APP_ID_PATTERN, MATCHER_KINDS, REFUSAL_CODES, SPEC_VERSION } from './types.ts';
 export type {
   AcceptanceExample,
   AcceptanceStep,
+  Matcher,
+  MatcherKind,
+  RefusalAssertion,
   RouteStep,
   ViewStep,
   AppManifest,
@@ -49,4 +52,4 @@ export {
   readGrants,
   writeGrants,
 } from './capabilities.ts';
-export { isViewStep } from './types.ts';
+export { hasKind, isMatcher, isViewStep } from './types.ts';

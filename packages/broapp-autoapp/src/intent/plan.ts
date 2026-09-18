@@ -351,8 +351,16 @@ function list(values: readonly string[]): string {
   return `[${values.join(', ')}]`;
 }
 
+/**
+ * What marks a failure criterion in a plan. 14b's builder twice read a
+ * failure criterion as contradicting the others; marked, it reads as the path
+ * where the route refuses.
+ */
+export const FAILURE_MARK = '(when it goes wrong)';
+
 function checkbox(criterion: Criterion): string {
-  return `- [${criterion.passed === true ? 'x' : ' '}] ${criterion.text}`;
+  const mark = criterion.failure ? `${FAILURE_MARK} ` : '';
+  return `- [${criterion.passed === true ? 'x' : ' '}] ${mark}${criterion.text}`;
 }
 
 /** One optional section, or nothing when it is empty. */

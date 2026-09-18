@@ -10,7 +10,7 @@
  */
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,16 +22,18 @@ import { ENGINEER_INSTRUCTIONS, createCandidateStates } from 'broapp-autoapp/eng
 import { builderMessage, NOT_AN_ATTEMPT, openIntents, type IntentStore, type RefusalGroup, type TaskInput } from 'broapp-autoapp/intent';
 import {
   ATTEMPTS_DOCUMENT_CHARS,
-  START_FROM_AN_EDIT,
   attemptsDocument,
   createEventLog,
   createEvidence,
   createServe,
+  DEFAULT_TASK_CONTEXT,
   fileKey,
   openKnowledge,
+  readTaskContext,
   rebuildLinks,
   recordContext,
   sourceReads,
+  TASK_CONTEXT_FILE,
   type AttemptRecord,
   type CreateServeInput,
   type EventLog,
@@ -209,7 +211,7 @@ interface Stores {
   readonly knowledge: Knowledge;
   readonly intents: IntentStore;
   readonly log: EventLog;
-  serve(options?: Pick<CreateServeInput, 'corpus' | 'documents' | 'seed'>): Serve;
+  serve(options?: Pick<CreateServeInput, 'corpus' | 'documents' | 'seed' | 'taskContext'>): Serve;
 }
 
 function stores(where = newRoot()): Stores {
@@ -475,31 +477,37 @@ describe('14b: an attempt that changed nothing', () => {
   });
   const count = (text: string, part: string): number => text.split(part).length - 1;
 
-  test('says what it read, at most six paths, and ends with the sentence once', () => {
+  // 14b closed the document with an instruction when the newest attempt
+  // changed nothing; 14d took it out. The document says what happened only.
+  const instruction = /Do not read them again|make the first edit|then use candidate\.cycle/;
+  const lastLine = (text: string): string => text.split('\n').at(-1) ?? '';
+
+  test('says what it read, at most six paths, and tells the retry nothing to do', () => {
     const paths = Array.from({ length: 8 }, (_, index) => `src/read-${String(index)}.ts`);
     const text = attemptsDocument({ attempts: [readOnly(1, paths)], diagnosis: null }) ?? '';
     expect(text).toContain('Changed: nothing\nRead: src/read-0.ts, src/read-1.ts, src/read-2.ts, src/read-3.ts, src/read-4.ts, src/read-5.ts and 2 more');
     expect(text).not.toContain('src/read-6.ts');
-    expect(text.endsWith(START_FROM_AN_EDIT)).toBe(true);
-    expect(count(text, START_FROM_AN_EDIT)).toBe(1);
+    expect(text).not.toMatch(instruction);
+    // It ends with what the attempt ended with, not with advice.
+    expect(lastLine(text)).toMatch(/^- /);
   });
 
-  test('the sentence only when the newest earlier attempt changed nothing; no Read: beside an edit', () => {
+  test('Read: only for an attempt that changed nothing, and no closing sentence in any order', () => {
     const older = attemptsDocument({ attempts: [readOnly(1, ['a.ts']), edited(2)], diagnosis: null }) ?? '';
     expect(older).toContain('Read: a.ts');
-    expect(older).not.toContain(START_FROM_AN_EDIT);
     const both = attemptsDocument({ attempts: [edited(1), readOnly(2, ['a.ts'])], diagnosis: null }) ?? '';
-    expect(count(both, START_FROM_AN_EDIT)).toBe(1);
+    expect(both).toContain('Read: a.ts');
     const withEdits = attemptsDocument({ attempts: [edited(1)], diagnosis: null }) ?? '';
     expect(withEdits).not.toContain('Read:');
-    expect(withEdits).not.toContain(START_FROM_AN_EDIT);
-    // Nothing read is recorded: still told to start from an edit, with no list.
     const unread = attemptsDocument({ attempts: [readOnly(1, [])], diagnosis: null }) ?? '';
     expect(unread).not.toContain('Read:');
-    expect(unread.endsWith(START_FROM_AN_EDIT)).toBe(true);
+    for (const text of [older, both, withEdits, unread]) {
+      expect(text).not.toMatch(instruction);
+      expect(count(text, 'Attempt ')).toBeGreaterThan(0);
+    }
   });
 
-  test('the sentence survives the 1,500-character cut', () => {
+  test('the newest attempt\'s Read: survives the 1,500-character cut', () => {
     const long = (n: number): AttemptRecord => ({
       ...edited(n),
       edited: Array.from({ length: 8 }, (_, index) => `src/a-rather-long-directory-name/number-${String(n)}-${String(index)}.ts`),
@@ -511,8 +519,7 @@ describe('14b: an attempt that changed nothing', () => {
     expect(text).toContain('…');
     expect(text).toContain('Attempt 6');
     expect(text).toContain('Read: src/a-rather-long-directory-name/read-0.ts');
-    expect(text.endsWith(START_FROM_AN_EDIT)).toBe(true);
-    expect(count(text, START_FROM_AN_EDIT)).toBe(1);
+    expect(text).not.toMatch(instruction);
   });
 
   test('the reads come from the run store: succeeded source.read calls of that run, each path once', () => {
@@ -998,6 +1005,45 @@ describe('a task’s lessons', () => {
     rebuildLinks({ knowledge: s.knowledge, intents: s.intents, layout: s.root, apps: ['items', 'other'] });
     const theirs = await turn(s.serve({ seed: false }), elsewhere.runId, 'Build this one task and nothing else.');
     expect(theirs.offered.filter((ref) => ref.startsWith('lesson:'))).toEqual([]);
+  }, 60_000);
+
+  // 14d, 10.
+  test('task-context.json turns the attempts document and tier 2 off, read per turn; missing or unreadable is on; code wins', async () => {
+    const s = stores();
+    const shared = fromCase(s, 'src/host/routes.ts', { summary: 'Quartz zebra lanterns hum' });
+    const task = related(s);
+    rebuildLinks({ knowledge: s.knowledge, intents: s.intents, layout: s.root, apps: ['items'] });
+    const file = join(s.dataDir, TASK_CONTEXT_FILE);
+    // One serving across every file below: the file is read again each turn.
+    const serve = s.serve({ seed: false, taskContext: () => readTaskContext(s.dataDir) });
+    const seen = async (over = serve): Promise<{ attempts: boolean; related: boolean }> => {
+      const { offered } = await turn(over, task.runId, 'Build this one task and nothing else.');
+      return { attempts: offered.includes('attempts:items'), related: offered.includes(`lesson:${String(shared)}`) };
+    };
+
+    expect(existsSync(file)).toBe(false);
+    expect(await seen()).toEqual({ attempts: true, related: true });
+    writeFileSync(file, JSON.stringify({ attempts: false }));
+    expect(await seen()).toEqual({ attempts: false, related: true });
+    writeFileSync(file, JSON.stringify({ related: false }));
+    expect(await seen()).toEqual({ attempts: true, related: false });
+    writeFileSync(file, '{ "attempts": fals');
+    expect(await seen()).toEqual({ attempts: true, related: true });
+    expect(readTaskContext(s.dataDir)).toEqual(DEFAULT_TASK_CONTEXT);
+    // Only `false` turns one off: a string is not a decision.
+    writeFileSync(file, JSON.stringify({ attempts: 'no', related: 0 }));
+    expect(await seen()).toEqual({ attempts: true, related: true });
+
+    // A replay or an evaluation says what it measures, whatever the file says.
+    writeFileSync(file, JSON.stringify({ attempts: false, related: false }));
+    expect(await seen()).toEqual({ attempts: false, related: false });
+    const measured = s.serve({
+      seed: false,
+      documents: { digest: true, evidence: true, attempts: true },
+      corpus: { related: true },
+      taskContext: () => readTaskContext(s.dataDir),
+    });
+    expect(await seen(measured)).toEqual({ attempts: true, related: true });
   }, 60_000);
 
   // 9.

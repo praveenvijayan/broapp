@@ -104,14 +104,34 @@ const ACCEPTANCE = `# acceptance — autoapp.json
 - A route step names a \`route\` and its \`input\`. The route is called on a preview
   of the candidate and must succeed. \`expect\`, when given, must deep-equal the
   output. \`match\`, when given, must be contained by it: every key it names
-  matches, an array has the same length and matches element by element — for
-  outputs with ids and timestamps an example cannot know. Proves the host.
+  matches, an array has the same length and matches element by element. For a
+  value an example cannot know, such as an id or a time, leave its key out of
+  \`match\`, or say its kind. Proves the host.
 - A view step carries a \`view\` with a \`page\` id and, optionally, a \`component\`
   id anywhere on that page. Judged against the candidate's view specification:
   the page or the component must be declared (\`exists\` defaults to true;
   \`false\` asserts it is not), and must contain \`match\` when given. Proves the
   specification: that a button is declared with this label and this operation,
   that a page has no children.
+
+Inside a \`match\`, \`{"$is": "<kind>"}\` means "this key is there and holds a value
+of this kind": \`string\`, \`number\` (finite), \`boolean\`, \`array\`, \`object\`,
+\`null\`, or \`any\` (present, whatever it holds). There is no other matcher, and
+any other key starting with \`$\` is refused; to match a literal \`{"$is": …}\`, use
+\`expect\`, which never reads \`$is\`.
+  { "route": "items.markDone", "input": { "id": 1 },
+    "match": { "id": 1, "done": true, "doneAt": { "$is": "number" } } }
+
+A route step with \`fails\` passes only if the route refuses. Its \`code\` is the
+error's code (\`invalid_input\`, \`not_found\`, \`conflict\`, \`unavailable\` or
+\`rejected\`); its \`message\` is words the error's message contains; \`fails: {}\`
+asserts only a refusal. A crash is never a refusal. Such a step carries no \`expect\` or
+\`match\`, and the steps after it still run, so show that nothing changed:
+  { "id": "0003-titles-c2", "title": "An empty title is refused", "steps": [
+    { "route": "items.add", "input": { "title": "" },
+      "fails": { "code": "invalid_input", "message": "title" } },
+    { "route": "items.list", "input": null, "match": { "count": 0 } } ] }
+
 Neither kind renders a page. What a browser shows is verified only by a person
 looking at the preview, and every check report says so. A good example fails on
 the release before the change and passes on the candidate; write the one that
@@ -244,10 +264,14 @@ export const SPLIT_RULES = `- One task is one change a person could accept or re
 - It is at most 400 changed lines; a task over 200 is a sign it is two.
 - A migration is its own task, and blocks every task that reads the new column.
 - When they depend on each other: the contract first, then the host, then the views.
-- Every criterion is something an acceptance example can assert: what a route returns, or
-  what a page declares. Never "looks good". What only a person can judge goes in \`runbook\`.
-- A criterion says what a route returns or what a page declares, never how the code is
+- Every criterion is something an acceptance example can assert: what a route returns or
+  refuses, or what a page declares. Never "looks good". What only a person can judge goes
+  in \`runbook\`.
+- A criterion says what a route returns or refuses, or what a page declares, never how the code is
   written; how it is written goes in \`testNotes\`.
+- A failure criterion names the route that refuses and what the person is told.
+- A criterion about a value nobody can know in advance, such as a time or an id, says what
+  kind of value it is, not what it equals.
 - A task that ships less than a working path is \`stub: true\` and names in \`repaidBy\`
   the task that finishes it.`;
 

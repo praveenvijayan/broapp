@@ -23,6 +23,8 @@ import type { ViewsSpec } from '../views/types.ts';
 
 import {
   APP_ID_PATTERN,
+  MATCHER_KINDS,
+  REFUSAL_CODES,
   SPEC_VERSION,
   type AcceptanceExample,
   type AppSpec,
@@ -31,6 +33,7 @@ import {
   type ExportedRoute,
   type Grants,
   type MigrationSpec,
+  type RouteStep,
 } from './types.ts';
 
 /**
@@ -204,6 +207,15 @@ const acceptance = s.object({
       input: s.optional(s.unknown()),
       expect: s.optional(s.unknown()),
       match: s.optional(s.unknown()),
+      fails: s.optional(
+        closed(
+          s.object({
+            code: s.optional(s.string({ min: 1, max: 40 })),
+            message: s.optional(s.string({ min: 1, max: 200 })),
+          }),
+          ['code', 'message'],
+        ),
+      ),
       view: s.optional(
         s.object({
           page: s.string({ min: 1, max: 100 }),
@@ -365,7 +377,28 @@ function crossCheck(spec: AppSpec): Issue[] {
             message: `route ${JSON.stringify(route)} is not an operation in this contract`,
           });
         }
+        const step = call as RouteStep;
+        if (step.fails !== undefined) {
+          if (step.expect !== undefined || step.match !== undefined) {
+            issues.push({
+              path: [...at, 'fails'],
+              message: 'a step that asserts a refusal carries neither expect nor match: a refusal has no output',
+            });
+          }
+          const code = step.fails.code;
+          if (code !== undefined && !(REFUSAL_CODES as readonly string[]).includes(code)) {
+            issues.push({
+              path: [...at, 'fails', 'code'],
+              message: `${JSON.stringify(code)} is not a code a route refuses with; use one of ${REFUSAL_CODES.join(', ')}`,
+            });
+          }
+        }
+        if (step.match !== undefined) issues.push(...matcherIssues(step.match, [...at, 'match']));
       } else if (view !== undefined) {
+        if ((call as { fails?: unknown }).fails !== undefined) {
+          issues.push({ path: [...at, 'fails'], message: 'a view step cannot assert a refusal; only a route refuses' });
+        }
+        if (view.match !== undefined) issues.push(...matcherIssues(view.match, [...at, 'view', 'match']));
         // A page that is asserted absent need not exist; anything else on it must.
         const declared = spec.views.pages.some((page) => page.id === view.page);
         const aboutAbsentPage = view.exists === false && view.component === undefined;
@@ -380,6 +413,40 @@ function crossCheck(spec: AppSpec): Issue[] {
   }
 
   issues.push(...capabilityIssues(spec.manifest.capabilities, ['manifest', 'capabilities']));
+  return issues;
+}
+
+/**
+ * Every matcher inside a `match` that would not mean what it says.
+ *
+ * Refused rather than ignored, because a misspelt `$is` compared literally
+ * fails for a reason nobody can see, and a `$` key this launcher does not know
+ * may be one a later launcher does: reserving them now is what stops an
+ * example written today from changing its meaning then.
+ */
+function matcherIssues(value: unknown, at: Path): Issue[] {
+  if (Array.isArray(value)) return value.flatMap((item, index) => matcherIssues(item, [...at, index]));
+  if (typeof value !== 'object' || value === null) return [];
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.includes('$is')) {
+    if (keys.length > 1) {
+      return [{ path: at, message: 'a matcher is an object with exactly one key, $is; to match such an object literally, use expect' }];
+    }
+    const kind = record['$is'];
+    if (!(MATCHER_KINDS as readonly unknown[]).includes(kind)) {
+      return [{ path: [...at, '$is'], message: `${JSON.stringify(kind)} is not a kind; use one of ${MATCHER_KINDS.join(', ')}` }];
+    }
+    return [];
+  }
+  const issues: Issue[] = [];
+  for (const key of keys) {
+    if (key.startsWith('$')) {
+      issues.push({ path: [...at, key], message: `${key} is reserved; the only matcher is $is, with one of ${MATCHER_KINDS.join(', ')}` });
+    } else {
+      issues.push(...matcherIssues(record[key], [...at, key]));
+    }
+  }
   return issues;
 }
 

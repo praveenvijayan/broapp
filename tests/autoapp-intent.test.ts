@@ -233,7 +233,7 @@ describe('renderPlan', () => {
         '',
         '## Acceptance criteria',
         '- [ ] An item can be given a tag from its form',
-        '- [x] A tag over 40 characters is refused with a sentence saying so',
+        '- [x] (when it goes wrong) A tag over 40 characters is refused with a sentence saying so',
         '- [ ] Every criterion above has exactly one test named after it',
         '',
         '## Non-functional',

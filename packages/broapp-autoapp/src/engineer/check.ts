@@ -11,8 +11,17 @@
  */
 import { canonicalJson } from 'broapp/host';
 
-import type { ChildHandle } from '../launcher/supervisor.ts';
-import { isViewStep, type AcceptanceExample, type RouteStep, type ViewStep } from '../spec/index.ts';
+import { CHECKING_PAUSE_REASON } from '../ipc/messages.ts';
+import { routeRefusal, type ChildHandle } from '../launcher/supervisor.ts';
+import {
+  hasKind,
+  isMatcher,
+  isViewStep,
+  type AcceptanceExample,
+  type MatcherKind,
+  type RouteStep,
+  type ViewStep,
+} from '../spec/index.ts';
 import type { Component, Page, ViewsSpec } from '../views/index.ts';
 
 import type { CheckResult } from './state.ts';
@@ -29,6 +38,9 @@ export const CHECK_STEP_TIMEOUT_MS = 30_000;
  * when the list is empty — which is what a stubbed route returns.
  */
 export function contains(actual: unknown, wanted: unknown): boolean {
+  // A matcher first, before the object branch would read `$is` as a key the
+  // output must have. Its key's presence was already checked by the caller.
+  if (isMatcher(wanted)) return hasKind(actual, wanted.$is);
   if (Array.isArray(wanted)) {
     return Array.isArray(actual) && actual.length === wanted.length && wanted.every((item, index) => contains(actual[index], item));
   }
@@ -50,6 +62,9 @@ export function contains(actual: unknown, wanted: unknown): boolean {
  * sorted. `match` is compared with {@link contains}.
  */
 export function stepFailure(step: RouteStep, output: unknown): string | null {
+  if (step.fails !== undefined) {
+    return `${step.route} succeeded with ${cut(JSON.stringify(output) ?? 'nothing', 200)}, but the example says it is refused`;
+  }
   if (step.expect !== undefined && canonicalJson(output) !== canonicalJson(step.expect)) {
     return `${step.route} returned ${JSON.stringify(output)}, not ${JSON.stringify(step.expect)} (expect; differs at ${divergence(output, step.expect, 'expect')})`;
   }
@@ -57,6 +72,54 @@ export function stepFailure(step: RouteStep, output: unknown): string | null {
     return `${step.route} returned ${JSON.stringify(output)}, which does not contain ${JSON.stringify(step.match)} (match; differs at ${divergence(output, step.match, 'match')})`;
   }
   return null;
+}
+
+/**
+ * Why a route's refusal does not satisfy a step, or `null` when the step said
+ * the route refuses and it refused as the step says.
+ */
+function refusalMismatch(step: RouteStep, refusal: { code: string; message: string }): string | null {
+  const fails = step.fails;
+  if (fails === undefined) return `${step.route} was refused: ${refusal.message}`;
+  if (refusal.code === 'internal') {
+    return `${step.route} failed with an internal error, which is not a refusal`;
+  }
+  if (refusal.code === 'unavailable' && refusal.message === CHECKING_PAUSE_REASON) {
+    return `${step.route} was not run: activation checks a paused candidate, which refuses every write before the route sees it, so this refusal is not the route's`;
+  }
+  if (fails.code !== undefined && fails.code !== refusal.code) {
+    return `${step.route} was refused with ${refusal.code}, but the example says ${fails.code} (${cut(refusal.message, 120)})`;
+  }
+  if (fails.message !== undefined && !refusal.message.includes(fails.message)) {
+    return `${step.route} was refused with ${JSON.stringify(cut(refusal.message, 120))}, which does not contain ${JSON.stringify(fails.message)}`;
+  }
+  return null;
+}
+
+/** Why a caught failure does not satisfy the step, or `null` when the step asserted it. */
+export function caughtFailure(step: RouteStep, cause: unknown): string | null {
+  const refusal = routeRefusal(cause);
+  if (refusal === null) {
+    const text = String(cause instanceof Error ? cause.message : cause);
+    return step.fails === undefined ? text : `${step.route} failed with an internal error, which is not a refusal: ${cut(text, 120)}`;
+  }
+  if (step.fails === undefined) return refusal.message;
+  return refusalMismatch(step, refusal);
+}
+
+/** A value cut to `max` characters, with an ellipsis when it was longer. */
+function cut(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/**
+ * Where a matcher missed: the kind wanted and the value got, cut at 80.
+ * This is the line a builder repairs from.
+ */
+function matcherMiss(path: string, kind: MatcherKind, actual: unknown): string {
+  const article = kind === 'array' || kind === 'object' || kind === 'any' ? 'an' : 'a';
+  const wanted = kind === 'null' ? 'null' : kind === 'any' ? 'any value' : `${article} ${kind}`;
+  return `${path}: expected ${wanted}, got ${cut(JSON.stringify(actual) ?? 'nothing', 80)}`;
 }
 
 /**
@@ -70,6 +133,7 @@ export function stepFailure(step: RouteStep, output: unknown): string | null {
  */
 export function divergence(actual: unknown, wanted: unknown, mode: 'expect' | 'match', at: readonly string[] = []): string {
   const here = at.length === 0 ? '$' : at.join('.');
+  if (mode === 'match' && isMatcher(wanted)) return matcherMiss(here, wanted.$is, actual);
   if (Array.isArray(wanted)) {
     if (!Array.isArray(actual)) return here;
     if (actual.length !== wanted.length) return `${here}.length`;
@@ -175,14 +239,24 @@ export async function runAcceptance(
           if (detail !== null) break;
           continue;
         }
-        const output: unknown = await child.invoke({
-          route: step.route,
-          input: step.input,
-          client: 'launcher',
-          requestId: crypto.randomUUID(),
-          timeoutMs: CHECK_STEP_TIMEOUT_MS,
-          as: 'check',
-        });
+        // A refusal is caught per step, so a step that asserts one can pass and
+        // the example go on to its next step: "refused, and the list is
+        // unchanged" is two steps.
+        let output: unknown;
+        try {
+          output = await child.invoke({
+            route: step.route,
+            input: step.input,
+            client: 'launcher',
+            requestId: crypto.randomUUID(),
+            timeoutMs: CHECK_STEP_TIMEOUT_MS,
+            as: 'check',
+          });
+        } catch (cause) {
+          detail = caughtFailure(step, cause);
+          if (detail !== null) break;
+          continue;
+        }
         detail = stepFailure(step, output);
         if (detail !== null) break;
       }

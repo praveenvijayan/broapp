@@ -22,6 +22,7 @@ import { createInputMemory, engineerTools, type TurnRecord } from '../engineer/t
 import type { RunStore } from '../host/run-store.ts';
 import { createExecutor, refusalsOf, type Executor, type IntentStore } from '../intent/index.ts';
 import { sourceReads } from '../knowledge/attempts.ts';
+import { readTaskContext } from '../knowledge/task-context.ts';
 import { createDistiller, pendingCases, type Distiller } from '../knowledge/distil.ts';
 import { recordContext, type Evidence } from '../knowledge/evidence.ts';
 import { instructionsHash, reviewFlags } from '../knowledge/freshness.ts';
@@ -195,6 +196,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           ...(options.intents === undefined ? {} : { intents: options.intents }),
           reads: (runId: string) => sourceReads(options.store, runId),
           refusals: (runId: string) => refusalsOf(options.store.getRun(runId)?.steps ?? []),
+          taskContext: () => readTaskContext(options.dataDir),
         });
 
   if (knowledge !== undefined) {

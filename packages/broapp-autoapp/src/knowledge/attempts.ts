@@ -25,16 +25,6 @@ export const ATTEMPTS_DOCUMENT_CHARS = 1_500;
 const MAX_PATHS = 8;
 /** The most paths an attempt's `Read:` line names. */
 const MAX_READ_PATHS = 6;
-/**
- * The one line in the document that tells a builder what to do.
- *
- * 14a's only retry followed an attempt that read four files, edited nothing
- * and was ended by the idle limit; told "Changed: nothing", the retry read the
- * same two files and went silent the same way. So when the newest earlier
- * attempt changed nothing, the document ends with this, once.
- */
-export const START_FROM_AN_EDIT =
-  'The last attempt read these and changed nothing. Do not read them again: make the first edit the plan calls for, then use candidate.cycle.';
 /** The most lines under `Ended with:`, `Refused:` and `Still wrong at the end:`. */
 const MAX_LINES = 3;
 /** How many paths `Changed:` keeps when the newest attempt alone is over the cap. */
@@ -195,8 +185,12 @@ function size(lines: readonly string[]): number {
  * the older attempts are cut at a line from the end, then the diagnosis goes,
  * then what came back, then the newest attempt's `Refused:` lines, and last its
  * `Changed:` paths are trimmed — each bounded so that the newest attempt alone
- * always fits. When the newest attempt changed
- * nothing, {@link START_FROM_AN_EDIT} closes the document and is never cut.
+ * always fits.
+ *
+ * It says what happened and never what to do next. 14b closed it with an
+ * instruction to start from an edit when the last attempt changed nothing;
+ * both retries given that sentence began by reading a file it named, and they
+ * were that seed's only two failures. So it came out, and `Read:` stayed.
  */
 export function attemptsDocument(input: AttemptsInput): string | null {
   const attempts = input.attempts.filter(isAttempt).sort((a, b) => a.attempt - b.attempt);
@@ -204,7 +198,6 @@ export function attemptsDocument(input: AttemptsInput): string | null {
   if (newest === undefined) return null;
   const older = attempts.slice(0, -1).flatMap((record) => block(record));
   let last = block(newest);
-  const closing = newest.edited.length === 0 ? [START_FROM_AN_EDIT] : [];
   const back = cameBack(attempts);
   const diagnosis =
     input.diagnosis === null || input.diagnosis.trim() === ''
@@ -213,7 +206,7 @@ export function attemptsDocument(input: AttemptsInput): string | null {
 
   // The cut order, after the older attempts: the diagnosis, what came back,
   // the newest attempt's refusals, then its changed paths trimmed.
-  const budget = ATTEMPTS_DOCUMENT_CHARS - size(closing);
+  const budget = ATTEMPTS_DOCUMENT_CHARS;
   const over = (): boolean => size(last) + size(tail) > budget;
   let tail = [...back, ...diagnosis];
   if (over()) tail = back;
@@ -231,7 +224,7 @@ export function attemptsDocument(input: AttemptsInput): string | null {
     }
     kept.push('…');
   }
-  return [...kept, ...last, ...tail, ...closing].join('\n');
+  return [...kept, ...last, ...tail].join('\n');
 }
 
 interface EventRow {
