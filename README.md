@@ -202,12 +202,15 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.13: a failed task says why, and the launcher can be stopped. A
+Version 0.4.14: a wider Backlog panel, tasks beside the request's analysis,
+and a task row whose model select stays on its row; only refused edits are
+counted as refused edits. One package: `broapp-autoapp` 0.3.13. Before it,
+0.4.13: a failed task says why, and the launcher can be stopped. A
 task whose builds were refused names the tool, the count and the error, to
 the person, the advice and the next attempt; a turn that ends with unbuilt
 edits is built once by the host; `broapp-autoapp stop` and `status`, a
 **Quit** in the panel, and children that exit when their launcher is gone.
-One package: `broapp-autoapp` 0.3.12; `broapp` stays at 0.4.3,
+`broapp` stays at 0.4.3,
 `broapp-ai-elements` at 0.4.6, the providers and `create-broapp` at 0.4.1.
 Earlier: 0.4.12, a backlog. The engineer restates a request, checks it against
 the application's real routes and pages, and splits it into tasks a person
