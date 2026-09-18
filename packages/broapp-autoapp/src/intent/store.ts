@@ -17,7 +17,16 @@ import { join } from 'node:path';
 
 import { publicError } from 'broapp/host';
 
-import { makeSlug, referenceProblems, slugWords, validateGraph, validateTask, type GraphTask } from './plan.ts';
+import {
+  ambiguousReference,
+  makeSlug,
+  referenceProblems,
+  resolveReference,
+  slugWords,
+  validateGraph,
+  validateTask,
+  type GraphTask,
+} from './plan.ts';
 import { tierOf } from './tier.ts';
 import {
   isAllowedMove,
@@ -144,14 +153,35 @@ export interface IntentStore {
   submit(intentId: number): PlanProblem[];
   /** An application's intents that are not finished — `draft`, `running`, `stopped` — newest first. */
   live(appId: string): IntentRecord[];
-  /** The one way a task's status changes. */
-  moveTask(taskId: number, to: StoredTaskStatus, note: string): TaskRecord;
+  /**
+   * The one way a task's status changes. Moving to `in-progress` counts an
+   * attempt and records `runId` among the task's runs.
+   */
+  moveTask(taskId: number, to: StoredTaskStatus, note: string, runId?: string): TaskRecord;
   /** A task's own model, or `null` for its tier's. */
   setModel(taskId: number, modelId: string | null): TaskRecord;
   /** Remove a task nothing live depends on. */
   removeTask(taskId: number, note?: string): TaskRecord;
   /** Withdraw a draft or stopped intent; every task not completed is removed. */
   withdraw(intentId: number): IntentRecord;
+  /**
+   * Say where a run of an intent stands: `running` from a submitted draft or a
+   * stopped intent, `stopped` with a reason or `done` from `running`.
+   */
+  setRun(intentId: number, status: 'running' | 'stopped' | 'done', reason?: string): IntentRecord;
+  /** Write what an attempt left: revisions, release, lines, and which criteria passed. */
+  recordResult(taskId: number, result: TaskResult): TaskRecord;
+  /** A failed task's reasons, or `null` to clear them. */
+  setFailure(taskId: number, failure: unknown): TaskRecord;
+  /** The main model's advice on a failed task, or `null` to clear it. */
+  setAdvice(taskId: number, advice: unknown): TaskRecord;
+  /** A builder's question: an `in-progress` task becomes `needs-answer`. */
+  ask(taskId: number, question: string, note: string): TaskRecord;
+  /**
+   * A person's answer, kept with the question it answers. A `needs-answer`
+   * task goes back to the queue; a failed one keeps its status.
+   */
+  answer(taskId: number, answer: string, by: string): TaskRecord;
   get(intentId: number): IntentDetail | null;
   task(taskId: number): TaskRecord | null;
   list(filter?: { readonly appId?: string; readonly limit?: number }): IntentSummary[];
@@ -159,6 +189,19 @@ export interface IntentStore {
   runOrder(intentId: number): TaskRecord[];
   close(): void;
 }
+
+/** What {@link IntentStore.recordResult} writes. Every field is optional. */
+export interface TaskResult {
+  readonly revBefore?: string | null;
+  readonly revAfter?: string | null;
+  readonly releaseId?: string | null;
+  readonly actualLines?: number | null;
+  /** Criterion ids whose example passed; the others are marked not passed. */
+  readonly passed?: readonly string[];
+}
+
+/** Why a run that was going when the launcher stopped is not going now. */
+export const LAUNCHER_STOPPED = 'The launcher stopped.';
 
 /** How a plan written one task at a time is checked as it is written. */
 export interface PlanOptions {
@@ -170,6 +213,13 @@ export interface PlanOptions {
 export interface OpenIntentsOptions {
   /** The clock rows are stamped with. Tests move it. */
   readonly now?: () => number;
+  /**
+   * Interrupt what a stopped launcher left in progress, and stop what it left
+   * running. Only the launcher that runs backlogs passes it: `serve <appId>`
+   * and the one-shot commands open this store beside a launcher that may be
+   * running one, and must not stop it.
+   */
+  readonly recover?: boolean;
 }
 
 interface IntentRow {
@@ -287,6 +337,27 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
       db.exec(`PRAGMA user_version = ${String(index + 1)}`);
     })();
   }
+
+  // A run does not survive the launcher that ran it. Whatever was in progress when it
+  // stopped may have left half a change, and a person decides what happens to
+  // an outcome nobody saw, so nothing resumes by itself: the task is
+  // interrupted and the intent stopped, with the reason, before anything reads
+  // them. The attempt is given back, because it was not the builder's failure.
+  if (options.recover === true) db.transaction(() => {
+    const at = now();
+    for (const row of db.query<{ id: number }, []>("SELECT id FROM tasks WHERE status = 'in-progress'").all()) {
+      db.query<null, [number, number]>(
+        "UPDATE tasks SET status = 'interrupted', ended_at = ?, attempts = MAX(attempts - 1, 0) WHERE id = ?",
+      ).run(at, row.id);
+      db.query<null, [number, number, string]>(
+        "INSERT INTO task_events (task_id, at, from_status, to_status, note) VALUES (?, ?, 'in-progress', 'interrupted', ?)",
+      ).run(row.id, at, 'the launcher stopped');
+    }
+    db.query<null, [number, string]>("UPDATE intents SET status = 'stopped', ended_at = ?, stop_reason = ? WHERE status = 'running'").run(
+      at,
+      LAUNCHER_STOPPED,
+    );
+  })();
 
   const intentRow = (id: number): IntentRow | null =>
     db.query<IntentRow, [number]>('SELECT * FROM intents WHERE id = ?').get(id);
@@ -428,31 +499,77 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
     'summary', 'criteria', 'no_failure_path', 'non_functional', 'test_notes', 'runbook', 'reasoning', 'tier', 'tier_reasons',
   ] as const;
 
-  /** What is wrong with a task's plan, or with its place in the graph. */
-  function problemsOf(
+  /**
+   * A plan with its references resolved to whole slugs, where they can be.
+   *
+   * A reference to a task's words becomes that task's slug among the intent's
+   * live tasks; one that matches nothing is left as it was, for the validator
+   * to refuse or for {@link IntentStore.submit} to resolve once the task
+   * exists. The task's own slug is among the candidates, so naming itself by
+   * its words is refused as naming itself.
+   */
+  function resolveInput(
     input: TaskInput,
     row: { slug: string; intentId: number; id: number | null },
     appId: string,
-    options: PlanOptions,
-  ): PlanProblem[] {
-    const others = appTasks(appId).filter((task) => task.id !== row.id);
-    const problems = validateTask(
-      input,
-      others.map((task) => ({ slug: task.slug, stored: task.status })),
-      row.id === null ? undefined : row.slug,
-      options,
-    );
-    if (problems.length > 0) return problems;
-    return validateGraph([
-      ...graphOf(others),
-      { slug: row.slug, intentId: row.intentId, blockedBy: input.blockedBy, stored: 'proposed' },
-    ]);
+  ): { input: TaskInput; problems: PlanProblem[] } {
+    const all = appTasks(appId);
+    const known = new Set(all.filter((task) => task.status !== 'removed').map((task) => task.slug));
+    known.add(row.slug);
+    const candidates = [
+      ...all.filter((task) => task.intent_id === row.intentId && task.status !== 'removed' && task.id !== row.id),
+      { slug: row.slug },
+    ];
+    const problems: PlanProblem[] = [];
+    const one = (field: string, reference: string): string => {
+      const resolved = resolveReference(reference, candidates, known);
+      if ('slug' in resolved) return resolved.slug;
+      if ('ambiguous' in resolved) problems.push(ambiguousReference(field, reference, resolved.ambiguous));
+      return reference;
+    };
+    return {
+      input: {
+        ...input,
+        blockedBy: input.blockedBy.map((reference) => one('blocked_by', reference)),
+        ...(input.repaidBy === undefined ? {} : { repaidBy: one('repaid_by', input.repaidBy) }),
+      },
+      problems,
+    };
   }
 
-  /** Refuse a task whose plan or whose place in the graph is wrong. */
-  function check(input: TaskInput, row: { slug: string; intentId: number; id: number | null }, appId: string, options: PlanOptions): void {
-    const problems = problemsOf(input, row, appId, options);
+  /** What is wrong with a task's plan, or with its place in the graph, and the plan as it would be stored. */
+  function problemsOf(
+    sent: TaskInput,
+    row: { slug: string; intentId: number; id: number | null },
+    appId: string,
+    options: PlanOptions,
+  ): { input: TaskInput; problems: PlanProblem[] } {
+    const { input, problems: references } = resolveInput(sent, row, appId);
+    const others = appTasks(appId).filter((task) => task.id !== row.id);
+    const problems = [
+      ...references,
+      ...validateTask(
+        input,
+        others.map((task) => ({ slug: task.slug, stored: task.status })),
+        row.id === null ? undefined : row.slug,
+        options,
+      ),
+    ];
+    if (problems.length > 0) return { input, problems };
+    return {
+      input,
+      problems: validateGraph([
+        ...graphOf(others),
+        { slug: row.slug, intentId: row.intentId, blockedBy: input.blockedBy, stored: 'proposed' },
+      ]),
+    };
+  }
+
+  /** Refuse a task whose plan or whose place in the graph is wrong; the plan as it is stored. */
+  function check(sent: TaskInput, row: { slug: string; intentId: number; id: number | null }, appId: string, options: PlanOptions): TaskInput {
+    const { input, problems } = problemsOf(sent, row, appId, options);
     if (problems.length > 0) invalid(problems);
+    return input;
   }
 
   /** The slug the next task of an application would get. */
@@ -478,13 +595,34 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
     ).run(taskId, now(), from, to, note);
   }
 
-  function move(taskId: number, to: StoredTaskStatus, note: string): void {
+  /**
+   * Change a status, stamp what the move means, and append the event.
+   *
+   * The stamps are here, in the same transaction, so nothing else writes them:
+   * starting counts an attempt and names its run; finishing, failing, being
+   * interrupted or stopping to ask sets when it ended. An interruption and a
+   * question take the attempt back, because neither was the builder's failure.
+   */
+  function move(taskId: number, to: StoredTaskStatus, note: string, runId?: string): void {
     const row = taskRow(taskId);
     if (row === null) throw publicError.notFound(`There is no task ${String(taskId)}.`);
     if (!isAllowedMove(row.status, to)) {
       throw publicError.conflict(`${row.slug} cannot move from ${row.status} to ${to}.`);
     }
     db.query<null, [StoredTaskStatus, number]>('UPDATE tasks SET status = ? WHERE id = ?').run(to, taskId);
+    if (to === 'in-progress') {
+      const runs = runId === undefined ? strings(row.run_ids) : [...strings(row.run_ids), runId];
+      db.query<null, [number, string, number]>(
+        'UPDATE tasks SET started_at = ?, ended_at = NULL, attempts = attempts + 1, run_ids = ? WHERE id = ?',
+      ).run(now(), JSON.stringify(runs), taskId);
+    } else if (to === 'completed' || to === 'failed') {
+      db.query<null, [number, number]>('UPDATE tasks SET ended_at = ? WHERE id = ?').run(now(), taskId);
+    } else if (row.status === 'in-progress' && (to === 'interrupted' || to === 'needs-answer')) {
+      db.query<null, [number, number]>('UPDATE tasks SET ended_at = ?, attempts = MAX(attempts - 1, 0) WHERE id = ?').run(
+        now(),
+        taskId,
+      );
+    }
     appendEvent(taskId, row.status, to, note);
   }
 
@@ -575,11 +713,11 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
     planProblems(intentId, input, replaces) {
       const intent = readIntent(intentId);
       if (replaces === undefined) {
-        return problemsOf(input, { slug: nextSlug(intent.appId, input), intentId, id: null }, intent.appId, { deferReferences: true });
+        return problemsOf(input, { slug: nextSlug(intent.appId, input), intentId, id: null }, intent.appId, { deferReferences: true }).problems;
       }
       const row = taskRow(replaces);
       if (row === null) throw publicError.notFound(`There is no task ${String(replaces)}.`);
-      return problemsOf(input, { slug: row.slug, intentId: row.intent_id, id: row.id }, row.app_id, { deferReferences: true });
+      return problemsOf(input, { slug: row.slug, intentId: row.intent_id, id: row.id }, row.app_id, { deferReferences: true }).problems;
     },
 
     addTask(intentId, input, options = {}) {
@@ -590,7 +728,7 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
         }
         // The next free number for the application, across all its intents.
         const slug = nextSlug(intent.appId, input);
-        check(input, { slug, intentId, id: null }, intent.appId, options);
+        const plan = check(input, { slug, intentId, id: null }, intent.appId, options);
         const seq =
           (db.query<{ n: number | null }, [number]>('SELECT MAX(seq) AS n FROM tasks WHERE intent_id = ?').get(intentId)?.n ?? 0) + 1;
         const columns = ['intent_id', 'app_id', 'seq', 'slug', ...PLAN_COLUMNS, 'status'];
@@ -598,7 +736,7 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
           .query<{ id: number }, (string | number | null)[]>(
             `INSERT INTO tasks (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')}) RETURNING id`,
           )
-          .get(intentId, intent.appId, seq, slug, ...planColumns(input), 'proposed')?.id;
+          .get(intentId, intent.appId, seq, slug, ...planColumns(plan), 'proposed')?.id;
         if (id === undefined) throw new Error('the task was not written');
         appendEvent(id, null, 'proposed', 'planned');
         unsubmit(intentId);
@@ -610,13 +748,24 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
       return db.transaction(() => {
         const row = taskRow(taskId);
         if (row === null) throw publicError.notFound(`There is no task ${String(taskId)}.`);
-        if (row.status !== 'proposed') {
-          throw publicError.conflict(`${row.slug} is ${row.status}; a plan is replaced only while it is proposed.`);
+        // A task that failed in a run that stopped may be revised too: that is
+        // the other way on from a stop, beside running it again. It goes back
+        // to `proposed`, so the person sees a new plan before it runs.
+        const revising = row.status === 'failed' && intentRow(row.intent_id)?.status === 'stopped';
+        if (row.status !== 'proposed' && !revising) {
+          throw publicError.conflict(
+            `${row.slug} is ${row.status}; a plan is replaced only while it is proposed, or after it failed in a run that stopped.`,
+          );
         }
-        check(input, { slug: row.slug, intentId: row.intent_id, id: row.id }, row.app_id, options);
+        const plan = check(input, { slug: row.slug, intentId: row.intent_id, id: row.id }, row.app_id, options);
         db.query<null, (string | number | null)[]>(
           `UPDATE tasks SET ${PLAN_COLUMNS.map((column) => `${column} = ?`).join(', ')} WHERE id = ?`,
-        ).run(...planColumns(input), taskId);
+        ).run(...planColumns(plan), taskId);
+        if (revising) {
+          // A new plan: the advice was about the old one.
+          db.query<null, [number]>('UPDATE tasks SET advice = NULL, failure = NULL WHERE id = ?').run(taskId);
+          move(taskId, 'proposed', 'the plan was revised after it failed');
+        }
         unsubmit(row.intent_id);
         return readTask(taskId);
       })();
@@ -628,12 +777,37 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
         if (intent.status !== 'draft') {
           throw publicError.conflict(`Intent ${String(intentId)} is ${intent.status}; only a draft is submitted.`);
         }
-        const all = appTasks(intent.appId);
-        const own = all.filter((row) => row.intent_id === intentId && row.status !== 'removed');
-        if (own.length === 0) {
+        const before = appTasks(intent.appId);
+        const mine = before.filter((row) => row.intent_id === intentId && row.status !== 'removed');
+        if (mine.length === 0) {
           return [{ field: 'tasks', message: `Intent ${String(intentId)} has no tasks. Add each part with intent.task first.` }];
         }
+        // Every task now exists, so a reference to one by its words resolves;
+        // what is stored from here on is the whole slug.
+        const known = new Set(before.filter((row) => row.status !== 'removed').map((row) => row.slug));
+        const ambiguous: PlanProblem[] = [];
+        for (const row of mine) {
+          const one = (field: string, reference: string): string => {
+            const resolved = resolveReference(reference, mine, known);
+            if ('slug' in resolved) return resolved.slug;
+            if ('ambiguous' in resolved) {
+              const problem = ambiguousReference(field, reference, resolved.ambiguous);
+              ambiguous.push({ field, message: `${row.slug}: ${problem.message}` });
+            }
+            return reference;
+          };
+          const blockedBy = strings(row.blocked_by).map((reference) => one('blocked_by', reference));
+          const repaidBy = row.repaid_by === null ? null : one('repaid_by', row.repaid_by);
+          db.query<null, [string, string | null, number]>('UPDATE tasks SET blocked_by = ?, repaid_by = ? WHERE id = ?').run(
+            JSON.stringify(blockedBy),
+            repaidBy,
+            row.id,
+          );
+        }
+        const all = appTasks(intent.appId);
+        const own = all.filter((row) => row.intent_id === intentId && row.status !== 'removed');
         const problems = [
+          ...ambiguous,
           ...referenceProblems(
             own.map((row) => ({ slug: row.slug, blockedBy: strings(row.blocked_by), repaidBy: row.repaid_by, stored: row.status })),
             all.map((row) => ({ slug: row.slug, stored: row.status })),
@@ -655,9 +829,9 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
         .map(toIntent);
     },
 
-    moveTask(taskId, to, note) {
+    moveTask(taskId, to, note, runId) {
       return db.transaction(() => {
-        move(taskId, to, note);
+        move(taskId, to, note, runId);
         return readTask(taskId);
       })();
     },
@@ -715,6 +889,94 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
         for (const row of going) move(row.id, 'removed', 'the intent was withdrawn');
         db.query<null, [number, number]>("UPDATE intents SET status = 'withdrawn', ended_at = ? WHERE id = ?").run(now(), intentId);
         return readIntent(intentId);
+      })();
+    },
+
+    setRun(intentId, status, reason) {
+      return db.transaction(() => {
+        const intent = readIntent(intentId);
+        const from: readonly IntentStatus[] = status === 'running' ? ['draft', 'stopped'] : ['running'];
+        if (!from.includes(intent.status)) {
+          throw publicError.conflict(`Intent ${String(intentId)} is ${intent.status}; it cannot become ${status}.`);
+        }
+        if (status === 'running') {
+          db.query<null, [number, number]>(
+            "UPDATE intents SET status = 'running', started_at = ?, ended_at = NULL, stop_reason = NULL WHERE id = ?",
+          ).run(now(), intentId);
+        } else {
+          db.query<null, [IntentStatus, number, string | null, number]>(
+            'UPDATE intents SET status = ?, ended_at = ?, stop_reason = ? WHERE id = ?',
+          ).run(status, now(), status === 'stopped' ? (reason ?? null) : null, intentId);
+        }
+        return readIntent(intentId);
+      })();
+    },
+
+    recordResult(taskId, result) {
+      return db.transaction(() => {
+        const row = taskRow(taskId);
+        if (row === null) throw publicError.notFound(`There is no task ${String(taskId)}.`);
+        const set = (column: string, value: string | number | null): void => {
+          db.query<null, [string | number | null, number]>(`UPDATE tasks SET ${column} = ? WHERE id = ?`).run(value, taskId);
+        };
+        if (result.revBefore !== undefined) set('rev_before', result.revBefore);
+        if (result.revAfter !== undefined) set('rev_after', result.revAfter);
+        if (result.releaseId !== undefined) set('release_id', result.releaseId);
+        if (result.actualLines !== undefined) set('actual_lines', result.actualLines);
+        if (result.passed !== undefined) {
+          const passed = new Set(result.passed);
+          const criteria = parsed<Criterion[]>(row.criteria, []).map((criterion) => ({ ...criterion, passed: passed.has(criterion.id) }));
+          set('criteria', JSON.stringify(criteria));
+        }
+        return readTask(taskId);
+      })();
+    },
+
+    setFailure(taskId, failure) {
+      readTask(taskId);
+      db.query<null, [string | null, number]>('UPDATE tasks SET failure = ? WHERE id = ?').run(
+        failure === null ? null : JSON.stringify(failure),
+        taskId,
+      );
+      return readTask(taskId);
+    },
+
+    setAdvice(taskId, advice) {
+      readTask(taskId);
+      db.query<null, [string | null, number]>('UPDATE tasks SET advice = ? WHERE id = ?').run(
+        advice === null ? null : JSON.stringify(advice),
+        taskId,
+      );
+      return readTask(taskId);
+    },
+
+    ask(taskId, question, note) {
+      return db.transaction(() => {
+        move(taskId, 'needs-answer', note);
+        db.query<null, [string, number]>('UPDATE tasks SET question = ? WHERE id = ?').run(question, taskId);
+        return readTask(taskId);
+      })();
+    },
+
+    answer(taskId, answer, by) {
+      return db.transaction(() => {
+        const task = readTask(taskId);
+        let question = task.question;
+        if (question === null && task.stored === 'failed') {
+          // What a failed task's advice asked the person, when it asked anything.
+          const advice = task.advice as { note?: unknown } | null;
+          question = typeof advice?.note === 'string' ? advice.note : 'What should happen to this task?';
+        }
+        if (question === null) {
+          throw publicError.conflict(`${task.slug} is not waiting for an answer.`);
+        }
+        if (task.stored !== 'needs-answer' && task.stored !== 'failed') {
+          throw publicError.conflict(`${task.slug} is ${task.stored}; only a task that asked, or one that failed, is answered.`);
+        }
+        const answers = [...task.answers, { question, answer, at: now() }];
+        db.query<null, [string, number]>('UPDATE tasks SET answers = ?, question = NULL WHERE id = ?').run(JSON.stringify(answers), taskId);
+        if (task.stored === 'needs-answer') move(taskId, 'in-queue', `answered by ${by}`);
+        return readTask(taskId);
       })();
     },
 

@@ -36,3 +36,9 @@ engineer turn with what it was given and what became of each lesson served,
 the lessons with their provenance, and the cases; a person confirms, retires,
 writes or replaces a lesson there, writing the same rows `broapp-autoapp
 knowledge confirm|retire` write. See [what the launcher remembers](../../docs/autoapp/learning.md).
+
+The **Backlog** panel runs a plan the engineer wrote: each task is its own
+engineer turn on the model its tier names, and a task counts as done only when a
+build passes an example for every criterion; nothing is activated. While a run
+goes it approves that application's edits, builds and previews for you and puts
+every other question to you. See [the backlog](../../docs/autoapp/intents.md).

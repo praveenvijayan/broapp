@@ -203,7 +203,7 @@ The engineer's three planning tools, `intent.open`, `intent.task` and
 `intent.submit`, are `read`, so the gate asks nobody about them. A draft is the
 engineer's proposal written down, as a transcript is: it changes no application
 and no release, and nothing acts on it. It leaves `draft` only when a person on
-channel `user` moves it, or when a tool that asks the person does (13c). The
+channel `user` moves it, or when `intent.start`, which asks the person, does. The
 three tools refuse with `conflict` once the intent is anything else.
 
 What the classification rests on is that no draft row can cause an effect
@@ -214,6 +214,48 @@ the plan before any of it is built. The request stored is the message the tab
 saw the person type, never the model's paraphrase, and whether the analysis
 names anything the application has is checked by the host against the release
 that is serving.
+
+## A run answers for the person
+
+Running a backlog (`intent.start` in the chat, **Run** in the panel) is agreeing
+to one thing, and both places say it before anything starts: until the run
+finishes or is stopped, edits, builds and previews of its application are
+approved without asking; anything else is put to the person in the Backlog
+panel and waits; activation is never approved this way.
+
+- **What it approves itself.** The run's standing answer covers `source.edit`,
+  `source.change`, `candidate.cycle`, `candidate.build`, `candidate.preview` and
+  `preview.stop`, and only when the call names the run's own application. It is
+  not a grant: `launcher.grants*` means capabilities, and nothing here changes
+  what an application may do.
+- **What it brings to the person.** Every other question — another tool that
+  asks, an `external` tool, a listed tool naming a different application — is
+  left in the approval table and shown at the top of the Backlog panel with
+  **Approve** and **Deny**, which answer through the same `ai.chatConfirm` a chat's
+  card uses. The turn waits. If the gate's window (ten minutes) passes
+  unanswered, the run stops and the task is interrupted without costing an
+  attempt.
+- **What a builder can never do.** `release.activate` and `apps.create` are
+  refused outright and never forwarded. Activation stays a person's click on a
+  candidate they have looked at. A builder also may not plan, change the
+  backlog, or start a run: the planning tools and `intent.start` refuse any turn
+  whose run id starts `intent-`.
+- **Every answer is still asked and recorded.** The gate asks every question
+  and consumes each answer once, bound to its arguments, exactly as for a
+  person. The core change behind this is small: an in-process turn's stand-in
+  may answer `'defer'`, which leaves the question for somebody else, so no
+  question is ever answered twice. The gate's record shows the caller as
+  `ai:intent-<intentId>-<slug>-a<n>`, which names the intent and the task; it has
+  no field for who answered, so the launcher's log carries one `log` event per
+  answer: "the run's standing answer approved …", "the run refused …", or "the
+  run put … to the person".
+- **The code it builds is trusted local code**, as every candidate is: it runs
+  on this machine with the application's permissions, and its preview uses a
+  copy of the data. Nothing about a run contains it further.
+
+While a run works on an application, tools that write to it from any other
+turn, and `launcher.activate`, are refused with `conflict`, so two hands never
+edit one workspace.
 
 ## What is recorded
 

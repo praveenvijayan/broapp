@@ -4,12 +4,14 @@
  * Each request a person made, what the engineer understood it to be, and the
  * tasks it was split into, in the order they would run. A person can choose
  * the model a task runs on, remove a task nothing depends on, withdraw a
- * request that is not running, and choose a model for each tier. Nothing here
- * runs anything, and nothing here edits a task's text: a plan is the engineer's
- * to write and the person's to accept or remove.
+ * request that is not running, choose a model for each tier, and run a
+ * reviewed backlog or stop it. Nothing here edits a task's text: a plan is the
+ * engineer's to write and the person's to accept or remove.
  *
- * Like the Knowledge panel it refreshes when it opens and when Refresh is
- * pressed, never on a timer, so a row does not move while somebody reads it.
+ * It reads when it opens and when Refresh is pressed, and every two seconds
+ * only while something is moving: a chat turn is running, the open request is
+ * still being written, or a run is going. Otherwise a row does not move while
+ * somebody reads it.
  *
  * The drawing is split from the reading. The components that draw take rows
  * and callbacks; the live panel fetches the rows. A test draws the same
@@ -18,8 +20,9 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useAiModels } from 'broapp/ai/react';
-import type { AiModelsHook } from 'broapp/ai/react';
+import type { AiContract, AiModelsHook } from 'broapp/ai/react';
 import { useOperation } from 'broapp/react';
+import { countdown, isUrgent } from 'broapp/shared';
 import type { OperationOutput } from 'broapp/shared';
 
 import type { LauncherContract } from '../contract.ts';
@@ -29,6 +32,8 @@ type IntentDetail = OperationOutput<LauncherContract, 'launcher.intentGet'>;
 type Task = IntentDetail['tasks'][number];
 type TierModels = OperationOutput<LauncherContract, 'launcher.intentModelsGet'>;
 type Model = AiModelsHook['models'][number];
+type Run = NonNullable<IntentDetail['run']>;
+type Question = NonNullable<Run['question']>;
 
 /** What the panel says with no application selected. */
 export const BACKLOG_NO_APP = 'Choose an application to see its backlog.';
@@ -40,6 +45,25 @@ export const BEING_WRITTEN = 'Being written';
 export const NEEDS_ANSWERS = 'The engineer needs answers';
 /** Where those answers go. */
 export const ANSWER_IN_CHAT = 'Answer in the chat. The engineer folds your answers into the plan and carries on from there.';
+/**
+ * What starting a run agrees to, asked before Run does anything.
+ *
+ * The engineer's `intent.start` says the same in its description, which is
+ * what the chat's question shows; a test holds the two equal, because the page
+ * cannot import host code.
+ */
+export const RUN_CONFIRMATION =
+  'Until it finishes or is stopped, edits, builds and previews for its application are approved without asking. Anything else is put to you in the Backlog panel and waits. Activation is never approved this way.';
+/** What a finished backlog says. The executor's `RUN_FINISHED`; a test holds them equal. */
+export const RUN_DONE =
+  'All tasks are built and checked in the candidate. Open the preview, look, then activate from the Candidate panel.';
+/** Under a failed task's reasons and advice. */
+export const FAILED_NEXT = 'Run again to retry, or ask the engineer to revise this task.';
+/** The heading over the runbook lines of a finished backlog. */
+export const BY_HAND = 'For you to check by hand';
+/** Over a question the run brought to the person. */
+export const RUN_ASKS = 'The run needs your answer before it goes on';
+
 /** What it says under a model select when the provider's list could not be read. */
 export const MODELS_UNREADABLE = 'The model list could not be read, so only the current choice is shown.';
 
@@ -200,8 +224,121 @@ export function TierModelsBlock({ value, models, unreadable, error, onChange }: 
   );
 }
 
+/** A text box and Answer: a builder's question, or the advice that asks the person. */
+export function AnswerBox({ label, onAnswer }: { label: string; onAnswer(answer: string): void }): React.ReactElement {
+  const [text, setText] = useState('');
+  const answer = text.trim();
+  return (
+    <div className="launcher__intent-answer">
+      <textarea
+        aria-label={label}
+        className="launcher__input launcher__intent-answer-text"
+        maxLength={1_000}
+        onChange={(event) => setText(event.target.value)}
+        rows={2}
+        value={text}
+      />
+      <button
+        className="launcher__button launcher__button--small"
+        disabled={answer === ''}
+        onClick={() => {
+          onAnswer(answer);
+          setText('');
+        }}
+        type="button"
+      >
+        Answer
+      </button>
+    </div>
+  );
+}
+
+/** The reasons a failed task gave, as stored. */
+function reasonsOf(failure: unknown): readonly string[] {
+  const reasons = (failure as { reasons?: unknown } | null)?.reasons;
+  return Array.isArray(reasons) ? reasons.filter((reason): reason is string => typeof reason === 'string') : [];
+}
+
+/** The main model's advice on a failed task, when it gave any. */
+function adviceOf(advice: unknown): { diagnosis: string; advice: string; note: string } | null {
+  const value = advice as { diagnosis?: unknown; advice?: unknown; note?: unknown } | null;
+  if (typeof value?.diagnosis !== 'string' || typeof value.advice !== 'string' || typeof value.note !== 'string') return null;
+  return { diagnosis: value.diagnosis, advice: value.advice, note: value.note };
+}
+
+/** How long ago, in words a person reads at a glance. */
+function ago(at: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - at) / 1_000));
+  return seconds < 60 ? `${String(seconds)}s ago` : `${String(Math.round(seconds / 60))} min ago`;
+}
+
+/** What the run says about one task, under its row: never hidden behind a click. */
+function TaskState({
+  task,
+  run,
+  onAnswer,
+}: {
+  task: Task;
+  run: Run | null;
+  onAnswer?: ((answer: string) => void) | undefined;
+}): React.ReactElement | null {
+  if (task.stored === 'in-progress' && run !== null && run.taskId === task.id) {
+    return (
+      <p className="launcher__intent-note launcher__intent-state">
+        {`Working, turn ${String(run.attempt)}: `}
+        {run.lastTool === null || run.lastToolAt === null ? 'starting' : `${run.lastTool}, ${ago(run.lastToolAt, Date.now())}`}
+        {run.approvals > 0 ? ` · ${String(run.approvals)} approvals` : ''}
+      </p>
+    );
+  }
+  if (task.stored === 'completed') {
+    return (
+      <p className="launcher__intent-note launcher__intent-state">
+        {`Estimated ${String(task.estimatedLines)} lines, changed ${task.actualLines === null ? 'an unknown number' : String(task.actualLines)}.`}
+      </p>
+    );
+  }
+  if (task.stored === 'needs-answer' && task.question !== null) {
+    return (
+      <div className="launcher__intent-ask">
+        <p className="launcher__k-quote">{task.question}</p>
+        {onAnswer === undefined ? null : <AnswerBox label={`Answer for ${task.slug}`} onAnswer={onAnswer} />}
+      </div>
+    );
+  }
+  if (task.stored === 'failed') {
+    const reasons = reasonsOf(task.failure);
+    const advice = adviceOf(task.advice);
+    return (
+      <div className="launcher__intent-failure">
+        {reasons.length === 0 ? null : (
+          <ul className="launcher__list">
+            {reasons.map((reason, index) => (
+              <li key={`${String(index)}-${reason.slice(0, 20)}`}>{reason}</li>
+            ))}
+          </ul>
+        )}
+        {advice === null ? null : (
+          <p className="launcher__intent-advice">
+            <strong>{`Advice: ${advice.advice}.`}</strong> {advice.diagnosis} {advice.note}
+          </p>
+        )}
+        <p className="launcher__lede">{FAILED_NEXT}</p>
+        {advice?.advice === 'ask' && onAnswer !== undefined ? (
+          <AnswerBox label={`Answer about ${task.slug}`} onAnswer={onAnswer} />
+        ) : null}
+      </div>
+    );
+  }
+  return null;
+}
+
 export interface TaskRowProps {
   readonly task: Task;
+  /** Where the run is, when one is going. */
+  readonly run?: Run | null;
+  /** Answer the task's question, or the advice that asks. */
+  onAnswer?(answer: string): void;
   readonly tierModel: string | null;
   readonly models: readonly Model[];
   readonly unreadable: boolean;
@@ -213,7 +350,18 @@ export interface TaskRowProps {
 }
 
 /** One task: slug, title, priority, tier, model, status, and what it waits on. */
-export function TaskRow({ task, tierModel, models, unreadable, open, onToggle, onModel, children }: TaskRowProps): React.ReactElement {
+export function TaskRow({
+  task,
+  run = null,
+  onAnswer,
+  tierModel,
+  models,
+  unreadable,
+  open,
+  onToggle,
+  onModel,
+  children,
+}: TaskRowProps): React.ReactElement {
   return (
     <li className="launcher__log-row launcher__intent-task">
       <div className="launcher__intent-line">
@@ -239,6 +387,7 @@ export function TaskRow({ task, tierModel, models, unreadable, open, onToggle, o
           value={task.modelOverride}
         />
       </div>
+      <TaskState onAnswer={onAnswer} run={run} task={task} />
       {open ? children : null}
     </li>
   );
@@ -325,8 +474,88 @@ function Block({ title, items }: { title: string; items: readonly string[] }): R
   );
 }
 
+/** A question the run brought to the person: what would run, how long is left, and the two answers. */
+export function RunQuestionView({
+  question,
+  onAnswer,
+}: {
+  question: Question;
+  onAnswer(approve: boolean): void;
+}): React.ReactElement {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, []);
+  const urgent = isUrgent(question.expiresAt, now);
+  return (
+    <section aria-label={RUN_ASKS} className="launcher__intent-questions" role="alert">
+      <h3 className="launcher__k-heading">{RUN_ASKS}</h3>
+      <p className="launcher__lede">
+        {`A builder wants to run ${question.tool}. The run does not answer this one for you.`}
+      </p>
+      <pre className="launcher__log-data">{JSON.stringify(question.input, null, 2)}</pre>
+      <div className="launcher__row-actions">
+        <button className="launcher__button launcher__button--small" onClick={() => onAnswer(true)} type="button">
+          Approve
+        </button>
+        <button className="launcher__button launcher__button--small" onClick={() => onAnswer(false)} type="button">
+          Deny
+        </button>
+        <span className={urgent ? 'launcher__intent-urgent' : 'launcher__intent-note'}>
+          {`expires in ${countdown(question.expiresAt, now)}`}
+        </span>
+      </div>
+    </section>
+  );
+}
+
+/** An inline confirmation: the question, the act, and Cancel. */
+function Confirming({
+  label,
+  question,
+  onConfirm,
+}: {
+  label: string;
+  question: string;
+  onConfirm(): void;
+}): React.ReactElement {
+  const [asking, setAsking] = useState(false);
+  if (!asking) {
+    return (
+      <button className="launcher__button launcher__button--small" onClick={() => setAsking(true)} type="button">
+        {label}
+      </button>
+    );
+  }
+  return (
+    <div className="launcher__row-actions launcher__intent-confirm">
+      <span>{question}</span>
+      <button
+        className="launcher__button launcher__button--small"
+        onClick={() => {
+          setAsking(false);
+          onConfirm();
+        }}
+        type="button"
+      >
+        {label}
+      </button>
+      <button className="launcher__button launcher__button--small" onClick={() => setAsking(false)} type="button">
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 export interface IntentDetailViewProps {
   readonly detail: IntentDetail;
+  /** A refusal from Run, Stop or an answer, as a sentence. */
+  readonly runError?: string | null;
+  onRun?(): void;
+  onStop?(): void;
+  onAnswer?(taskId: number, answer: string): void;
+  onConfirm?(question: Question, approve: boolean): void;
   readonly tierModels: TierModels | null;
   readonly models: readonly Model[];
   readonly unreadable: boolean;
@@ -349,8 +578,16 @@ export function IntentDetailView({
   onWithdraw,
   onModel,
   renderTask,
+  runError = null,
+  onRun,
+  onStop,
+  onAnswer,
+  onConfirm,
 }: IntentDetailViewProps): React.ReactElement {
-  const { intent, tasks } = detail;
+  const { intent, tasks, run } = detail;
+  const runnable =
+    (intent.status === 'draft' && intent.submittedAt !== null && intent.questions.length === 0) || intent.status === 'stopped';
+  const byHand = intent.status === 'done' ? tasks.filter((task) => task.stored === 'completed' && task.runbook.length > 0) : [];
   const [asking, setAsking] = useState(false);
   const [openTask, setOpenTask] = useState<number | null>(null);
   const analysed =
@@ -375,6 +612,50 @@ export function IntentDetailView({
           <p className="launcher__lede">{ANSWER_IN_CHAT}</p>
         </section>
       ) : null}
+      {run?.question === null || run?.question === undefined ? null : (
+        <RunQuestionView onAnswer={(approve) => onConfirm?.(run.question as Question, approve)} question={run.question} />
+      )}
+      {intent.status === 'stopped' && intent.stopReason !== null ? (
+        <p className="launcher__message launcher__message--error" role="status">{`Stopped: ${intent.stopReason}`}</p>
+      ) : null}
+      {intent.status === 'done' ? (
+        <section aria-label="Finished" className="launcher__intent-done">
+          <p className="launcher__lede">{RUN_DONE}</p>
+          {byHand.length === 0 ? null : (
+            <>
+              <h3 className="launcher__k-heading">{BY_HAND}</h3>
+              <ul className="launcher__list">
+                {byHand.flatMap((task) =>
+                  task.runbook.map((line, index) => <li key={`${task.slug}-${String(index)}`}>{`${task.slug}: ${line}`}</li>),
+                )}
+              </ul>
+            </>
+          )}
+        </section>
+      ) : null}
+      {runnable && onRun !== undefined ? (
+        <div className="launcher__row-actions">
+          <Confirming
+            label="Run"
+            onConfirm={onRun}
+            question={`Start building this backlog for ${intent.appId}? ${RUN_CONFIRMATION}`}
+          />
+        </div>
+      ) : null}
+      {intent.status === 'running' && onStop !== undefined ? (
+        <div className="launcher__row-actions">
+          <Confirming
+            label="Stop"
+            onConfirm={onStop}
+            question="Stop this run? The task in hand is interrupted and the workspace is left as it is."
+          />
+        </div>
+      ) : null}
+      {runError === null ? null : (
+        <p className="launcher__message launcher__message--error" role="alert">
+          {runError}
+        </p>
+      )}
       <p className="launcher__k-quote">{intent.request}</p>
       {analysed ? (
         <dl className="launcher__k-fields">
@@ -440,6 +721,8 @@ export function IntentDetailView({
         {tasks.map((task) => (
           <TaskRow
             key={task.id}
+            run={run}
+            {...(onAnswer === undefined ? {} : { onAnswer: (answer: string) => onAnswer(task.id, answer) })}
             models={models}
             onModel={(modelId) => onModel(task.id, modelId)}
             onToggle={() => setOpenTask(openTask === task.id ? null : task.id)}
@@ -488,6 +771,11 @@ export interface BacklogSnapshot {
 export interface IntentPanelProps {
   /** The application whose backlog is shown; `null` when none is selected. */
   readonly appId: string | null;
+  /**
+   * Whether a chat turn is running. While it is, the list is read again every
+   * two seconds, because the engineer may be writing a backlog into it.
+   */
+  readonly turnActive?: boolean;
   onClose(): void;
   /** Draw only the frame and this sentence: a launcher's refusal. */
   readonly error?: string;
@@ -495,7 +783,7 @@ export interface IntentPanelProps {
   readonly snapshot?: BacklogSnapshot;
 }
 
-export function IntentPanel({ appId, onClose, error, snapshot }: IntentPanelProps): React.ReactElement {
+export function IntentPanel({ appId, onClose, error, snapshot, turnActive = false }: IntentPanelProps): React.ReactElement {
   if (error !== undefined) {
     return (
       <Frame onClose={onClose}>
@@ -541,12 +829,50 @@ export function IntentPanel({ appId, onClose, error, snapshot }: IntentPanelProp
       </Frame>
     );
   }
-  return <LiveIntentPanel appId={appId} onClose={onClose} />;
+  return <LiveIntentPanel appId={appId} onClose={onClose} turnActive={turnActive} />;
+}
+
+/**
+ * Whether the backlog is moving under somebody's eyes: a chat turn that may be
+ * writing it, the open request still being written, or a run going.
+ */
+export function shouldPoll(
+  turnActive: boolean,
+  intents: readonly Pick<IntentSummary, 'id' | 'status' | 'submittedAt'>[],
+  opened: number | null,
+): boolean {
+  if (turnActive) return true;
+  if (intents.some((intent) => intent.status === 'running')) return true;
+  const open = intents.find((intent) => intent.id === opened);
+  return open !== undefined && open.status === 'draft' && open.submittedAt === null;
+}
+
+/** How often the panel reads again while something is moving. */
+const POLL_MS = 2_000;
+
+/**
+ * Read again every two seconds while `moving`, and once more when it stops.
+ *
+ * One timer for the three reasons a backlog moves under somebody's eyes: a
+ * chat turn that may be writing it, a draft still being written, a run going.
+ * The launcher contract has no stream, and this prompt does not add the first.
+ */
+function usePolling(moving: boolean, tick: () => void): void {
+  const [was, setWas] = useState(moving);
+  useEffect(() => {
+    if (!moving) return undefined;
+    const timer = setInterval(tick, POLL_MS);
+    return () => clearInterval(timer);
+  }, [moving, tick]);
+  useEffect(() => {
+    if (was && !moving) tick();
+    if (was !== moving) setWas(moving);
+  }, [moving, was, tick]);
 }
 
 // ── Reading: the live panel ─────────────────────────────────────────────────
 
-function LiveIntentPanel({ appId, onClose }: { appId: string; onClose(): void }): React.ReactElement {
+function LiveIntentPanel({ appId, onClose, turnActive }: { appId: string; onClose(): void; turnActive: boolean }): React.ReactElement {
   const list = useOperation<LauncherContract, 'launcher.intentsList'>('launcher.intentsList');
   const tierGet = useOperation<LauncherContract, 'launcher.intentModelsGet'>('launcher.intentModelsGet');
   const tierSet = useOperation<LauncherContract, 'launcher.intentModelsSet'>('launcher.intentModelsSet');
@@ -566,6 +892,7 @@ function LiveIntentPanel({ appId, onClose }: { appId: string; onClose(): void })
   const refresh = useCallback(() => setReload((n) => n + 1), []);
   const intents = list.data?.intents ?? [];
   const tiers = tierSet.data ?? tierGet.data;
+  usePolling(shouldPoll(turnActive, intents, opened), refresh);
 
   return (
     <Frame onClose={onClose} onRefresh={refresh}>
@@ -628,6 +955,11 @@ function LiveIntentDetail({
   const detail = useOperation<LauncherContract, 'launcher.intentGet'>('launcher.intentGet');
   const withdraw = useOperation<LauncherContract, 'launcher.intentWithdraw'>('launcher.intentWithdraw');
   const setModel = useOperation<LauncherContract, 'launcher.intentTaskModel'>('launcher.intentTaskModel');
+  const start = useOperation<LauncherContract, 'launcher.intentRun'>('launcher.intentRun');
+  const stop = useOperation<LauncherContract, 'launcher.intentStop'>('launcher.intentStop');
+  const answer = useOperation<LauncherContract, 'launcher.intentAnswer'>('launcher.intentAnswer');
+  // The same approval table a chat's card answers: one question, one answer.
+  const confirm = useOperation<AiContract, 'ai.chatConfirm'>('ai.chatConfirm');
   const { run } = detail;
   useEffect(() => {
     void run({ id });
@@ -649,6 +981,13 @@ function LiveIntentDetail({
       onModel={(taskId, modelId) => void setModel.run({ taskId, modelId }).then(onChanged)}
       onWithdraw={() => void withdraw.run({ id }).then(onChanged)}
       renderTask={(task) => <LiveTaskDetail onChanged={onChanged} task={task} />}
+      onAnswer={(taskId, text) => void answer.run({ taskId, answer: text, by: 'the person' }).then(onChanged)}
+      onConfirm={(question, approve) =>
+        void confirm.run({ runId: question.runId, callId: question.callId, approve }).then(onChanged)
+      }
+      onRun={() => void start.run({ id }).then(onChanged)}
+      onStop={() => void stop.run({ id }).then(onChanged)}
+      runError={start.error?.message ?? stop.error?.message ?? answer.error?.message ?? confirm.error?.message ?? null}
       tierModels={tierModels}
       unreadable={unreadable}
       withdrawError={withdraw.error?.message ?? null}

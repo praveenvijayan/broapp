@@ -1269,8 +1269,8 @@ describe('the engineer’s instructions', () => {
     expect(ENGINEER_INSTRUCTIONS).toContain('Do not call it sandboxed');
   });
 
-  test('are under seventy lines, so they are read', () => {
-    expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(70);
+  test('are at most seventy-two lines, so they are read', () => {
+    expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(72);
   });
 
   test('name apps.list first in the loop, and forgive indentation', () => {

@@ -39,8 +39,18 @@ export type { ProblemLocation } from './tools.ts';
 export { startPreview } from './preview.ts';
 export type { PreviewDeps } from './preview.ts';
 
-export { engineerTools, PLANNING_LOCKED, PLANNING_REFUSAL } from './tools.ts';
-export { groundedIn, intentTools, isBlank, QUESTIONS_REFUSAL, UNGROUNDED } from './intent-tools.ts';
+export { BUSY_LOCKED, engineerTools, PLANNING_LOCKED, PLANNING_REFUSAL } from './tools.ts';
+export {
+  BUILDER_MAY_NOT_PLAN,
+  BUILDER_RUN_PREFIX,
+  groundedIn,
+  intentTools,
+  isBlank,
+  isBuilderRun,
+  QUESTIONS_REFUSAL,
+  RUN_AGREEMENT,
+  UNGROUNDED,
+} from './intent-tools.ts';
 export type { IntentTools, IntentToolsOptions } from './intent-tools.ts';
 export type { EngineerKnowledge, EngineerToolsOptions, TurnRecord } from './tools.ts';
 export { REFERENCE_TOPICS, specReference, SPLIT_RULES } from './reference.ts';

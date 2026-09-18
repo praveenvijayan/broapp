@@ -246,6 +246,8 @@ export const SPLIT_RULES = `- One task is one change a person could accept or re
 - When they depend on each other: the contract first, then the host, then the views.
 - Every criterion is something an acceptance example can assert: what a route returns, or
   what a page declares. Never "looks good". What only a person can judge goes in \`runbook\`.
+- A criterion says what a route returns or what a page declares, never how the code is
+  written; how it is written goes in \`testNotes\`.
 - A task that ships less than a working path is \`stub: true\` and names in \`repaidBy\`
   the task that finishes it.`;
 

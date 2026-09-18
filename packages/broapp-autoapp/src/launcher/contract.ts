@@ -283,6 +283,28 @@ const taskRecord = s.object({
   events: s.array(taskEvent, { max: 1_000 }),
 });
 
+/** A question a backlog run put to the person, answered through `ai.chatConfirm`. */
+const runQuestion = s.object({
+  runId: s.string({ max: 200 }),
+  callId: s.string({ max: 200 }),
+  tool: s.string({ max: 100 }),
+  input: s.unknown(),
+  askedAt: count,
+  expiresAt: count,
+});
+
+/** Where a running intent is, kept in memory by the executor. */
+const runProgress = s.object({
+  taskId: count,
+  attempt: count,
+  startedAt: count,
+  lastTool: s.nullable(s.string({ max: 100 })),
+  lastToolAt: s.nullable(count),
+  approvals: count,
+  /** The question waiting for the person, if the run brought one to them. */
+  question: s.nullable(runQuestion),
+});
+
 const modelChoice = s.nullable(s.string({ min: 1, max: 200 }));
 const tierModels = s.object({ light: modelChoice, standard: modelChoice, deep: modelChoice });
 
@@ -557,8 +579,41 @@ export const launcherContract = defineContract({
     'launcher.intentGet': {
       effect: 'read',
       input: s.object({ id: s.number({ int: true, min: 1 }) }),
-      output: s.object({ intent: intentRecord, tasks: s.array(taskRecord, { max: 200 }) }),
-      summary: 'One request in full: what it was understood to be, and its tasks in the order they run.',
+      output: s.object({ intent: intentRecord, tasks: s.array(taskRecord, { max: 200 }), run: s.nullable(runProgress) }),
+      summary: 'One request in full: what it was understood to be, its tasks in the order they run, and where its run is.',
+    },
+    'launcher.intentRunning': {
+      effect: 'read',
+      input: s.void(),
+      output: s.object({
+        run: s.nullable(s.object({ intentId: count, appId: s.string({ max: 40 }), waiting: s.boolean() })),
+      }),
+      summary: 'Which backlog is running, if any, and whether it is waiting for the person.',
+    },
+    'launcher.intentRun': {
+      // The person starting a run, behind a confirmation that says what the
+      // run's standing answer covers. The engineer's `intent.start` reaches the
+      // same function and asks first.
+      effect: 'write',
+      input: s.object({ id: s.number({ int: true, min: 1 }) }),
+      output: s.object({ started: s.boolean(), tasks: count }),
+      summary: 'Start or resume building a reviewed backlog.',
+    },
+    'launcher.intentStop': {
+      effect: 'write',
+      input: s.object({ id: s.number({ int: true, min: 1 }) }),
+      output: s.object({ stopped: s.boolean() }),
+      summary: 'Stop a backlog run: the task in hand is interrupted.',
+    },
+    'launcher.intentAnswer': {
+      effect: 'write',
+      input: s.object({
+        taskId: s.number({ int: true, min: 1 }),
+        answer: s.string({ min: 1, max: 1_000 }),
+        by: s.string({ min: 1, max: 80 }),
+      }),
+      output: s.object({ status: s.enum(TASK_STATUS_NAMES) }),
+      summary: 'Answer a question a builder, or the advice on a failed task, put to the person.',
     },
     'launcher.intentPlan': {
       effect: 'read',

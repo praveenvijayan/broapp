@@ -224,6 +224,44 @@ export function referenceProblems(tasks: readonly ReferencingTask[], known: read
   return problems;
 }
 
+/** What one `blocked_by` or `repaid_by` reference resolved to. */
+export type ResolvedReference =
+  | { readonly slug: string }
+  | { readonly ambiguous: readonly string[] }
+  | { readonly unresolved: true };
+
+/**
+ * Resolve one reference to a whole slug.
+ *
+ * The host numbers slugs, so a model adding several tasks in one pass cannot
+ * know them; 13b's by-hand run watched one name `author-column`, be refused at
+ * submit three times, and spend three rewrites repairing it. So a reference may
+ * be a task's words as well as its whole slug. A whole slug of a live task
+ * matches itself, wherever it is; anything else matches the task among
+ * `candidates` — the intent's own live tasks — whose slug without its number
+ * equals it. None is `unresolved`, left for later or refused by the caller; two
+ * is `ambiguous`, naming both.
+ */
+export function resolveReference(
+  reference: string,
+  candidates: readonly { readonly slug: string }[],
+  known: ReadonlySet<string>,
+): ResolvedReference {
+  if (known.has(reference)) return { slug: reference };
+  const matches = candidates.filter((task) => task.slug.slice(5) === reference).map((task) => task.slug);
+  if (matches.length === 1 && matches[0] !== undefined) return { slug: matches[0] };
+  if (matches.length > 1) return { ambiguous: matches };
+  return { unresolved: true };
+}
+
+/** The sentence for a reference that matched two tasks. */
+export function ambiguousReference(field: string, reference: string, slugs: readonly string[]): PlanProblem {
+  return {
+    field,
+    message: `${field} names ${reference}, which could be ${slugs.join(' or ')}. Name the whole slug.`,
+  };
+}
+
 /** A task as the graph check needs to see it. */
 export interface GraphTask {
   readonly slug: string;

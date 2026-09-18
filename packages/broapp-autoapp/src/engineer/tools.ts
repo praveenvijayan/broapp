@@ -92,6 +92,46 @@ export interface EngineerToolsOptions {
   readonly intents?: IntentTools;
   /** Whether a turn planned a backlog, for a caller that keeps its own record. */
   readonly planning?: (runId: string) => boolean;
+  /**
+   * The refusal for a write to an application a backlog run is working on,
+   * or `null`: the executor's `busy`. Absent, nothing is ever busy.
+   */
+  readonly busy?: (appId: string, runId: string | null) => string | null;
+}
+
+/** The tools that write to an application, refused while a backlog run works on it from another turn. */
+export const BUSY_LOCKED: readonly string[] = [
+  'source.edit',
+  'source.change',
+  'candidate.build',
+  'candidate.preview',
+  'candidate.cycle',
+  'preview.stop',
+  'release.activate',
+];
+
+/**
+ * Refuse a write to an application a backlog run is working on.
+ *
+ * Before the gate, as the planning lock is: nothing runs, so nobody is asked.
+ * The run's own turns pass, including a cycle's inner steps, whose request ids
+ * carry the same run.
+ */
+function lockWhileRunning(tools: Record<string, GuardedTool>, busy: (appId: string, runId: string | null) => string | null): void {
+  for (const name of BUSY_LOCKED) {
+    const tool = tools[name];
+    if (tool === undefined) continue;
+    const inner = tool.execute;
+    tools[name] = {
+      ...tool,
+      execute: (input, envelope, signal) => {
+        const appId = (input as { appId?: unknown } | null | undefined)?.appId;
+        const refusal = typeof appId === 'string' ? busy(appId, runIdOf(envelope)) : null;
+        if (refusal !== null) return Promise.reject(publicError.conflict(refusal));
+        return inner(input, envelope, signal);
+      },
+    };
+  }
 }
 
 /** What a tool that edits or builds says in a turn that planned. */
@@ -1471,6 +1511,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   if (intents !== undefined || planning !== undefined) {
     lockWhilePlanning(tools, (runId) => intents?.planning(runId) === true || planning?.(runId) === true);
   }
+  if (options.busy !== undefined) lockWhileRunning(tools, options.busy);
   if (intents !== undefined) Object.assign(tools, intents.tools);
 
   if (options.confirmTimeoutMs !== undefined) tellingExpiry(tools, options.confirmTimeoutMs);

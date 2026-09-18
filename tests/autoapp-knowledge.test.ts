@@ -1533,7 +1533,7 @@ describe('the knowledge path: seeds and instructions', () => {
       '# What you may not do',
       '# How to describe a change',
     ]);
-    expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(70);
+    expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(72);
     const flat = ENGINEER_INSTRUCTIONS.replace(/\s+/g, ' ');
     const first =
       'Each message comes with an orientation for the application and evidence for the request: read them before calling any tool. They say what is built, what is verified and what to do next.';

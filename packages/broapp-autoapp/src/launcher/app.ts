@@ -17,7 +17,15 @@ import type { Bridge } from 'brobridge';
 import { startPreview } from '../engineer/preview.ts';
 import type { CandidateStates } from '../engineer/state.ts';
 import type { RunStore } from '../host/run-store.ts';
-import { modelFor, readTierModels, renderPlan, writeTierModels, type IntentStore, type TaskRecord } from '../intent/index.ts';
+import {
+  modelFor,
+  readTierModels,
+  renderPlan,
+  writeTierModels,
+  type Executor,
+  type IntentStore,
+  type TaskRecord,
+} from '../intent/index.ts';
 import type { EventLog } from '../knowledge/log.ts';
 import { confirmLesson, retireLesson, writeLesson } from '../knowledge/review.ts';
 import type { Session } from '../knowledge/session.ts';
@@ -76,6 +84,12 @@ export interface CreateLauncherAppOptions {
    * written to. Absent, every intent route answers `unavailable`.
    */
   readonly intents?: IntentStore;
+  /**
+   * The backlog's executor: `launcher.intentRun` and `intentStop` reach it,
+   * `intentGet` reads its progress, and its `busy` refuses an activation while
+   * a run works on the application. Absent, no backlog runs.
+   */
+  readonly executor?: Executor;
   /**
    * Open a URL in the person's browser. Defaults to the operating system's
    * opener; tests pass a stub so a suite does not open tabs.
@@ -390,7 +404,12 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       runIds: [...task.runIds],
       answers: task.answers.map((answer) => ({ ...answer })),
     });
+    const progress = options.executor?.progress(id) ?? { run: null, question: null };
     return {
+      run:
+        progress.run === null
+          ? null
+          : { ...progress.run, question: progress.question === null ? null : { ...progress.question } },
       intent: {
         ...found.intent,
         conflicts: [...found.intent.conflicts],
@@ -404,6 +423,37 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
         events: task.events.map((event) => ({ ...event })),
       })),
     };
+  });
+
+  /** The executor, or the refusal every run route gives without one. */
+  function executor(): Executor {
+    if (options.executor === undefined) throw publicError.unavailable('This launcher runs no backlog.');
+    return options.executor;
+  }
+
+  host.operation('launcher.intentRunning', () => {
+    const active = options.executor?.active() ?? null;
+    if (active === null) return { run: null };
+    return { run: { ...active, waiting: executor().progress(active.intentId).question !== null } };
+  });
+
+  // The person's own click, after the panel's confirmation said what the run
+  // answers for them. `intent.start` reaches the same function from the chat.
+  host.operation('launcher.intentRun', async ({ id }, context) => {
+    byPerson(context);
+    return await executor().start(id, 'the person, from the Backlog panel');
+  });
+
+  host.operation('launcher.intentStop', ({ id }, context) => {
+    byPerson(context);
+    return executor().stop(id, 'the person');
+  });
+
+  host.operation('launcher.intentAnswer', ({ taskId, answer, by }, context) => {
+    const store = byPerson(context);
+    const task = store.answer(taskId, answer, by);
+    options.log?.event('log', `task ${task.slug}: answered by ${by}`, undefined, { appId: task.appId });
+    return { status: task.stored };
   });
 
   host.operation('launcher.intentPlan', ({ taskId }) => {
@@ -552,6 +602,10 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   });
 
   host.operation('launcher.activate', async ({ appId, releaseId }, context) => {
+    // Not while a backlog run is building on it: the candidate is moving
+    // under the person's feet, and activation is theirs to decide once it stops.
+    const busy = options.executor?.busy(appId, null) ?? null;
+    if (busy !== null) throw publicError.conflict(busy);
     // The same function the engineer's tool reaches. What differs is the channel
     // the request arrived on, which the journal's run record already carries.
     const preview = states.get(appId).preview;

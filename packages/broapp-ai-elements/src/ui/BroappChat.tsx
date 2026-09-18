@@ -43,6 +43,11 @@ export interface BroappChatProps {
   readonly onAwaiting?: BroappChatOptions['onAwaiting'];
   /** After a turn has ended and the conversation has been written back. */
   readonly onTurnEnd?: BroappChatOptions['onTurnEnd'];
+  /**
+   * Whether a turn is running, whenever that changes: for a surrounding
+   * application that watches something the turn may be writing.
+   */
+  readonly onBusy?: (busy: boolean) => void;
   /** Render assistant text as markdown. Default true. */
   readonly markdown?: boolean;
   /** Offered while the transcript is empty; clicking one sends it. */
@@ -120,6 +125,7 @@ export function BroappChat({
   onToolResult,
   onAwaiting,
   onTurnEnd,
+  onBusy,
   markdown = true,
   suggestions,
   suggestionTip,
@@ -158,6 +164,9 @@ export function BroappChat({
   // mark shows the turn's elapsed time and changes its phrase on the tick.
   const busy = status === 'submitted' || status === 'streaming';
   const now = useTick(awaiting > 0 || busy);
+  React.useEffect(() => {
+    onBusy?.(busy);
+  }, [busy, onBusy]);
 
   // Assigned during render, the way `useBroappChat` keeps its own callbacks
   // current: an effect would leave the first paint's buttons pointing at

@@ -367,6 +367,13 @@ async function openLauncher(
     isBusy: () => tab.ai.activeStreams > 0,
     onShutdown: async () => {
       supervisor.setPanel(null);
+      // A backlog run is stopped first and given the deadline a child gets:
+      // its turn writes its transcript and its task's move before the stores
+      // below close. What it leaves is interrupted, and nothing resumes it.
+      tab.executor?.stopAll('the launcher');
+      if (tab.executor !== null) {
+        await Promise.race([tab.executor.idle(), Bun.sleep(STOP_DEADLINE_MS)]);
+      }
       tab.ai.abortAll('the launcher is shutting down');
       // The conversations live in a SQLite file of the AI layer's own, and a
       // database that is never closed misses its last WAL checkpoint.
@@ -692,7 +699,9 @@ async function main(): Promise<number> {
   const knowledge = longRunning ? openKnowledge(join(root.root, 'launcher')) : null;
   // The backlog lives beside knowledge and opens with it; nothing but the
   // launcher's tab reads it, and a one-shot command never needs it.
-  const intents = knowledge === null ? null : openIntents(join(root.root, 'launcher'));
+  // Only the launcher tab runs backlogs, so only it recovers one: `serve
+  // <appId>` may open this store beside a launcher that is running a backlog.
+  const intents = knowledge === null ? null : openIntents(join(root.root, 'launcher'), { recover: wantsPanel });
   const recording: Recording | null =
     knowledge === null || intents === null
       ? null

@@ -71,6 +71,18 @@ export interface InProcessTurn {
   readonly history?: readonly ChatTurn[];
 }
 
+/** One question put to an in-process turn's stand-in. */
+export interface InProcessQuestion {
+  readonly tool: string;
+  readonly input: unknown;
+  /** The approval table's key, `<runId>:<callId>`. */
+  readonly requestId: string;
+  /** The call the question is about, as `ai.chatConfirm` names it with the run id. */
+  readonly callId: string;
+  /** When the question stops waiting, when the gate said. */
+  readonly expiresAt?: number;
+}
+
 /** How {@link Ai.turn} is answered and stopped. */
 export interface InProcessTurnOptions {
   /**
@@ -78,8 +90,14 @@ export interface InProcessTurnOptions {
    *
    * The caller is the person's stand-in, so it decides exactly as the person
    * would have: the gate still asks, and still records the answer.
+   *
+   * `'defer'` answers nothing. The question stays in the approval table for
+   * somebody else to answer by its request id, over `ai.chatConfirm` as a
+   * person in a chat would, and the gate's own window still ends it. That is
+   * for a stand-in that answers some questions itself and brings the rest to a
+   * person: whoever answers, each question is answered once.
    */
-  readonly answer: (question: { readonly tool: string; readonly input: unknown }) => boolean;
+  readonly answer: (question: InProcessQuestion) => boolean | 'defer';
   /** Aborting it cancels the turn, as a browser's cancel would. */
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: ChatEvent) => void;
@@ -398,7 +416,14 @@ export function createAi(options: CreateAiOptions): Ai {
             // The gate's request id is `<runId>:<callId>`, which is what an
             // event without one would have named.
             const requestId = event.requestId ?? `${turn.runId}:${event.callId}`;
-            void settle(requestId, turnOptions.answer({ tool: event.tool ?? '', input: event.input }));
+            const answer = turnOptions.answer({
+              tool: event.tool ?? '',
+              input: event.input,
+              requestId,
+              callId: event.callId ?? '',
+              ...(event.expiresAt === undefined ? {} : { expiresAt: event.expiresAt }),
+            });
+            if (answer !== 'defer') void settle(requestId, answer);
           }
           return Promise.resolve();
         },

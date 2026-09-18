@@ -20,7 +20,7 @@ import { createCandidateStates, type CandidateStates } from '../engineer/state.t
 import { intentTools, type IntentTools } from '../engineer/intent-tools.ts';
 import { engineerTools, type TurnRecord } from '../engineer/tools.ts';
 import type { RunStore } from '../host/run-store.ts';
-import type { IntentStore } from '../intent/index.ts';
+import { createExecutor, type Executor, type IntentStore } from '../intent/index.ts';
 import { createDistiller, pendingCases, type Distiller } from '../knowledge/distil.ts';
 import { recordContext, type Evidence } from '../knowledge/evidence.ts';
 import { instructionsHash, reviewFlags } from '../knowledge/freshness.ts';
@@ -81,6 +81,11 @@ export interface CreateLauncherTabOptions {
    * keeps none.
    */
   readonly intents?: IntentStore;
+  /**
+   * How a backlog run is paced: a builder's turn limit and attempts per task.
+   * The launcher uses the executor's own; tests shorten them.
+   */
+  readonly run?: { readonly turnTimeoutMs?: number; readonly maxAttempts?: number };
   /** The AI layer's document budget. Tests shrink it to watch a document being cut. */
   readonly contextBudgetChars?: number;
   /** Which application is selected. Defaults to `session.json` in `dataDir`. */
@@ -119,6 +124,11 @@ export interface LauncherTab {
    * written down. The launcher's shutdown closes it; a test awaits `idle()`.
    */
   readonly distiller: Distiller | null;
+  /**
+   * The backlog's executor; `null` without a backlog. The launcher's shutdown
+   * stops it and awaits `idle()`, as a test does.
+   */
+  readonly executor: Executor | null;
 }
 
 /** What the engineer is, in the words the model is given first. */
@@ -196,6 +206,27 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
         });
 
   /**
+   * The backlog's executor: runs a reviewed backlog task by task, each a turn
+   * of this tab's own AI layer. Built before `ai` exists, so it is handed a
+   * function, as the distiller is.
+   */
+  const executor: Executor | null =
+    options.intents === undefined
+      ? null
+      : createExecutor({
+          intents: options.intents,
+          ai: () => ai,
+          states,
+          layout: options.layout,
+          ...(knowledge === undefined ? {} : { log: knowledge.log }),
+          logger,
+          confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
+          ...(options.run?.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: options.run.turnTimeoutMs }),
+          ...(options.run?.maxAttempts === undefined ? {} : { maxAttempts: options.run.maxAttempts }),
+        });
+  const busy = executor === null ? undefined : (appId: string, runId: string | null) => executor.busy(appId, runId);
+
+  /**
    * The backlog's tools, and the record of which turns planned: kept here so
    * the turn's end can clear it, and the next message can build what the
    * person approved.
@@ -208,6 +239,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           gate: options.gate,
           intents: options.intents,
           logger,
+          ...(executor === null ? {} : { executor }),
           ...(knowledge === undefined ? {} : { knowledge: { log: knowledge.log, turn: (runId: string) => turns.get(runId) } }),
         });
 
@@ -222,6 +254,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ...(knowledge === undefined ? {} : { log: knowledge.log, knowledge: knowledge.store }),
     store: options.store,
     ...(options.intents === undefined ? {} : { intents: options.intents }),
+    ...(executor === null ? {} : { executor }),
     templates: options.templates,
     versions: options.versions,
     ...(options.openBrowser === undefined ? {} : { openBrowser: options.openBrowser }),
@@ -262,6 +295,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
       session,
       ...(planning === null ? {} : { intents: planning }),
+      ...(busy === undefined ? {} : { busy }),
       ...(knowledge === undefined
         ? {}
         : {
@@ -359,5 +393,6 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     knowledge: knowledge?.store ?? null,
     session,
     distiller,
+    executor,
   };
 }

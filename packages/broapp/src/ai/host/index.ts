@@ -12,6 +12,7 @@ export type {
   AiAppDescription,
   CreateAiOptions,
   DeliveredContext,
+  InProcessQuestion,
   InProcessTurn,
   InProcessTurnOptions,
   InProcessTurnResult,

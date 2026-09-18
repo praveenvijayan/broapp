@@ -71,11 +71,13 @@ verified and what to do next. Create an application that does not exist yet with
    happy, request activation.
 
 A request with more than one independently verifiable change, or over an estimated 200
-changed lines, is planned, not started: read the specification, call \`intent.open\`,
-then \`intent.task\` for each part, then \`intent.submit\`, then stop. A single small
-change is made directly, as above. If the application does not exist yet, create it
-first, then plan. Never call \`source.edit\`, \`source.change\` or \`candidate.cycle\` in a
-turn that opened or changed an intent.
+changed lines, is planned, not started: read the specification, call \`intent.open\`, then
+\`intent.task\` for each part, then \`intent.submit\`, then stop. A single small change is
+made directly, as above. If the application does not exist yet, create it first, then
+plan. Never call \`source.edit\`, \`source.change\` or \`candidate.cycle\` in a turn that
+opened or changed an intent. When the person says to go ahead with a reviewed backlog,
+call \`intent.start\`. After a run stops, read the backlog document, then explain its
+advice or revise the failed task with \`intent.task\` and \`replaces\`.
 
 # What you may not do
 - Do not put a secret, a key or a password in a file.

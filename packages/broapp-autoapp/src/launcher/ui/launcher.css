@@ -1107,3 +1107,76 @@ code {
 .launcher__intent-open .launcher__log-time {
   flex: none;
 }
+
+/* A backlog run's state under a task's row: always shown, never behind a click,
+   because it is what somebody opened the panel to see. */
+.launcher__intent-state {
+  margin: 0.2rem 0 0;
+}
+
+.launcher__intent-failure,
+.launcher__intent-ask {
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  background: var(--launcher-error-surface);
+  color: var(--launcher-error-text);
+  font-size: 0.85rem;
+}
+
+.launcher__intent-ask {
+  background: var(--launcher-warn-surface);
+  color: var(--launcher-warn-text);
+}
+
+.launcher__intent-failure .launcher__lede,
+.launcher__intent-ask .launcher__k-quote {
+  color: inherit;
+}
+
+.launcher__intent-advice {
+  margin: 0.35rem 0;
+}
+
+.launcher__intent-answer {
+  display: flex;
+  gap: 0.4rem;
+  align-items: flex-end;
+  margin-top: 0.35rem;
+}
+
+.launcher__intent-answer-text {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+.launcher__intent-done {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.6rem;
+  border-radius: 6px;
+  background: var(--launcher-good-surface);
+  color: var(--launcher-good-text);
+}
+
+.launcher__intent-done .launcher__lede {
+  color: inherit;
+  margin: 0;
+}
+
+.launcher__intent-confirm {
+  flex-wrap: wrap;
+}
+
+.launcher__intent-urgent {
+  color: var(--launcher-error-text);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+/* A run is waiting for the person: the rail says so wherever they are. */
+.launcher__rail-button--waiting {
+  color: var(--launcher-warn-text);
+  background: var(--launcher-warn-surface);
+  border-color: var(--launcher-warn-text);
+}

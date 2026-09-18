@@ -314,4 +314,68 @@ describe('Ai.turn()', () => {
       await rm(dataDir, { recursive: true, force: true });
     }
   });
+
+  test("an answer of 'defer' leaves the question to ai.chatConfirm: yes runs the tool, no refuses it", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'broapp-ai-defer-'));
+    try {
+      let ran = 0;
+      const gate = createGate({ appId: 'app', releaseId: 'r1', confirmTimeoutMs: 5_000 });
+      const write = guardedTool(gate, {
+        name: 'demo.write',
+        description: 'Write one thing.',
+        inputSchema: s.object({ n: s.number() }).toJsonSchema(),
+        effect: 'write',
+        run: () => {
+          ran += 1;
+          return Promise.resolve({ wrote: true });
+        },
+      });
+      const step = { kind: 'tool', name: 'demo.write', input: { n: 1 }, then: [{ kind: 'text', chunks: ['done'] }] } as const;
+      const ai = createAi({
+        dataDir,
+        providers: [createFakeAdapter({ script: [step, step] })],
+        app: { name: 'test', purpose: 'testing a deferred answer' },
+        tools: { 'demo.write': write },
+        fetch: noNetwork,
+      });
+      await ai.registry.update({ provider: 'fake', modelId: 'fake-1' });
+      live = await harness((bridge) => ai.mount(bridge));
+      const client = await live.connect(aiContract);
+
+      const deferred = async (runId: string, approve: boolean): Promise<Awaited<ReturnType<typeof ai.turn>>> => {
+        let asked: { callId: string } | null = null;
+        const turn = ai.turn(
+          { runId, message: 'write one' },
+          {
+            answer: (question) => {
+              asked = { callId: question.callId };
+              expect(question.requestId).toBe(`${runId}:${question.callId}`);
+              return 'defer';
+            },
+          },
+        );
+        while (asked === null) await Bun.sleep(5);
+        const callId = (asked as { callId: string }).callId;
+        // Nothing has run: the question waits for somebody else.
+        await Bun.sleep(50);
+        expect(ran).toBe(approve ? 0 : 1);
+        expect((await client.call('ai.chatConfirm', { runId, callId, approve })).accepted).toBe(true);
+        // Answered once: a second answer finds nobody waiting.
+        expect((await client.call('ai.chatConfirm', { runId, callId, approve })).accepted).toBe(false);
+        return await turn;
+      };
+
+      const yes = await deferred('turn-defer-yes', true);
+      expect(yes.status).toBe('succeeded');
+      expect(ran).toBe(1);
+
+      const no = await deferred('turn-defer-no', false);
+      expect(no.status).toBe('succeeded');
+      expect(ran).toBe(1);
+      expect(no.events.some((event) => event.type === 'tool-result' && event.denied === true)).toBe(true);
+      ai.close();
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
 });

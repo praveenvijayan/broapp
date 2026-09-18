@@ -38,6 +38,7 @@ import {
   type TaskInput,
   type TaskRecord,
 } from '../intent/index.ts';
+import type { Executor } from '../intent/executor.ts';
 import { readCurrent, readRelease, type AppSpec, type Layout } from '../spec/index.ts';
 import type { Component } from '../views/types.ts';
 
@@ -52,6 +53,34 @@ export const QUESTIONS_REFUSAL =
 export const UNGROUNDED =
   '`fits` names nothing this application has. Read it with spec.read and say which routes or pages the request builds on.';
 
+/** The prefix of every run id a backlog run gives a builder's turn. */
+export const BUILDER_RUN_PREFIX = 'intent-';
+
+/** Whether a turn is a builder's, started by a backlog run rather than by a person. */
+export function isBuilderRun(runId: string | null): boolean {
+  return runId !== null && runId.startsWith(BUILDER_RUN_PREFIX);
+}
+
+/** What a planning tool says to a builder. */
+export const BUILDER_MAY_NOT_PLAN = 'A builder builds its one task. It does not plan or change the backlog.';
+
+/**
+ * Refuse a planning call from a builder's turn.
+ *
+ * A builder is given one task and a standing answer for edits and builds; a
+ * builder that could rewrite the backlog it is part of could widen its own
+ * task, or start another run.
+ */
+function builderRefused(envelope: Envelope | undefined, tool: string): void {
+  // `conflict`, not `rejected`: the run loop reads a rejection as the person
+  // saying no, and this is a rule the builder has to be told.
+  if (isBuilderRun(runIdOf(envelope))) throw publicError.conflict(`${tool}: ${BUILDER_MAY_NOT_PLAN}`);
+}
+
+/** What a person agrees to by starting a run, said by the tool, the panel and the documents alike. */
+export const RUN_AGREEMENT =
+  'Until it finishes or is stopped, edits, builds and previews for its application are approved without asking. Anything else is put to you in the Backlog panel and waits. Activation is never approved this way.';
+
 /** What {@link intentTools} needs. */
 export interface IntentToolsOptions {
   readonly layout: Layout;
@@ -61,6 +90,8 @@ export interface IntentToolsOptions {
   /** The turn a run belongs to, and the log accepted calls are written to. */
   readonly knowledge?: Pick<EngineerKnowledge, 'log' | 'turn'>;
   readonly logger?: HostLogger;
+  /** The backlog's executor. Absent, there is no `intent.start` and no `intent.ask`. */
+  readonly executor?: Pick<Executor, 'start' | 'ask'>;
 }
 
 /** The three tools, and the turns that used them. */
@@ -259,6 +290,7 @@ export function intentTools(options: IntentToolsOptions): IntentTools {
     inputSchema: openInput.toJsonSchema(),
     effect: 'read',
     run: (input, _signal, envelope) => {
+      builderRefused(envelope, 'intent.open');
       const analysis = parsed(openInput, input);
       const { appId } = analysis;
       if (!existsSync(root.app(appId).dir)) {
@@ -325,14 +357,22 @@ export function intentTools(options: IntentToolsOptions): IntentTools {
 
   tools['intent.task'] = guardedTool(gate, {
     name: 'intent.task',
-    description: `Add one task to a draft intent, in the plan format. You give the slug's words, the title (imperative, 8 to 100 characters, no full stop), priority (high, medium, low), labels, blockedBy, estimatedLines, a summary of at most 400 characters, two to eight criteria and reasoning (low, medium, high); the host assigns the slug's number, the tier and the model. blockedBy and repaidBy name whole slugs such as 0001-add-tags, never the words alone; a task not added yet may be named, since each new task takes the next number, and that is checked at submit. A plan problem comes back as ok: false with each field named; fix those and call again. replaces: a slug, to rewrite a task still proposed.
+    description: `Add one task to a draft intent, in the plan format. You give the slug's words, the title (imperative, 8 to 100 characters, no full stop), priority (high, medium, low), labels, blockedBy, estimatedLines, a summary of at most 400 characters, two to eight criteria and reasoning (low, medium, high); the host assigns the slug's number, the tier and the model. blockedBy and repaidBy name a task by its whole slug, such as 0001-add-tags, or by its words alone, such as add-tags; the host stores the whole slug. A task not added yet may be named, and is resolved at submit. A plan problem comes back as ok: false with each field named; fix those and call again. replaces: a slug, to rewrite a task still proposed.
 What a good split is:
 ${SPLIT_RULES}`,
     inputSchema: taskInput.toJsonSchema(),
     effect: 'read',
     run: (input, _signal, envelope) => {
+      builderRefused(envelope, 'intent.task');
       const sent = parsed(taskInput, input);
-      const intent = draft(sent.intentId, 'intent.task');
+      // A stopped intent's failed task may be revised: that is one of the two
+      // ways on from a stop. Anything else about a stopped intent is a person's.
+      const found = store.get(sent.intentId);
+      const revising =
+        found?.intent.status === 'stopped' &&
+        given(sent.replaces) !== undefined &&
+        found.tasks.some((task) => task.slug === given(sent.replaces) && task.stored === 'failed');
+      const intent = revising && found !== null ? found.intent : draft(sent.intentId, 'intent.task');
       answered(intent);
 
       // Plain strings until the validator has seen them: it is what says
@@ -364,8 +404,10 @@ ${SPLIT_RULES}`,
         if (replacing === undefined) {
           throw publicError.notFound(`${replaces} is not a task of intent ${String(intent.id)}.`);
         }
-        if (replacing.stored !== 'proposed') {
-          throw publicError.conflict(`${replacing.slug} is ${replacing.stored}; only a proposed task is rewritten.`);
+        if (replacing.stored !== 'proposed' && !(revising && replacing.stored === 'failed')) {
+          throw publicError.conflict(
+            `${replacing.slug} is ${replacing.stored}; only a proposed task, or a failed one in a stopped run, is rewritten.`,
+          );
         }
       }
 
@@ -402,6 +444,7 @@ ${SPLIT_RULES}`,
     inputSchema: submitInput.toJsonSchema(),
     effect: 'read',
     run: (input, _signal, envelope) => {
+      builderRefused(envelope, 'intent.submit');
       const { intentId } = parsed(submitInput, input);
       const intent = draft(intentId, 'intent.submit');
       answered(intent);
@@ -429,6 +472,52 @@ ${SPLIT_RULES}`,
       });
     },
   });
+
+  const executor = options.executor;
+  if (executor !== undefined) {
+    const startInput = s.object({ intentId: s.number({ int: true, min: 1 }) });
+    tools['intent.start'] = guardedTool(gate, {
+      name: 'intent.start',
+      // What the person agrees to is in the question the gate puts to them,
+      // which shows this tool and its input: so the description says it.
+      description: `Start building a reviewed backlog. ${RUN_AGREEMENT} Call it when the person says to go ahead with a backlog they have reviewed.`,
+      inputSchema: startInput.toJsonSchema(),
+      // A write, so the gate asks: starting is the person's decision, and the
+      // question is where they are told what it covers.
+      effect: 'write',
+      run: async (input, _signal, envelope) => {
+        builderRefused(envelope, 'intent.start');
+        const { intentId } = parsed(startInput, input);
+        const runId = runIdOf(envelope);
+        const started = await executor.start(intentId, runId === null ? 'the person' : `the person, in chat turn ${runId}`);
+        const intent = store.get(intentId)?.intent;
+        if (intent !== undefined) logged(`intent ${String(intentId)} started from the chat`, envelope, intent.appId);
+        return {
+          ...started,
+          next: 'Tell the person it has started and that progress is in the Backlog panel. Do nothing else this turn.',
+        };
+      },
+    });
+
+    const askInput = s.object({ question: s.string({ min: 10, max: 300 }) });
+    tools['intent.ask'] = guardedTool(gate, {
+      name: 'intent.ask',
+      description:
+        'Only while building one task of a backlog run: ask the person one question, when the plan leaves open a real choice that changes what you build. The task waits for the answer and is run again with it. At most two per task.',
+      inputSchema: askInput.toJsonSchema(),
+      // A read: it changes no application and asks nobody. It records a
+      // question for the person and ends the builder's turn.
+      effect: 'read',
+      run: (input, _signal, envelope) => {
+        const { question } = parsed(askInput, input);
+        const runId = runIdOf(envelope);
+        if (!isBuilderRun(runId) || runId === null) {
+          throw publicError.conflict('intent.ask is for a builder in a backlog run. Ask the person in the chat instead.');
+        }
+        return Promise.resolve(executor.ask(runId, question));
+      },
+    });
+  }
 
   return {
     tools,

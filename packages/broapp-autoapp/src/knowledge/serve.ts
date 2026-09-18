@@ -311,10 +311,18 @@ export function createServe(input: CreateServeInput): Serve {
   }
 
   /**
-   * Which application a message is about: the one it names, else the one the
-   * person or the engineer last chose, else the only one there is.
+   * Which application a message is about: the one its first line declares as
+   * `Application: <appId>`, else the one it names, else the one the person or
+   * the engineer last chose, else the only one there is.
+   *
+   * The declaration comes first because a backlog run writes one into every
+   * builder's message, above a plan whose own words may name another
+   * application: 13c's tests watched "an empty list" serve a turn about
+   * `items` with the documents of an application called `empty`.
    */
   function chooseApp(text: string, words: readonly string[], rows: readonly AppRow[]): string | null {
+    const declared = /^Application: (\S+)\s*$/.exec(text.split('\n', 1)[0] ?? '')?.[1];
+    if (declared !== undefined && rows.some((row) => row.appId === declared)) return declared;
     const lower = text.toLowerCase();
     const byId = rows.find((row) => namesId(lower, row.appId));
     if (byId !== undefined) return byId.appId;

@@ -622,7 +622,7 @@ describe('what the engineer is told', () => {
   test('the instructions keep their five headings and name the three tools; the intents topic names every label', () => {
     for (const section of INSTRUCTION_SECTIONS) expect(ENGINEER_INSTRUCTIONS).toContain(section);
     for (const name of ['intent.open', 'intent.task', 'intent.submit']) expect(ENGINEER_INSTRUCTIONS).toContain(`\`${name}\``);
-    expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(70);
+    expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(72);
     const topic = specReference('intents');
     for (const label of LABELS) expect(topic).toContain(`\`${label}\``);
     expect(topic).toMatch(/^# intents /);

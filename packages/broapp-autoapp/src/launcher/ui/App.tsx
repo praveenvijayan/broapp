@@ -114,6 +114,9 @@ export function App(): React.ReactElement {
   const [showLogs, setShowLogs] = useState(false);
   const [showKnowledge, setShowKnowledge] = useState(false);
   const [showBacklog, setShowBacklog] = useState(false);
+  // Whether a chat turn is running, for the Backlog panel: a turn may be
+  // writing a backlog into it.
+  const [turnActive, setTurnActive] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(() => remembered(HISTORY_OPEN, true));
   const [appsOpen, setAppsOpen] = useState(() => remembered(APPS_OPEN, true));
   const [scheme, setScheme] = useState<BroappScheme>(() => readScheme());
@@ -149,6 +152,22 @@ export function App(): React.ReactElement {
   }, []);
   // What the chat's own header reaches the conversation through.
   const controls = useRef<BroappChatControls | null>(null);
+
+  // Whether a backlog run is going and waiting for the person. The rail's
+  // Backlog button is marked while it waits, whether the panel is open or not:
+  // a question the run brought to the person stops it until it is answered.
+  const running = useOperation<LauncherContract, 'launcher.intentRunning'>('launcher.intentRunning');
+  const { run: readRunning } = running;
+  const runGoing = running.data?.run !== null && running.data?.run !== undefined;
+  const runWaiting = running.data?.run?.waiting === true;
+  useEffect(() => {
+    if (connection.phase === 'ready') void readRunning(undefined);
+  }, [connection.phase, readRunning, changed]);
+  useEffect(() => {
+    if (!runGoing) return undefined;
+    const timer = setInterval(() => void readRunning(undefined), 2_000);
+    return () => clearInterval(timer);
+  }, [runGoing, readRunning]);
 
   const { run: refreshApps } = apps;
   const ready = connection.phase === 'ready';
@@ -398,10 +417,10 @@ export function App(): React.ReactElement {
         </button>
         <button
           aria-expanded={showBacklog}
-          aria-label="Backlog"
-          className="launcher__rail-button"
+          aria-label={runWaiting ? 'Backlog, a question is waiting' : 'Backlog'}
+          className={`launcher__rail-button${runWaiting ? ' launcher__rail-button--waiting' : ''}`}
           onClick={() => setShowBacklog((open) => !open)}
-          title="Backlog"
+          title={runWaiting ? 'Backlog: a question is waiting for you' : 'Backlog'}
           type="button"
         >
           <ListChecks aria-hidden="true" size={17} />
@@ -445,6 +464,7 @@ export function App(): React.ReactElement {
           frame="plain"
           modelId={active?.modelId ?? null}
           onAwaiting={onAwaiting}
+          onBusy={setTurnActive}
           // The host derives a conversation's title from its first message, so
           // the list beside this one only learns the real title by reading it
           // back once the turn has been written.
@@ -590,7 +610,7 @@ export function App(): React.ReactElement {
             onClick={() => setShowBacklog(false)}
             type="button"
           />
-          <IntentPanel appId={selected} onClose={() => setShowBacklog(false)} />
+          <IntentPanel appId={selected} onClose={() => setShowBacklog(false)} turnActive={turnActive} />
         </>
       ) : null}
 

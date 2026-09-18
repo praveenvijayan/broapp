@@ -7,9 +7,9 @@ far each part got. The launcher's rail calls it **Backlog**; the code calls it
 `intent`, because [backlog.md](backlog.md) already uses the word for deferred
 framework work.
 
-This page describes what exists after prompt 13b: the store, the plan format,
-the tier rule, the routes, the panel, and the engineer's three tools that fill
-the backlog. Nothing runs it yet: prompt 13c does that.
+This page describes what exists after prompt 13c: the store, the plan format,
+the tier rule, the routes, the panel, the engineer's tools that fill the
+backlog, and the executor that runs it.
 
 ## Words
 
@@ -47,12 +47,20 @@ transaction.
 | From | To |
 |---|---|
 | `proposed` | `in-queue`, `removed` |
-| `in-queue` | `in-progress`, `removed` |
+| `in-queue` | `in-progress`, `failed`, `removed` |
 | `in-progress` | `completed`, `failed`, `interrupted`, `needs-answer` |
 | `needs-answer` | `in-queue`, `removed` |
-| `failed` | `in-queue`, `removed` |
+| `failed` | `in-queue`, `proposed`, `removed` |
 | `interrupted` | `in-queue`, `removed` |
 | `completed`, `removed` | nothing |
+
+`moveTask` also stamps what a move means, in the same transaction, and nothing
+else writes these columns: `in-progress` sets `started_at`, clears `ended_at`,
+adds one to `attempts` and appends the run id to `run_ids`; `completed` and
+`failed` set `ended_at`; `interrupted` and `needs-answer` set `ended_at` and take
+the attempt back, because neither was the builder's failure. `in-queue → failed`
+is a task whose model is no longer offered, which fails without a turn;
+`failed → proposed` is a failed task the engineer revised after a run stopped.
 
 `needs-answer` is a task whose builder asked the person a question. The
 question is in `question`, and every `{ question, answer, at }` so far is in
@@ -187,14 +195,103 @@ Each accepted call writes one `log` event: `intent 4 opened for notes`,
 | That every `blocked_by` and `repaid_by` names a task, and that there is no cycle | How the work is split and what waits on what |
 | That a turn which planned does not edit or build | When to plan and when to change directly |
 | That a draft leaves `draft` only by a person, or a tool that asks one | Nothing: the engineer cannot start a task |
+| Whether a task is completed, from the verdict below | Nothing: its closing words are not evidence |
+
+## How a backlog runs
+
+![Hub and spoke: the host executor, started and stopped by the person, runs each task as its own builder turn, answers the launcher gate itself only for edits, builds and previews of its own application, sends every other question to the person, decides completion from a verdict on evidence, and asks the main model for advice when a task fails.](../../diagrams/autoapp-backlog-run.svg)
+
+The hub is two things. The **host executor** (`src/intent/executor.ts`) is
+deterministic code: it decides the order, the model, the time allowed, whether a
+task is finished and when to stop. The **main model**, the one chosen in
+Settings, is asked where judgement is needed: once for advice when a task
+fails, and on the person's next chat turn, where the `intent:<appId>` document
+tells it what happened. No model supervises another; reports 08c and 12j
+measured what a local model does with one long open-ended turn.
+
+1. The person says to go ahead in the chat (`intent.start`, which the gate asks
+   about) or presses **Run** in the panel (`launcher.intentRun`, behind an
+   inline confirmation). Both say what is being agreed to, and both call
+   `executor.start`.
+2. Start requires a submitted draft with no open questions, or a stopped
+   intent whose live tasks form a valid graph; no task waiting for an answer;
+   something left to run; no other run in this launcher; and AI set up. It moves
+   `proposed`, `failed` and `interrupted` tasks to `in-queue`, sets the intent
+   `running`, and returns at once.
+3. One task at a time, in run order. Each is one engineer turn, run id
+   `intent-<intentId>-<slug>-a<n>`, with no history, on `modelFor(task)`: its own
+   model, its tier's, or the Settings model. A model the provider no longer
+   offers fails the task without a turn.
+4. The builder's message starts `Application: <appId>`, which is how the turn's
+   documents are chosen, says to build this one task with one example per
+   criterion under exactly the ids `<slug>-c<n>`, to use `candidate.cycle`
+   until every check passes, and not to activate or plan. Then the plan, then
+   any answers the person gave, then why the last attempt was not completed.
+5. During the turn the executor answers the gate for the person, as described
+   in [security.md](security.md#a-run-answers-for-the-person). A question it
+   does not cover waits in the panel.
+6. When the turn ends, however it ended, the verdict decides.
+7. Completed: the next task. Not completed: a second attempt with the reasons.
+   Failed twice: the run stops.
+8. Every task completed: the intent is `done`. Nothing is activated. The panel
+   says to open the preview, look, and activate from the Candidate panel, and
+   lists every task's runbook lines under "For you to check by hand".
+
+A task is **completed** only when all of these hold after its turn: the
+workspace revision moved; the last build has no problems; nothing was edited
+after it; its checks ran on the preview that is running now; every check passed,
+so no earlier task's example regressed; and for every criterion an example
+named `<slug>-c<n>` ran. Otherwise each condition that did not hold is a
+sentence ("No example named 0007-add-tags-c2 was run.", "The turn ran out of
+time."). A completed task records `rev_after`, `release_id` and `actual_lines`
+(from `git diff --shortstat`), and each criterion whose example passed is drawn
+`[x]` in its plan. A verdict is only as strong as the examples the builder wrote;
+the backlog's **A verdict as strong as its examples** row says what would
+strengthen it.
+
+**Failure policy: stop.** After the second failed attempt the task is `failed`
+with its reasons and run ids, the intent is `stopped`, and later tasks stay
+`in-queue`. The workspace is left as the attempt left it, so the person and the
+engineer can look; nothing is reset. The main model is then asked one
+structured question, `{ diagnosis, advice: retry | revise | split | ask, note }`,
+and the answer is shown under the failure; it stays there when the task is
+queued again and goes when the task completes or is revised. An answer that does not arrive or
+does not parse stores nothing and changes no status. From there the person runs
+again (failed and interrupted tasks are queued, and the run continues from the
+first unfinished task), or asks the engineer to revise the failed task with
+`intent.task` and `replaces`, which returns it to `proposed`.
+
+**A builder that is unsure asks.** `intent.ask` records one question on the
+task, moves it to `needs-answer`, stops the intent with "<slug> needs an
+answer", and ends the turn without counting the attempt. The person answers in
+the panel (`launcher.intentAnswer`), which returns the task to the queue; they
+then press Run. At most two questions per task; a third is told to decide with
+what it has.
+
+**Stopping.** `launcher.intentStop` aborts the turn: the task is `interrupted`,
+the intent `stopped` "by the person", and the preview is left as it is. While a
+run is going, other turns may read the application and talk to the engineer,
+but every tool that writes to that application, and `launcher.activate`, is
+refused until the run stops.
+
+**A restart interrupts and never resumes.** When the launcher's tab opens the
+store (`openIntents(…, { recover: true })`; `serve <appId>` and the one-shot
+commands open it without, because a launcher beside them may be running), any
+`in-progress` task becomes `interrupted` (attempt given back) and any `running`
+intent becomes `stopped`, "The launcher stopped." An interrupted turn may have
+left half a change, and a person decides what happens to an outcome nobody saw.
 
 ## Routes and the panel
 
 The reads are `launcher.intentsList`, `intentGet`, `intentPlan` and
 `intentModelsGet`. The writes are `launcher.intentTaskModel`,
-`intentTaskRemove`, `intentWithdraw` and `intentModelsSet`. Each write is a
-`write` that is accepted only on channel `user`. No engineer tool names any of
-them. If a launcher has no store, every one of these routes answers
+`intentTaskRemove`, `intentWithdraw`, `intentModelsSet`, and since 13c
+`intentRun`, `intentStop` and `intentAnswer`. Each write is a `write` that is
+accepted only on channel `user`. No engineer tool names any of them.
+`launcher.intentGet` carries the run's progress (`run`: the task in hand, its
+turn, when it started, its last tool, how many approvals, and a question
+waiting for the person), and `launcher.intentRunning` says whether any run is
+going and waiting. If a launcher has no store, every one of these routes answers
 `unavailable`.
 
 The **Backlog** panel shows the intents of the application selected in the
@@ -206,3 +303,13 @@ remove a task, withdraw the intent, and set the three tier models. Each of
 these is refused with a sentence when the rules above do not allow it. A draft
 the engineer has not submitted shows **Being written** beside its status, and a
 draft with open questions shows them first.
+
+A submitted draft or a stopped intent has **Run**, and a running one **Stop**,
+each behind an inline confirmation. While a run goes, the task in hand shows
+its last tool; a failed task shows its reasons, the main model's advice and
+"Run again to retry, or ask the engineer to revise this task."; a task waiting
+for an answer shows the question and a box to answer it. A question the run
+brought to the person is shown at the top with **Approve** and **Deny**, answered
+through `ai.chatConfirm`, and the rail's Backlog button is marked while one
+waits. The panel reads again every two seconds while a chat turn runs, while the
+open draft is being written, or while a run goes, and never otherwise.
