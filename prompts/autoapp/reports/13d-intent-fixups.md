@@ -72,36 +72,50 @@ git diff --stat tests/ai-chat.test.ts                    (nothing)
 
 ## The by-hand run
 
-Compiled launcher from this commit's tree, over the real root, 2026-09-18. The 13c launcher (pid
-54153, the old binary) was still serving that root; I stopped it with SIGTERM and started the new one
-with `open --no-open`, which printed `restored: reading-list`. In the panel: select Reading list,
-Backlog, intent 1 (`stopped`, "1 completed · 1 interrupted · 2 blocked"), **Run**, confirm. The run
-began at 12:51:22 on the Settings model, OpenRouter `z-ai/glm-5.3`.
+Compiled launcher from this tree, over the real root, 2026-09-18. The 13c launcher (pid 54153, the
+old binary) was still serving that root; I stopped it with SIGTERM and started the new one with
+`open --no-open` (`restored: reading-list`). Settings model: OpenRouter `z-ai/glm-5.3`. Two runs:
 
-| task | model | turn | started | ended | tool calls | verdict |
+**Run 1, 12:51:22, pressed by me: out of credit.** Turns a4 and a5 of `0001-author-field` failed at
+the provider ("This request requires more credits, or fewer max_tokens. You requested up to 131072
+tokens, but can only afford 83488."), 62 s and 1 s, no tool call, and the run stopped "failed after 2
+attempts". The advice question failed the same way. The person topped the key up.
+
+**Run 2, 13:08:02, pressed by the person,** who had also set `0001-author-field`'s own model to
+`deepseek/deepseek-v4.1-flash` in the panel. Tool calls are the gate's steps in `runs.sqlite`.
+
+| task | model | turn | started | length | tool calls | verdict |
 |---|---|---|---|---|---|---|
-| 0001-author-field | glm-5.3 | a4 | 12:51:22 | 12:52:24 | 0 | not completed: checks not on the running preview; `…-c6` failed |
-| | | a5 | 12:52:24 | 12:52:25 | 0 | same; run stopped, "0001-author-field failed after 2 attempts." |
-| 0002-unread-page | glm-5.3 | – | – | – | – | not reached |
+| 0001-author-field | deepseek-v4.1-flash | a6 | 13:08:03 | 20m00s | 23 | not completed: `…-c6` failed; ran out of time |
+| | | a7 | 13:28:04 | 19m42s | 31: 2 edits, 2 builds, 3 checks | **completed**; est. 110, actual 184 lines; 528,192 in, 28,791 out |
+| 0002-unread-page | glm-5.3 | a1 | 13:47:46 | 10m05s | 13, reads only | not completed: no change, no example; **no tool call for 8 minutes**; error "Failed to process successful response" |
+| | | a2 | 13:57:51 | 8m31s | 12, reads only | the same; run stopped, "0002-unread-page failed after 2 attempts." |
 | 0003-author-counts | deepseek-v4-flash | – | – | – | – | not reached |
 
-**Why it stopped: the OpenRouter key is out of credit.** Both turns, and the advice question, failed
-at the provider: "This request requires more credits, or fewer max_tokens. You requested up to 131072
-tokens, but can only afford 83488." No tool was called and nothing in the workspace changed. The rest
-of the run was not measured; it needs the key topped up (a person's step), then **Run** again. The
-intent is `stopped`, `0001-author-field` is `failed` with 4 lifetime attempts, and nothing was activated.
+**What it shows about 13d.**
+- **The idle limit fired twice**, both on glm-5.3 after twelve or thirteen reads: 8 minutes of silence
+  ended turns that would otherwise have had twenty. That is the 13c pattern (twelve reads, no edit,
+  twenty minutes) cut to ten. Its sentence reached the failure and the builder's next message. The
+  abort also shows as "The turn ended with an error: Failed to process successful response", the SDK's
+  message for a response cut off mid-read: one cause, two sentences.
+- **Fix 2:** a6's verdict did not say "The workspace did not change." It was judged against 13c's first
+  turn, whose edits are still there.
+- **Fix 3 was not exercised by a real run.** 0001 went from 5 of 6 to completed, which the ordinary
+  second attempt allows; 0002 passed 0 then 0, so no progress and a stop after two, as the rule says.
+- **Fix 1:** 0001 completed with 0004's examples still passing; nothing was removed.
+- The advice for 0002, verbatim in substance: `retry`, "the run stalled and errored out before the
+  workspace was touched, so the plan has not been tested at all".
 
-What the run did show about 13d: attempt a4's verdict no longer says "The workspace did not change."
-(fix 2 — it is judged against 13c's first turn, and 13c's attempts did change it), and the two
-failures stopped the run after two counted turns, as neither got further.
+The intent is `stopped`; 0001 and 0004 are `completed` in the candidate, 0002 `failed`, 0003 queued.
+Nothing was activated. The launcher is still running.
 
 **Found, not changed here (out of scope):**
-- A provider error mid-turn is not in the verdict's reasons. `InProcessTurnResult.error` is set only
-  for a turn that could not start; one that fails on the provider ends `failed` with no `error`, so the
-  task's failure reads as if the builder had tried and missed. And such a turn costs an attempt, where
-  an interruption gives it back.
-- The launcher's stderr printed the provider's error text unredacted, including the key's
-  identifier in OpenRouter's settings URL; the knowledge log's copy has it `<redacted>`.
+- A provider failure is a builder's failure. The out-of-credit turns ended with no error in the
+  verdict (it read as a missed example) and each cost an attempt, where an interruption gives one back.
+- The launcher's stderr printed the provider's error text unredacted, including the key's identifier
+  in OpenRouter's settings URL; the knowledge log's copy has it `<redacted>`.
+- glm-5.3 stalled after reading on 0002 in both turns, as on 0001 in 13c; deepseek finished 0001.
+  Whether 0002 wants its own model is the person's call; the advice says retry.
 
 ## Open questions
 
