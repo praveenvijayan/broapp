@@ -24,12 +24,14 @@ met.
 After this prompt an acceptance example, each of its steps and a step's `view`
 refuse a key they do not know, with the key and its path.
 
-Run this after 14d is merged.
+Run this after 14e is merged: both are held by `tests/autoapp-activation.test.ts`,
+and 14e changes where activation reads and runs the examples.
 
 ## Read first
 
-- `prompts/autoapp/00-common-rules.md`; reports 12d (decision 6), 14d in full,
-  above all what it found about a specification's format version.
+- `prompts/autoapp/00-common-rules.md`; reports 12d (decision 6), 14d in full —
+  above all what it found about a specification's format version — and 14e
+  (where activation now runs the examples).
 - `packages/broapp-autoapp/src/spec/validate.ts` in full: `closed` (line ~131),
   how `capability` uses it, the `acceptance` schema (line ~196), `crossCheck`,
   `parseSpec`, and whatever produces the JSON schema the engineer is shown.
@@ -52,6 +54,11 @@ Run this after 14d is merged.
    from starting or listing, stop and report it as a deviation before going on:
    an application somebody is using must not stop working because its example
    has a stray key.
+3. The other side of that: a candidate **built before this prompt** with a stray
+   key in a step, and activated after it. 14e runs its examples on `data-check`
+   before the switch. Say what the person is told and confirm the previous
+   release is still serving. Refusing it there is right; it must be said in a
+   sentence that names the key, not as a failed example.
 
 ## Fixed decisions
 
@@ -103,7 +110,7 @@ New tests, beside the ones 14d added to `tests/autoapp-spec.test.ts`:
 ## Report
 
 `prompts/autoapp/reports/15a-a-step-refuses-what-it-does-not-know.md`: Step 0's
-two lists; every `parseSpec` caller and what a refusal does there; whether the
+three findings; every `parseSpec` caller and what a refusal does there; whether the
 JSON schema now says the objects are closed; which other specification objects
 are still open; what an older launcher does with a new field.
 

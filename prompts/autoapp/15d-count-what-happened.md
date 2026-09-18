@@ -27,7 +27,7 @@ the code says 0.
 After this prompt the first edit is the first edit that landed, and a turn's
 tokens are a known subtotal with a flag that says whether it is the whole.
 
-Run this after 14d is merged. Independent of 15a–15c.
+Run this after 14e is merged. Independent of 15a–15c.
 
 ## Read first
 

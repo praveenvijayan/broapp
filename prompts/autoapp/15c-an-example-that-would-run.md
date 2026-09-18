@@ -21,7 +21,7 @@ rather than a placeholder.
 After this prompt every example is one that would be applied, to a workspace
 that exists, and a test holds it to that.
 
-Run this after 14d is merged. Independent of 15a and 15b.
+Run this after 14e is merged. Independent of 15a and 15b.
 
 ## Read first
 
