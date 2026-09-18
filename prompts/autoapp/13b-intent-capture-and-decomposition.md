@@ -54,6 +54,26 @@ means. Nothing runs: 13c does that.
 | Logging | One knowledge event per accepted call through `options.knowledge.log`, kind `log`, level `info`: `intent 4 opened for notes`, `task 0007-add-tags proposed (deep)`, `intent 4 submitted with 5 tasks`. |
 | Not in scope | Running a task; `intent.start`; changing the executor's approvals; the panel's Run button; editing tasks from the panel; an evaluation condition. |
 
+## Step 0 — two corrections to 13a, before anything else
+
+From the review of report 13a. Both are small; do them first, with their tests,
+and list them in your report under their own heading.
+
+1. **Priority is `high`, `medium`, `low`.** 13a chose `normal` because the
+   prompt did not list the three; the plan format the person gave says
+   `medium`. Change `PRIORITIES` in `intent/types.ts`, the contract's copy, the
+   panel's pill, `docs/autoapp/intents.md`, the fixture in test 3 and any test
+   that names `normal` as a priority. `risk` keeps `high` and `normal`. No
+   migration: the column has no `CHECK` on priority; if you find one, add
+   migration 2 that rewrites `normal` to `medium` and replaces the constraint.
+   `runOrder` sorts `high`, `medium`, `low`.
+2. **A withdrawn intent's failed or interrupted task goes straight to
+   `removed`.** 13a routed it through `in-queue` because the move table had no
+   direct move, which writes a history row for a state the task was never in.
+   Add `failed→removed` and `interrupted→removed` to `TASK_MOVES`, make
+   `withdraw` use them, and change the test so a withdrawn failed task has one
+   event, not two. Update the moves table in `docs/autoapp/intents.md`.
+
 ## Step 1 — the tools
 
 `intent-tools.ts`, built with `guardedTool` like the others. Wire
