@@ -1000,3 +1000,95 @@ code {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/*
+ * The Backlog panel: the Knowledge panel's overlay and chips, with a task row
+ * that holds a control. A `<select>` cannot live inside the button that opens
+ * a row, so the line is a flex row of its own with the button as its first
+ * child.
+ */
+.launcher__intent-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  padding: 0.3rem 0.2rem;
+}
+
+.launcher__intent-line:hover {
+  background: var(--launcher-quiet);
+}
+
+.launcher__intent-open {
+  display: flex;
+  flex: 1 1 16rem;
+  align-items: baseline;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.1rem 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.launcher__intent-open:focus-visible,
+.launcher__intent-summary:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 1px;
+}
+
+.launcher__intent-model {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.launcher__intent-select {
+  max-width: 14rem;
+  font-size: 0.78rem;
+}
+
+.launcher__intent-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.launcher__intent-note,
+.launcher__intent-blocked {
+  color: var(--launcher-muted);
+  font-size: 0.72rem;
+}
+
+.launcher__intent-tiers {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--launcher-border);
+  border-radius: 8px;
+  background: var(--launcher-surface);
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+}
+
+.launcher__intent-summary {
+  font-weight: 600;
+  color: var(--launcher-heading);
+  cursor: pointer;
+}
+
+.launcher__intent-tier-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.launcher__intent-plan {
+  max-height: 24rem;
+  white-space: pre-wrap;
+}
+
+/* A slug is how a task is named everywhere else; it is never the part cut short. */
+.launcher__intent-open .launcher__log-time {
+  flex: none;
+}

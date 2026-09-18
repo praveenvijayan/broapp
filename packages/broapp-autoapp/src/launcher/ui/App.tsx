@@ -31,12 +31,13 @@ import {
 import type { BroappChatControls, BroappScheme } from 'broapp-ai-elements/ui';
 import { useConnection, useOperation } from 'broapp/react';
 import { announcePending, browserSurface } from 'broapp-autoapp/react';
-import { BookOpen, History, PanelRight, Plus, ScrollText, SlidersHorizontal } from 'lucide-react';
+import { BookOpen, History, ListChecks, PanelRight, Plus, ScrollText, SlidersHorizontal } from 'lucide-react';
 
 import type { LauncherContract } from '../contract.ts';
 
 import { AppsTable } from './AppsTable.tsx';
 import { CandidatePanel } from './CandidatePanel.tsx';
+import { IntentPanel } from './IntentPanel.tsx';
 import { KnowledgePanel } from './KnowledgePanel.tsx';
 import { LogsPanel } from './LogsPanel.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
@@ -112,6 +113,7 @@ export function App(): React.ReactElement {
   const [showSettings, setShowSettings] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showKnowledge, setShowKnowledge] = useState(false);
+  const [showBacklog, setShowBacklog] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(() => remembered(HISTORY_OPEN, true));
   const [appsOpen, setAppsOpen] = useState(() => remembered(APPS_OPEN, true));
   const [scheme, setScheme] = useState<BroappScheme>(() => readScheme());
@@ -318,6 +320,19 @@ export function App(): React.ReactElement {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [showKnowledge]);
 
+  // Escape closes the Backlog panel too, except while a select inside it has
+  // focus: there Escape belongs to the select, closing its list.
+  useEffect(() => {
+    if (!showBacklog) return undefined;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      if (document.activeElement?.tagName === 'SELECT') return;
+      setShowBacklog(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showBacklog]);
+
   // The host opens the tab; this page never sees the address. All it can be
   // told is that no browser could be opened.
   const notOpened = open.data?.opened === false;
@@ -380,6 +395,16 @@ export function App(): React.ReactElement {
           type="button"
         >
           <BookOpen aria-hidden="true" size={17} />
+        </button>
+        <button
+          aria-expanded={showBacklog}
+          aria-label="Backlog"
+          className="launcher__rail-button"
+          onClick={() => setShowBacklog((open) => !open)}
+          title="Backlog"
+          type="button"
+        >
+          <ListChecks aria-hidden="true" size={17} />
         </button>
         <div className="launcher__rail-spacer" />
         {/*
@@ -554,6 +579,18 @@ export function App(): React.ReactElement {
             type="button"
           />
           <KnowledgePanel apps={rows.map((row) => row.appId)} onClose={() => setShowKnowledge(false)} />
+        </>
+      ) : null}
+
+      {showBacklog ? (
+        <>
+          <button
+            aria-label="Close backlog"
+            className="launcher__scrim"
+            onClick={() => setShowBacklog(false)}
+            type="button"
+          />
+          <IntentPanel appId={selected} onClose={() => setShowBacklog(false)} />
         </>
       ) : null}
 

@@ -164,6 +164,126 @@ const caseRow = {
   edits: count,
 };
 
+/**
+ * The Backlog panel's rows.
+ *
+ * Written out rather than imported from `intent/types.ts` for the reason
+ * `STAGE_NAMES` is: the page bundles this contract. A test holds the lists
+ * equal.
+ */
+export const INTENT_STATUS_NAMES = ['draft', 'running', 'stopped', 'done', 'withdrawn'] as const;
+export const TASK_STATUS_NAMES = [
+  'proposed',
+  'in-queue',
+  'in-progress',
+  'needs-answer',
+  'completed',
+  'failed',
+  'interrupted',
+  'removed',
+] as const;
+
+const taskStatus = s.enum([...TASK_STATUS_NAMES, 'blocked']);
+const texts = (max: number, items: number): Schema<string[]> => s.array(s.string({ max }), { max: items });
+
+const intentSummary = s.object({
+  id: count,
+  appId: s.string({ max: 40 }),
+  status: s.enum(INTENT_STATUS_NAMES),
+  restated: s.string({ max: 4_000 }),
+  createdAt: count,
+  counts: s.object({
+    proposed: count,
+    'in-queue': count,
+    'in-progress': count,
+    'needs-answer': count,
+    completed: count,
+    failed: count,
+    interrupted: count,
+    removed: count,
+    blocked: count,
+  }),
+});
+
+const intentRecord = s.object({
+  id: count,
+  appId: s.string({ max: 40 }),
+  request: s.string({ max: 100_000 }),
+  restated: s.nullable(s.string({ max: 4_000 })),
+  fits: s.nullable(s.string({ max: 4_000 })),
+  conflicts: texts(1_000, 50),
+  outOfReach: texts(1_000, 50),
+  assumptions: texts(1_000, 50),
+  questions: texts(1_000, 50),
+  status: s.enum(INTENT_STATUS_NAMES),
+  proposedByRun: s.nullable(s.string({ max: 200 })),
+  hubModel: s.nullable(s.string({ max: 200 })),
+  createdAt: count,
+  submittedAt: s.nullable(count),
+  startedAt: s.nullable(count),
+  endedAt: s.nullable(count),
+  stopReason: s.nullable(s.string({ max: 2_000 })),
+});
+
+const taskEvent = s.object({
+  id: count,
+  at: count,
+  from: s.nullable(s.enum(TASK_STATUS_NAMES)),
+  to: s.enum(TASK_STATUS_NAMES),
+  note: s.string({ max: 2_000 }),
+});
+
+const taskRecord = s.object({
+  id: count,
+  intentId: count,
+  appId: s.string({ max: 40 }),
+  seq: count,
+  slug: s.string({ max: 80 }),
+  title: s.string({ max: 200 }),
+  priority: s.string({ max: 20 }),
+  labels: texts(20, 10),
+  blockedBy: texts(80, 20),
+  estimatedLines: count,
+  locks: texts(100, 10),
+  risk: s.string({ max: 20 }),
+  stub: s.boolean(),
+  repaidBy: s.nullable(s.string({ max: 80 })),
+  summary: s.string({ max: 1_000 }),
+  criteria: s.array(
+    s.object({ id: s.string({ max: 8 }), text: s.string({ max: 400 }), failure: s.boolean(), passed: s.optional(s.boolean()) }),
+    { max: 10 },
+  ),
+  noFailurePath: s.nullable(s.string({ max: 400 })),
+  nonFunctional: texts(400, 10),
+  testNotes: texts(400, 10),
+  runbook: texts(400, 10),
+  reasoning: s.string({ max: 20 }),
+  tier: s.enum(['light', 'standard', 'deep']),
+  tierReasons: texts(200, 10),
+  modelOverride: s.nullable(s.string({ max: 200 })),
+  stored: s.enum(TASK_STATUS_NAMES),
+  status: taskStatus,
+  waitingOn: texts(80, 20),
+  /** What the task will run on: its override, its tier's model, or `null` for Settings. */
+  model: s.nullable(s.string({ max: 200 })),
+  attempts: count,
+  revBefore: s.nullable(s.string({ max: 80 })),
+  revAfter: s.nullable(s.string({ max: 80 })),
+  releaseId: s.nullable(s.string({ max: 64 })),
+  actualLines: s.nullable(count),
+  runIds: texts(200, 100),
+  failure: s.unknown(),
+  advice: s.unknown(),
+  question: s.nullable(s.string({ max: 4_000 })),
+  answers: s.array(s.object({ question: s.string({ max: 4_000 }), answer: s.string({ max: 4_000 }), at: count }), { max: 100 }),
+  startedAt: s.nullable(count),
+  endedAt: s.nullable(count),
+  events: s.array(taskEvent, { max: 1_000 }),
+});
+
+const modelChoice = s.nullable(s.string({ min: 1, max: 200 }));
+const tierModels = s.object({ light: modelChoice, standard: modelChoice, deep: modelChoice });
+
 const appSummary = s.object({
   appId: s.string({ max: 40 }),
   name: s.string({ max: 200 }),
@@ -422,6 +542,59 @@ export const launcherContract = defineContract({
       }),
       output: s.object({ id: count }),
       summary: 'Write a confirmed lesson by hand, or replace one with a corrected lesson that supersedes it.',
+    },
+    'launcher.intentsList': {
+      effect: 'read',
+      input: s.object({
+        appId: s.optional(s.string({ max: 40 })),
+        limit: s.optional(s.number({ int: true, min: 1, max: 100 })),
+      }),
+      output: s.object({ intents: s.array(intentSummary, { max: 100 }) }),
+      summary: 'The backlog, newest first: each request and how many of its tasks are in each status.',
+    },
+    'launcher.intentGet': {
+      effect: 'read',
+      input: s.object({ id: s.number({ int: true, min: 1 }) }),
+      output: s.object({ intent: intentRecord, tasks: s.array(taskRecord, { max: 200 }) }),
+      summary: 'One request in full: what it was understood to be, and its tasks in the order they run.',
+    },
+    'launcher.intentPlan': {
+      effect: 'read',
+      input: s.object({ taskId: s.number({ int: true, min: 1 }) }),
+      output: s.object({ markdown: s.string({ max: 40_000 }) }),
+      summary: 'One task’s plan, as markdown.',
+    },
+    'launcher.intentModelsGet': {
+      effect: 'read',
+      input: s.void(),
+      output: tierModels,
+      summary: 'Which model runs a task of each tier; null is the model chosen in Settings.',
+    },
+    'launcher.intentTaskModel': {
+      // A person's choice, and a write: it changes what a task will run on.
+      // No engineer tool names this or any other backlog write.
+      effect: 'write',
+      input: s.object({ taskId: s.number({ int: true, min: 1 }), modelId: modelChoice }),
+      output: s.object({ model: s.nullable(s.string({ max: 200 })) }),
+      summary: 'Choose the model one task runs on, or clear the choice so its tier decides.',
+    },
+    'launcher.intentTaskRemove': {
+      effect: 'write',
+      input: s.object({ taskId: s.number({ int: true, min: 1 }) }),
+      output: s.object({ status: s.enum(TASK_STATUS_NAMES) }),
+      summary: 'Remove a task that has not started and that no other task depends on.',
+    },
+    'launcher.intentWithdraw': {
+      effect: 'write',
+      input: s.object({ id: s.number({ int: true, min: 1 }) }),
+      output: s.object({ status: s.enum(INTENT_STATUS_NAMES) }),
+      summary: 'Withdraw a request that is not running; every task it has not completed is removed.',
+    },
+    'launcher.intentModelsSet': {
+      effect: 'write',
+      input: tierModels,
+      output: tierModels,
+      summary: 'Choose which model runs a task of each tier.',
     },
     'launcher.grantsGet': {
       effect: 'read',

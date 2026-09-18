@@ -1,0 +1,694 @@
+/**
+ * The launcher's backlog: intents, their tasks, and every move a task made.
+ *
+ * One SQLite file beside `knowledge.sqlite`, with its own migrations and its
+ * own `user_version`, because it is a different thing with a different life: a
+ * lesson is evidence and is never rewritten, a task is work and moves. What the
+ * two share is the shape of the file and the reasoning about durability.
+ *
+ * Every write is one transaction, and every change of a task's status goes
+ * through {@link IntentStore.moveTask}, which refuses a move the table in
+ * `types.ts` does not list and appends the event in the same transaction. A
+ * status that changed without an event is a history that lies.
+ */
+import { Database } from 'bun:sqlite';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { publicError } from 'broapp/host';
+
+import { makeSlug, slugWords, validateGraph, validateTask, type GraphTask } from './plan.ts';
+import { tierOf } from './tier.ts';
+import {
+  isAllowedMove,
+  TASK_STATUSES,
+  type Criterion,
+  type IntentAnalysis,
+  type IntentRecord,
+  type IntentStatus,
+  type Label,
+  type PlanProblem,
+  type Priority,
+  type Reasoning,
+  type Risk,
+  type StoredTaskStatus,
+  type TaskEvent,
+  type TaskInput,
+  type TaskRecord,
+  type TaskStatus,
+  type Tier,
+} from './types.ts';
+
+/** The file, inside the launcher's own data directory. */
+export const INTENTS_FILE = 'intents.sqlite';
+
+/**
+ * The migrations, in order. Append; never edit one that has shipped.
+ *
+ * The first creates every column 13b and 13c will write, so the prompts that
+ * fill the backlog and run it add behaviour rather than schema. `app_id` is on
+ * a task as well as on its intent because a slug is unique per application,
+ * and a unique index can only name columns of its own table.
+ */
+const MIGRATIONS: readonly string[] = [
+  `CREATE TABLE intents (
+     id INTEGER PRIMARY KEY, app_id TEXT NOT NULL, request TEXT NOT NULL,
+     restated TEXT, fits TEXT,
+     conflicts TEXT NOT NULL DEFAULT '[]', out_of_reach TEXT NOT NULL DEFAULT '[]',
+     assumptions TEXT NOT NULL DEFAULT '[]', questions TEXT NOT NULL DEFAULT '[]',
+     status TEXT NOT NULL CHECK (status IN ('draft', 'running', 'stopped', 'done', 'withdrawn')),
+     proposed_by_run TEXT, hub_model TEXT,
+     created_at INTEGER NOT NULL, submitted_at INTEGER, started_at INTEGER, ended_at INTEGER, stop_reason TEXT);
+   CREATE INDEX intents_app ON intents(app_id, created_at);
+   CREATE TABLE tasks (
+     id INTEGER PRIMARY KEY, intent_id INTEGER NOT NULL REFERENCES intents(id), app_id TEXT NOT NULL,
+     seq INTEGER NOT NULL, slug TEXT NOT NULL, title TEXT NOT NULL, priority TEXT NOT NULL,
+     labels TEXT NOT NULL, blocked_by TEXT NOT NULL, estimated_lines INTEGER NOT NULL, locks TEXT NOT NULL,
+     risk TEXT NOT NULL, stub INTEGER NOT NULL, repaid_by TEXT, summary TEXT NOT NULL,
+     criteria TEXT NOT NULL, no_failure_path TEXT,
+     non_functional TEXT NOT NULL DEFAULT '[]', test_notes TEXT NOT NULL DEFAULT '[]', runbook TEXT NOT NULL DEFAULT '[]',
+     reasoning TEXT NOT NULL, tier TEXT NOT NULL, tier_reasons TEXT NOT NULL, model_override TEXT,
+     status TEXT NOT NULL CHECK (status IN (${TASK_STATUSES.map((status) => `'${status}'`).join(', ')})),
+     attempts INTEGER NOT NULL DEFAULT 0, rev_before TEXT, rev_after TEXT, release_id TEXT, actual_lines INTEGER,
+     run_ids TEXT NOT NULL DEFAULT '[]', failure TEXT, advice TEXT, question TEXT, answers TEXT NOT NULL DEFAULT '[]',
+     started_at INTEGER, ended_at INTEGER);
+   CREATE UNIQUE INDEX tasks_slug ON tasks(app_id, slug);
+   CREATE UNIQUE INDEX tasks_seq ON tasks(intent_id, seq);
+   CREATE TABLE task_events (
+     id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL REFERENCES tasks(id), at INTEGER NOT NULL,
+     from_status TEXT, to_status TEXT NOT NULL, note TEXT NOT NULL);
+   CREATE INDEX task_events_task ON task_events(task_id, id);
+   CREATE TRIGGER task_events_append_only_update BEFORE UPDATE ON task_events
+   BEGIN SELECT RAISE(ABORT, 'a task''s history is appended to, never rewritten'); END;
+   CREATE TRIGGER task_events_append_only_delete BEFORE DELETE ON task_events
+   BEGIN SELECT RAISE(ABORT, 'a task''s history is appended to, never rewritten'); END;`,
+];
+
+/** An intent as the list shows it. */
+export interface IntentSummary {
+  readonly id: number;
+  readonly appId: string;
+  readonly status: IntentStatus;
+  /** The restatement, or the first 120 characters of the request. */
+  readonly restated: string;
+  readonly createdAt: number;
+  /** How many tasks are in each status a reader sees, `blocked` included. */
+  readonly counts: Readonly<Record<TaskStatus, number>>;
+}
+
+/** A task and its history. */
+export interface TaskWithEvents extends TaskRecord {
+  readonly events: readonly TaskEvent[];
+}
+
+/** An intent in full, with its tasks in run order. */
+export interface IntentDetail {
+  readonly intent: IntentRecord;
+  readonly tasks: readonly TaskWithEvents[];
+}
+
+/** What a new intent is opened with. */
+export interface NewIntent {
+  readonly appId: string;
+  readonly request: string;
+  readonly proposedByRun?: string;
+  readonly hubModel?: string;
+}
+
+/** The backlog. */
+export interface IntentStore {
+  /** The directory the store and the tier-to-model file live in. */
+  readonly dataDir: string;
+  /** For tests and the sibling modules in this directory only. */
+  readonly db: Database;
+  createIntent(intent: NewIntent): IntentRecord;
+  /** Replace what the intent was understood to be. Only while it is a draft. */
+  replaceAnalysis(intentId: number, analysis: IntentAnalysis): IntentRecord;
+  /** Validate a task, give it a slug and a tier, and add it as `proposed`. */
+  addTask(intentId: number, input: TaskInput): TaskRecord;
+  /** Replace a `proposed` task's plan. The slug stays. */
+  replaceTask(taskId: number, input: TaskInput): TaskRecord;
+  /** The one way a task's status changes. */
+  moveTask(taskId: number, to: StoredTaskStatus, note: string): TaskRecord;
+  /** A task's own model, or `null` for its tier's. */
+  setModel(taskId: number, modelId: string | null): TaskRecord;
+  /** Remove a task nothing live depends on. */
+  removeTask(taskId: number, note?: string): TaskRecord;
+  /** Withdraw a draft or stopped intent; every task not completed is removed. */
+  withdraw(intentId: number): IntentRecord;
+  get(intentId: number): IntentDetail | null;
+  task(taskId: number): TaskRecord | null;
+  list(filter?: { readonly appId?: string; readonly limit?: number }): IntentSummary[];
+  /** An intent's tasks: blockers first, then priority, then slug. */
+  runOrder(intentId: number): TaskRecord[];
+  close(): void;
+}
+
+/** Options for {@link openIntents}. */
+export interface OpenIntentsOptions {
+  /** The clock rows are stamped with. Tests move it. */
+  readonly now?: () => number;
+}
+
+interface IntentRow {
+  id: number;
+  app_id: string;
+  request: string;
+  restated: string | null;
+  fits: string | null;
+  conflicts: string;
+  out_of_reach: string;
+  assumptions: string;
+  questions: string;
+  status: IntentStatus;
+  proposed_by_run: string | null;
+  hub_model: string | null;
+  created_at: number;
+  submitted_at: number | null;
+  started_at: number | null;
+  ended_at: number | null;
+  stop_reason: string | null;
+}
+
+interface TaskRow {
+  id: number;
+  intent_id: number;
+  app_id: string;
+  seq: number;
+  slug: string;
+  title: string;
+  priority: Priority;
+  labels: string;
+  blocked_by: string;
+  estimated_lines: number;
+  locks: string;
+  risk: Risk;
+  stub: number;
+  repaid_by: string | null;
+  summary: string;
+  criteria: string;
+  no_failure_path: string | null;
+  non_functional: string;
+  test_notes: string;
+  runbook: string;
+  reasoning: Reasoning;
+  tier: Tier;
+  tier_reasons: string;
+  model_override: string | null;
+  status: StoredTaskStatus;
+  attempts: number;
+  rev_before: string | null;
+  rev_after: string | null;
+  release_id: string | null;
+  actual_lines: number | null;
+  run_ids: string;
+  failure: string | null;
+  advice: string | null;
+  question: string | null;
+  answers: string;
+  started_at: number | null;
+  ended_at: number | null;
+}
+
+interface EventRow {
+  id: number;
+  task_id: number;
+  at: number;
+  from_status: StoredTaskStatus | null;
+  to_status: StoredTaskStatus;
+  note: string;
+}
+
+/** JSON the store wrote itself; anything else reads as the fallback. */
+function parsed<T>(text: string | null, fallback: T): T {
+  if (text === null) return fallback;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function strings(text: string): string[] {
+  const value = parsed<unknown>(text, []);
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+const PRIORITY_RANK: Readonly<Record<Priority, number>> = { high: 0, normal: 1, low: 2 };
+
+/** The statuses whose model may still be chosen: before it runs, or after it stopped. */
+const MODEL_EDITABLE: readonly StoredTaskStatus[] = ['proposed', 'in-queue', 'failed', 'interrupted'];
+/** The statuses a person may remove a task from. */
+const REMOVABLE: readonly StoredTaskStatus[] = ['proposed', 'in-queue'];
+
+function invalid(problems: readonly PlanProblem[]): never {
+  throw publicError.invalidInput(problems.map((problem) => `${problem.field}: ${problem.message}`).join(' '));
+}
+
+/** Open (and create) the backlog inside `dataDir`. */
+export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): IntentStore {
+  const now = options.now ?? Date.now;
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  const db = new Database(join(dataDir, INTENTS_FILE), { create: true, strict: true });
+  // `synchronous` stays at WAL's NORMAL for the reasons written beside the same
+  // pragmas in `knowledge/store.ts`: nothing here is read by recovery.
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA foreign_keys = ON');
+  db.exec('PRAGMA busy_timeout = 5000');
+
+  const at = db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0;
+  for (let index = at; index < MIGRATIONS.length; index += 1) {
+    const statement = MIGRATIONS[index];
+    if (statement === undefined) break;
+    db.transaction(() => {
+      db.exec(statement);
+      db.exec(`PRAGMA user_version = ${String(index + 1)}`);
+    })();
+  }
+
+  const intentRow = (id: number): IntentRow | null =>
+    db.query<IntentRow, [number]>('SELECT * FROM intents WHERE id = ?').get(id);
+  const taskRow = (id: number): TaskRow | null => db.query<TaskRow, [number]>('SELECT * FROM tasks WHERE id = ?').get(id);
+  const appTasks = (appId: string): TaskRow[] =>
+    db.query<TaskRow, [string]>('SELECT * FROM tasks WHERE app_id = ? ORDER BY slug').all(appId);
+
+  function toIntent(row: IntentRow): IntentRecord {
+    return {
+      id: row.id,
+      appId: row.app_id,
+      request: row.request,
+      restated: row.restated,
+      fits: row.fits,
+      conflicts: strings(row.conflicts),
+      outOfReach: strings(row.out_of_reach),
+      assumptions: strings(row.assumptions),
+      questions: strings(row.questions),
+      status: row.status,
+      proposedByRun: row.proposed_by_run,
+      hubModel: row.hub_model,
+      createdAt: row.created_at,
+      submittedAt: row.submitted_at,
+      startedAt: row.started_at,
+      endedAt: row.ended_at,
+      stopReason: row.stop_reason,
+    };
+  }
+
+  /** A row as a record, with `blocked` derived from its application's other tasks. */
+  function toTask(row: TaskRow, statusOf: ReadonlyMap<string, StoredTaskStatus>): TaskRecord {
+    const blockedBy = strings(row.blocked_by);
+    const waitingOn = row.status === 'in-queue' ? blockedBy.filter((slug) => statusOf.get(slug) !== 'completed') : [];
+    return {
+      id: row.id,
+      intentId: row.intent_id,
+      appId: row.app_id,
+      seq: row.seq,
+      slug: row.slug,
+      title: row.title,
+      priority: row.priority,
+      labels: strings(row.labels) as Label[],
+      blockedBy,
+      estimatedLines: row.estimated_lines,
+      locks: strings(row.locks),
+      risk: row.risk,
+      stub: row.stub === 1,
+      repaidBy: row.repaid_by,
+      summary: row.summary,
+      criteria: parsed<Criterion[]>(row.criteria, []),
+      noFailurePath: row.no_failure_path,
+      nonFunctional: strings(row.non_functional),
+      testNotes: strings(row.test_notes),
+      runbook: strings(row.runbook),
+      reasoning: row.reasoning,
+      tier: row.tier,
+      tierReasons: strings(row.tier_reasons),
+      modelOverride: row.model_override,
+      stored: row.status,
+      status: waitingOn.length > 0 ? 'blocked' : row.status,
+      waitingOn,
+      attempts: row.attempts,
+      revBefore: row.rev_before,
+      revAfter: row.rev_after,
+      releaseId: row.release_id,
+      actualLines: row.actual_lines,
+      runIds: strings(row.run_ids),
+      failure: parsed<unknown>(row.failure, null),
+      advice: parsed<unknown>(row.advice, null),
+      question: row.question,
+      answers: parsed<TaskRecord['answers']>(row.answers, []),
+      startedAt: row.started_at,
+      endedAt: row.ended_at,
+    };
+  }
+
+  function statuses(appId: string): Map<string, StoredTaskStatus> {
+    return new Map(
+      db
+        .query<{ slug: string; status: StoredTaskStatus }, [string]>('SELECT slug, status FROM tasks WHERE app_id = ?')
+        .all(appId)
+        .map((row) => [row.slug, row.status]),
+    );
+  }
+
+  function readTask(id: number): TaskRecord {
+    const row = taskRow(id);
+    if (row === null) throw publicError.notFound(`There is no task ${String(id)}.`);
+    return toTask(row, statuses(row.app_id));
+  }
+
+  function readIntent(id: number): IntentRecord {
+    const row = intentRow(id);
+    if (row === null) throw publicError.notFound(`There is no intent ${String(id)}.`);
+    return toIntent(row);
+  }
+
+  function graphOf(rows: readonly TaskRow[]): GraphTask[] {
+    return rows.map((row) => ({
+      slug: row.slug,
+      intentId: row.intent_id,
+      blockedBy: strings(row.blocked_by),
+      stored: row.status,
+    }));
+  }
+
+  /** The plan columns of a task, as bound parameters, in one fixed order. */
+  function planColumns(input: TaskInput): (string | number | null)[] {
+    const { tier, reasons } = tierOf(input);
+    const criteria: Criterion[] = input.criteria.map((criterion, index) => ({
+      id: `c${String(index + 1)}`,
+      text: criterion.text,
+      failure: criterion.failure,
+    }));
+    return [
+      input.title,
+      input.priority,
+      JSON.stringify(input.labels),
+      JSON.stringify(input.blockedBy),
+      input.estimatedLines,
+      JSON.stringify(input.locks),
+      input.risk,
+      input.stub ? 1 : 0,
+      input.repaidBy ?? null,
+      input.summary,
+      JSON.stringify(criteria),
+      input.noFailurePath ?? null,
+      JSON.stringify(input.nonFunctional ?? []),
+      JSON.stringify(input.testNotes ?? []),
+      JSON.stringify(input.runbook ?? []),
+      input.reasoning,
+      tier,
+      JSON.stringify(reasons),
+    ];
+  }
+
+  const PLAN_COLUMNS = [
+    'title', 'priority', 'labels', 'blocked_by', 'estimated_lines', 'locks', 'risk', 'stub', 'repaid_by',
+    'summary', 'criteria', 'no_failure_path', 'non_functional', 'test_notes', 'runbook', 'reasoning', 'tier', 'tier_reasons',
+  ] as const;
+
+  /** Refuse a task whose plan or whose place in the graph is wrong. */
+  function check(input: TaskInput, row: { slug: string; intentId: number; id: number | null }, appId: string): void {
+    const others = appTasks(appId).filter((task) => task.id !== row.id);
+    const problems = validateTask(
+      input,
+      others.map((task) => ({ slug: task.slug, stored: task.status })),
+      row.id === null ? undefined : row.slug,
+    );
+    if (problems.length > 0) invalid(problems);
+    const graph = validateGraph([
+      ...graphOf(others),
+      { slug: row.slug, intentId: row.intentId, blockedBy: input.blockedBy, stored: 'proposed' },
+    ]);
+    if (graph.length > 0) invalid(graph);
+  }
+
+  function appendEvent(taskId: number, from: StoredTaskStatus | null, to: StoredTaskStatus, note: string): void {
+    db.query<null, [number, number, StoredTaskStatus | null, StoredTaskStatus, string]>(
+      'INSERT INTO task_events (task_id, at, from_status, to_status, note) VALUES (?, ?, ?, ?, ?)',
+    ).run(taskId, now(), from, to, note);
+  }
+
+  function move(taskId: number, to: StoredTaskStatus, note: string): void {
+    const row = taskRow(taskId);
+    if (row === null) throw publicError.notFound(`There is no task ${String(taskId)}.`);
+    if (!isAllowedMove(row.status, to)) {
+      throw publicError.conflict(`${row.slug} cannot move from ${row.status} to ${to}.`);
+    }
+    db.query<null, [StoredTaskStatus, number]>('UPDATE tasks SET status = ? WHERE id = ?').run(to, taskId);
+    appendEvent(taskId, row.status, to, note);
+  }
+
+  /** Live tasks of the application, outside `except`, that wait on or repay one of `slugs`. */
+  function dependants(appId: string, slugs: ReadonlySet<string>, except: ReadonlySet<number>): string[] {
+    return appTasks(appId)
+      .filter((task) => task.status !== 'removed' && !except.has(task.id))
+      .filter((task) => strings(task.blocked_by).some((slug) => slugs.has(slug)) || (task.repaid_by !== null && slugs.has(task.repaid_by)))
+      .map((task) => task.slug);
+  }
+
+  function orderOf(intentId: number): TaskRecord[] {
+    const intent = intentRow(intentId);
+    if (intent === null) throw publicError.notFound(`There is no intent ${String(intentId)}.`);
+    const statusOf = statuses(intent.app_id);
+    const tasks = db
+      .query<TaskRow, [number]>('SELECT * FROM tasks WHERE intent_id = ? ORDER BY seq')
+      .all(intentId)
+      .map((row) => toTask(row, statusOf));
+
+    // Kahn's algorithm over the blockers inside this intent. A blocker in
+    // another intent orders nothing here: it is either done or it holds the
+    // task `blocked`, which the status already says.
+    const bySlug = new Map(tasks.map((task) => [task.slug, task]));
+    const waiting = new Map(tasks.map((task) => [task.slug, task.blockedBy.filter((slug) => bySlug.has(slug)).length]));
+    const before = (a: TaskRecord, b: TaskRecord): number =>
+      PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.slug.localeCompare(b.slug);
+    const ready = tasks.filter((task) => waiting.get(task.slug) === 0);
+    const out: TaskRecord[] = [];
+    while (ready.length > 0) {
+      ready.sort(before);
+      const next = ready.shift();
+      if (next === undefined) break;
+      out.push(next);
+      for (const task of tasks) {
+        if (!task.blockedBy.includes(next.slug)) continue;
+        const left = (waiting.get(task.slug) ?? 0) - 1;
+        waiting.set(task.slug, left);
+        if (left === 0) ready.push(task);
+      }
+    }
+    // A cycle cannot be stored, but a row written by hand could make one; its
+    // tasks go last rather than vanishing from the list.
+    const placed = new Set(out.map((task) => task.slug));
+    return [...out, ...tasks.filter((task) => !placed.has(task.slug)).sort(before)];
+  }
+
+  let closed = false;
+  return {
+    dataDir,
+    db,
+
+    createIntent({ appId, request, proposedByRun, hubModel }) {
+      if (request.trim().length === 0) throw publicError.invalidInput('request: an intent needs the words the person typed.');
+      const id = db
+        .query<{ id: number }, [string, string, string | null, string | null, number]>(
+          `INSERT INTO intents (app_id, request, status, proposed_by_run, hub_model, created_at)
+           VALUES (?, ?, 'draft', ?, ?, ?) RETURNING id`,
+        )
+        .get(appId, request, proposedByRun ?? null, hubModel ?? null, now())?.id;
+      if (id === undefined) throw new Error('the intent was not written');
+      return readIntent(id);
+    },
+
+    replaceAnalysis(intentId, analysis) {
+      return db.transaction(() => {
+        const intent = readIntent(intentId);
+        if (intent.status !== 'draft') {
+          throw publicError.conflict(`Intent ${String(intentId)} is ${intent.status}; its analysis is changed only while it is a draft.`);
+        }
+        db.query<null, [string | null, string | null, string, string, string, string, number]>(
+          `UPDATE intents SET restated = ?, fits = ?, conflicts = ?, out_of_reach = ?, assumptions = ?, questions = ?
+           WHERE id = ?`,
+        ).run(
+          analysis.restated,
+          analysis.fits,
+          JSON.stringify(analysis.conflicts),
+          JSON.stringify(analysis.outOfReach),
+          JSON.stringify(analysis.assumptions),
+          JSON.stringify(analysis.questions),
+          intentId,
+        );
+        return readIntent(intentId);
+      })();
+    },
+
+    addTask(intentId, input) {
+      return db.transaction(() => {
+        const intent = readIntent(intentId);
+        if (intent.status !== 'draft' && intent.status !== 'stopped') {
+          throw publicError.conflict(`Intent ${String(intentId)} is ${intent.status}; tasks are added only to a draft or a stopped one.`);
+        }
+        const words = input.words ?? slugWords(input.title);
+        // The next free number for the application, across all its intents.
+        const highest =
+          db
+            .query<{ n: number | null }, [string]>('SELECT MAX(CAST(substr(slug, 1, 4) AS INTEGER)) AS n FROM tasks WHERE app_id = ?')
+            .get(intent.appId)?.n ?? 0;
+        const slug = makeSlug(highest + 1, words);
+        check(input, { slug, intentId, id: null }, intent.appId);
+        const seq =
+          (db.query<{ n: number | null }, [number]>('SELECT MAX(seq) AS n FROM tasks WHERE intent_id = ?').get(intentId)?.n ?? 0) + 1;
+        const columns = ['intent_id', 'app_id', 'seq', 'slug', ...PLAN_COLUMNS, 'status'];
+        const id = db
+          .query<{ id: number }, (string | number | null)[]>(
+            `INSERT INTO tasks (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')}) RETURNING id`,
+          )
+          .get(intentId, intent.appId, seq, slug, ...planColumns(input), 'proposed')?.id;
+        if (id === undefined) throw new Error('the task was not written');
+        appendEvent(id, null, 'proposed', 'planned');
+        return readTask(id);
+      })();
+    },
+
+    replaceTask(taskId, input) {
+      return db.transaction(() => {
+        const row = taskRow(taskId);
+        if (row === null) throw publicError.notFound(`There is no task ${String(taskId)}.`);
+        if (row.status !== 'proposed') {
+          throw publicError.conflict(`${row.slug} is ${row.status}; a plan is replaced only while it is proposed.`);
+        }
+        check(input, { slug: row.slug, intentId: row.intent_id, id: row.id }, row.app_id);
+        db.query<null, (string | number | null)[]>(
+          `UPDATE tasks SET ${PLAN_COLUMNS.map((column) => `${column} = ?`).join(', ')} WHERE id = ?`,
+        ).run(...planColumns(input), taskId);
+        return readTask(taskId);
+      })();
+    },
+
+    moveTask(taskId, to, note) {
+      return db.transaction(() => {
+        move(taskId, to, note);
+        return readTask(taskId);
+      })();
+    },
+
+    setModel(taskId, modelId) {
+      return db.transaction(() => {
+        const row = taskRow(taskId);
+        if (row === null) throw publicError.notFound(`There is no task ${String(taskId)}.`);
+        if (!MODEL_EDITABLE.includes(row.status)) {
+          throw publicError.conflict(
+            `${row.slug} is ${row.status}. A task's model is chosen before it runs or after it stopped, not while it runs or once it is finished.`,
+          );
+        }
+        db.query<null, [string | null, number]>('UPDATE tasks SET model_override = ? WHERE id = ?').run(modelId, taskId);
+        return readTask(taskId);
+      })();
+    },
+
+    removeTask(taskId, note = 'removed by a person') {
+      return db.transaction(() => {
+        const row = taskRow(taskId);
+        if (row === null) throw publicError.notFound(`There is no task ${String(taskId)}.`);
+        if (!REMOVABLE.includes(row.status)) {
+          throw publicError.conflict(`${row.slug} is ${row.status}; only a proposed or queued task can be removed.`);
+        }
+        const waiting = dependants(row.app_id, new Set([row.slug]), new Set([row.id]));
+        if (waiting.length > 0) {
+          throw publicError.conflict(`${row.slug} cannot be removed: ${waiting.join(', ')} depend${waiting.length === 1 ? 's' : ''} on it.`);
+        }
+        move(taskId, 'removed', note);
+        return readTask(taskId);
+      })();
+    },
+
+    withdraw(intentId) {
+      return db.transaction(() => {
+        const intent = readIntent(intentId);
+        if (intent.status !== 'draft' && intent.status !== 'stopped') {
+          throw publicError.conflict(`Intent ${String(intentId)} is ${intent.status}; only a draft or a stopped intent can be withdrawn.`);
+        }
+        const rows = db.query<TaskRow, [number]>('SELECT * FROM tasks WHERE intent_id = ?').all(intentId);
+        const going = rows.filter((row) => row.status !== 'completed' && row.status !== 'removed');
+        const running = going.filter((row) => row.status === 'in-progress');
+        if (running.length > 0) {
+          throw publicError.conflict(`${running.map((row) => row.slug).join(', ')} is still running. Stop it before withdrawing.`);
+        }
+        const waiting = dependants(intent.appId, new Set(going.map((row) => row.slug)), new Set(rows.map((row) => row.id)));
+        if (waiting.length > 0) {
+          throw publicError.conflict(
+            `Intent ${String(intentId)} cannot be withdrawn: ${waiting.join(', ')} in another intent depend${waiting.length === 1 ? 's' : ''} on its tasks.`,
+          );
+        }
+        for (const row of going) {
+          // A failed or interrupted task has no move straight to `removed`;
+          // it goes back to the queue first, and its history says why.
+          if (row.status === 'failed' || row.status === 'interrupted') move(row.id, 'in-queue', 'the intent was withdrawn');
+          move(row.id, 'removed', 'the intent was withdrawn');
+        }
+        db.query<null, [number, number]>("UPDATE intents SET status = 'withdrawn', ended_at = ? WHERE id = ?").run(now(), intentId);
+        return readIntent(intentId);
+      })();
+    },
+
+    get(intentId) {
+      const row = intentRow(intentId);
+      if (row === null) return null;
+      const events = db
+        .query<EventRow, [number]>(
+          'SELECT e.* FROM task_events e JOIN tasks t ON t.id = e.task_id WHERE t.intent_id = ? ORDER BY e.id',
+        )
+        .all(intentId);
+      return {
+        intent: toIntent(row),
+        tasks: orderOf(intentId).map((task) => ({
+          ...task,
+          events: events
+            .filter((event) => event.task_id === task.id)
+            .map((event) => ({ id: event.id, at: event.at, from: event.from_status, to: event.to_status, note: event.note })),
+        })),
+      };
+    },
+
+    task(taskId) {
+      const row = taskRow(taskId);
+      return row === null ? null : toTask(row, statuses(row.app_id));
+    },
+
+    list(filter = {}) {
+      const limit = filter.limit ?? 100;
+      const rows =
+        filter.appId === undefined
+          ? db.query<IntentRow, [number]>('SELECT * FROM intents ORDER BY created_at DESC, id DESC LIMIT ?').all(limit)
+          : db
+              .query<IntentRow, [string, number]>('SELECT * FROM intents WHERE app_id = ? ORDER BY created_at DESC, id DESC LIMIT ?')
+              .all(filter.appId, limit);
+      return rows.map((row) => {
+        const counts = Object.fromEntries([...TASK_STATUSES, 'blocked'].map((status) => [status, 0])) as Record<TaskStatus, number>;
+        for (const task of orderOf(row.id)) counts[task.status] += 1;
+        return {
+          id: row.id,
+          appId: row.app_id,
+          status: row.status,
+          restated: row.restated ?? row.request.slice(0, 120),
+          createdAt: row.created_at,
+          counts,
+        };
+      });
+    },
+
+    runOrder: orderOf,
+
+    close() {
+      if (closed) return;
+      closed = true;
+      // As the knowledge store does: fold the WAL back in and leave one file.
+      try {
+        db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+        db.exec('PRAGMA journal_mode = DELETE');
+      } catch {
+        // Another connection has it open. Not a reason to keep this one.
+      }
+      db.close();
+    },
+  };
+}

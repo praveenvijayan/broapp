@@ -38,9 +38,10 @@ about an unsigned binary, are in [Packaging and offline](packaging.md).
 2. [Components](components.md) — the three layers that draw a page, the one palette that reaches all three, and what anything new has to pass.
 3. [Design guidance](design-guidance.md) — what the engineer is told about deciding a page, what was left out of it on purpose, and the detector that runs over the gallery.
 4. [What the launcher remembers](learning.md) — the record of what the engineer did, and the lessons a resolved case can leave behind.
-5. [Approvals and limits](security.md) — which calls stop and ask, and how an answer is bound to its question.
-6. [Packaging and offline](packaging.md) — the artifacts, where they have been run, and which offline claims have evidence.
-7. [Phase 2 backlog](backlog.md) — what phase 1 left out, and what would make each item worth doing.
+5. [The backlog](intents.md) — a request split into tasks written as plans, the tier each task gets, and the panel that shows them.
+6. [Approvals and limits](security.md) — which calls stop and ask, and how an answer is bound to its question.
+7. [Packaging and offline](packaging.md) — the artifacts, where they have been run, and which offline claims have evidence.
+8. [Phase 2 backlog](backlog.md) — what phase 1 left out, and what would make each item worth doing.
 
 Autoapp is not containment: a candidate release is trusted local code, crash
 isolated but not permission isolated. See [Scope and limitations](../limitations.md).

@@ -96,7 +96,7 @@ describe('the Autoapp landing page', () => {
     for (const block of blocks) expect(readme).toContain(block);
   });
 
-  test('lists the section’s seven pages in reading order', () => {
+  test('lists the section’s eight pages in reading order', () => {
     // The renderer has no continuation lines in list items, so a wrapped item
     // would come out as six one-item lists and loose paragraphs.
     const list = /<h2 id="read-next">Read next<\/h2>\n<ol>([\s\S]*?)<\/ol>/.exec(page('autoapp.html'))?.[1] ?? '';
@@ -105,6 +105,7 @@ describe('the Autoapp landing page', () => {
       'autoapp-components.html',
       'autoapp-design-guidance.html',
       'autoapp-learning.html',
+      'autoapp-intents.html',
       'autoapp-security.html',
       'autoapp-packaging.html',
       'autoapp-backlog.html',

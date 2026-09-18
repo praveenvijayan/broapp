@@ -26,6 +26,7 @@ import type { RunningApp } from 'broapp/host';
 
 import { createCandidateStates } from '../engineer/state.ts';
 import { createRunStore } from '../host/run-store.ts';
+import { openIntents, type IntentStore } from '../intent/index.ts';
 import { connectControl, type ControlClient } from '../mcp/client.ts';
 import {
   createEventLog,
@@ -193,6 +194,8 @@ async function readLine(): Promise<string> {
 interface Recording {
   readonly knowledge: Knowledge;
   readonly log: EventLog;
+  /** The backlog, opened beside knowledge by the same long-running commands. */
+  readonly intents: IntentStore;
 }
 
 /** The logger to hand everything: the event log when there is one. */
@@ -339,6 +342,7 @@ async function openLauncher(
             log: recording.log,
             evidence: createEvidence(recording.knowledge, recording.log),
           },
+          intents: recording.intents,
         }),
     templates,
     versions: VERSIONS,
@@ -376,6 +380,7 @@ async function openLauncher(
       // The run store, then knowledge: the last things a stopping child says
       // are written to the log before it closes.
       store.close();
+      recording?.intents.close();
       recording?.knowledge.close();
     },
   });
@@ -685,10 +690,13 @@ async function main(): Promise<number> {
   // commands keep printing to the terminal and write nothing.
   const longRunning = command === undefined || command === 'open' || command === 'serve';
   const knowledge = longRunning ? openKnowledge(join(root.root, 'launcher')) : null;
+  // The backlog lives beside knowledge and opens with it; nothing but the
+  // launcher's tab reads it, and a one-shot command never needs it.
+  const intents = knowledge === null ? null : openIntents(join(root.root, 'launcher'));
   const recording: Recording | null =
-    knowledge === null
+    knowledge === null || intents === null
       ? null
-      : { knowledge, log: createEventLog(knowledge, { source: 'launcher', tee: console }) };
+      : { knowledge, log: createEventLog(knowledge, { source: 'launcher', tee: console }), intents };
   const supervisor = createSupervisor(loggerOf(recording));
   stopChildrenOnExit(supervisor);
 
@@ -833,6 +841,7 @@ async function main(): Promise<number> {
     journal.close();
     // Already closed by the launcher tab's shutdown when that is what ran;
     // closing twice is harmless, and `serve <appId>` has no shutdown of its own.
+    intents?.close();
     knowledge?.close();
     // Every command but `serve` is one-shot, and a live child's IPC channel is
     // a handle that keeps this process's event loop open. Leaving one behind

@@ -17,6 +17,7 @@ import type { Bridge } from 'brobridge';
 import { startPreview } from '../engineer/preview.ts';
 import type { CandidateStates } from '../engineer/state.ts';
 import type { RunStore } from '../host/run-store.ts';
+import { modelFor, readTierModels, renderPlan, writeTierModels, type IntentStore, type TaskRecord } from '../intent/index.ts';
 import type { EventLog } from '../knowledge/log.ts';
 import { confirmLesson, retireLesson, writeLesson } from '../knowledge/review.ts';
 import type { Session } from '../knowledge/session.ts';
@@ -70,6 +71,11 @@ export interface CreateLauncherAppOptions {
   readonly knowledge?: Knowledge;
   /** The launcher's run store, for a turn's steps, duration and status. */
   readonly store?: RunStore;
+  /**
+   * The backlog the Backlog panel reads and a person's changes to it are
+   * written to. Absent, every intent route answers `unavailable`.
+   */
+  readonly intents?: IntentStore;
   /**
    * Open a URL in the person's browser. Defaults to the operating system's
    * opener; tests pass a stub so a suite does not open tabs.
@@ -338,6 +344,92 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
         : `lesson ${String(id)} written by ${by}, superseding lesson ${String(supersedes)}`,
     );
     return { id };
+  });
+
+  /**
+   * The backlog, or the refusal every intent route gives without one.
+   *
+   * The writes are a person's: each is refused off channel `user`, so a
+   * request that reached this bridge some other way changes nothing even if
+   * somebody approved it. No engineer tool names any of them.
+   */
+  function intents(): IntentStore {
+    if (options.intents === undefined) throw publicError.unavailable('This launcher keeps no backlog.');
+    return options.intents;
+  }
+
+  function byPerson(context: { readonly channel: string }): IntentStore {
+    const store = intents();
+    if (context.channel !== 'user') throw publicError.rejected('Only a person changes the backlog, from the Backlog panel.');
+    return store;
+  }
+
+  host.operation('launcher.intentsList', ({ appId, limit }) => ({
+    intents: intents()
+      .list({ ...(appId === undefined ? {} : { appId }), ...(limit === undefined ? {} : { limit }) })
+      .map((intent) => ({ ...intent, counts: { ...intent.counts } })),
+  }));
+
+  host.operation('launcher.intentGet', ({ id }) => {
+    const store = intents();
+    const found = store.get(id);
+    if (found === null) throw publicError.notFound(`There is no intent ${String(id)}.`);
+    const mapping = readTierModels(store.dataDir);
+    // Every array copied: the route's output type is mutable, the record's is not.
+    const copy = (task: TaskRecord) => ({
+      ...task,
+      labels: [...task.labels],
+      blockedBy: [...task.blockedBy],
+      locks: [...task.locks],
+      criteria: task.criteria.map((criterion) => ({ ...criterion })),
+      nonFunctional: [...task.nonFunctional],
+      testNotes: [...task.testNotes],
+      runbook: [...task.runbook],
+      tierReasons: [...task.tierReasons],
+      waitingOn: [...task.waitingOn],
+      runIds: [...task.runIds],
+      answers: task.answers.map((answer) => ({ ...answer })),
+    });
+    return {
+      intent: {
+        ...found.intent,
+        conflicts: [...found.intent.conflicts],
+        outOfReach: [...found.intent.outOfReach],
+        assumptions: [...found.intent.assumptions],
+        questions: [...found.intent.questions],
+      },
+      tasks: found.tasks.map((task) => ({
+        ...copy(task),
+        model: modelFor(task, mapping),
+        events: task.events.map((event) => ({ ...event })),
+      })),
+    };
+  });
+
+  host.operation('launcher.intentPlan', ({ taskId }) => {
+    const task = intents().task(taskId);
+    if (task === null) throw publicError.notFound(`There is no task ${String(taskId)}.`);
+    return { markdown: renderPlan(task) };
+  });
+
+  host.operation('launcher.intentModelsGet', () => ({ ...readTierModels(intents().dataDir) }));
+
+  host.operation('launcher.intentTaskModel', ({ taskId, modelId }, context) => {
+    const store = byPerson(context);
+    const task = store.setModel(taskId, modelId);
+    return { model: modelFor(task, readTierModels(store.dataDir)) };
+  });
+
+  host.operation('launcher.intentTaskRemove', ({ taskId }, context) => ({
+    status: byPerson(context).removeTask(taskId).stored,
+  }));
+
+  host.operation('launcher.intentWithdraw', ({ id }, context) => ({ status: byPerson(context).withdraw(id).status }));
+
+  host.operation('launcher.intentModelsSet', (models, context) => {
+    const store = byPerson(context);
+    writeTierModels(store.dataDir, models);
+    return { ...readTierModels(store.dataDir) };
   });
 
   host.operation('launcher.appSelect', ({ appId }) => {

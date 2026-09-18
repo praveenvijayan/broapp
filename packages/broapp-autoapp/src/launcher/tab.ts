@@ -19,6 +19,7 @@ import { ENGINEER_INSTRUCTIONS } from '../engineer/instructions.ts';
 import { createCandidateStates, type CandidateStates } from '../engineer/state.ts';
 import { engineerTools, type TurnRecord } from '../engineer/tools.ts';
 import type { RunStore } from '../host/run-store.ts';
+import type { IntentStore } from '../intent/index.ts';
 import { createDistiller, pendingCases, type Distiller } from '../knowledge/distil.ts';
 import { recordContext, type Evidence } from '../knowledge/evidence.ts';
 import { instructionsHash, reviewFlags } from '../knowledge/freshness.ts';
@@ -73,6 +74,12 @@ export interface CreateLauncherTabOptions {
     readonly log: EventLog;
     readonly evidence: Evidence;
   };
+  /**
+   * The backlog, opened by `main.ts` beside the knowledge store and handed
+   * in for the same reason. Absent, the Backlog panel says this launcher
+   * keeps none.
+   */
+  readonly intents?: IntentStore;
   /** The AI layer's document budget. Tests shrink it to watch a document being cut. */
   readonly contextBudgetChars?: number;
   /** Which application is selected. Defaults to `session.json` in `dataDir`. */
@@ -196,6 +203,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     session,
     ...(knowledge === undefined ? {} : { log: knowledge.log, knowledge: knowledge.store }),
     store: options.store,
+    ...(options.intents === undefined ? {} : { intents: options.intents }),
     templates: options.templates,
     versions: options.versions,
     ...(options.openBrowser === undefined ? {} : { openBrowser: options.openBrowser }),

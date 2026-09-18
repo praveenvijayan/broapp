@@ -334,6 +334,16 @@ at WAL's NORMAL because nothing in it is read by recovery and every write
 runs on the launcher's event loop. The reasons are beside the pragmas in
 `src/launcher/journal.ts` and `src/knowledge/store.ts`.
 
+The second cross-cutting feature arrived with prompt 13a: the backlog, whose
+store, routes and panel are described in [intents.md](intents.md). It was
+wired by hand in the same way as knowledge, under its own name. It has its own
+store, `intents.sqlite`, with its own migrations; routes on the launcher's
+contract; and a panel on the rail. It has no engineer hook yet, because 13b
+adds one. Report 13a compares, side by side, what each of the two features
+needed from the tab, `main.ts`, the contract and the rail. The abstraction
+can be judged from those two instances when 13b and 13c have finished the
+second one.
+
 ## Where the rest of it is written down
 
 - [components.md](components.md) — the three layers that draw a page, the one
@@ -341,6 +351,8 @@ runs on the launcher's event loop. The reasons are beside the pragmas in
 - [design-guidance.md](design-guidance.md) — the `design` reference topic: what
   the engineer is told about deciding a page, what was deliberately left out of
   it, the detector that runs over the gallery in CI, and the attribution.
+- [intents.md](intents.md) — the backlog: intents, tasks written as plans,
+  the statuses and moves, the tier rule, and the Backlog panel.
 - [packaging.md](packaging.md) — the launcher binary, its targets and sizes,
   what is smoke-tested where, Windows, offline evidence, publishing.
 - [security.md](security.md) — the gate, approvals and their windows, the

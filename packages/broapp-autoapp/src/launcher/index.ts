@@ -11,7 +11,7 @@ export type { CreateLauncherAppOptions, LauncherApp } from './app.ts';
 export { appIds, listApps, serving } from './apps.ts';
 export type { AppRow } from './apps.ts';
 
-export { launcherContract, STAGE_NAMES } from './contract.ts';
+export { INTENT_STATUS_NAMES, launcherContract, STAGE_NAMES, TASK_STATUS_NAMES } from './contract.ts';
 export type { LauncherContract } from './contract.ts';
 
 export { createLauncherTab } from './tab.ts';

@@ -65,6 +65,7 @@ const PAGES: readonly Page[] = [
   { slug: 'autoapp-components.html', title: 'Components', source: 'docs/autoapp/components.md', group: 'Autoapp' },
   { slug: 'autoapp-design-guidance.html', title: 'Design guidance', source: 'docs/autoapp/design-guidance.md', group: 'Autoapp' },
   { slug: 'autoapp-learning.html', title: 'What the launcher remembers', source: 'docs/autoapp/learning.md', group: 'Autoapp' },
+  { slug: 'autoapp-intents.html', title: 'The backlog', source: 'docs/autoapp/intents.md', group: 'Autoapp' },
   { slug: 'autoapp-security.html', title: 'Approvals and limits', source: 'docs/autoapp/security.md', group: 'Autoapp' },
   { slug: 'autoapp-packaging.html', title: 'Packaging and offline', source: 'docs/autoapp/packaging.md', group: 'Autoapp' },
   { slug: 'autoapp-backlog.html', title: 'Phase 2 backlog', source: 'docs/autoapp/backlog.md', group: 'Autoapp' },
