@@ -75,15 +75,16 @@ export function stepFailure(step: RouteStep, output: unknown): string | null {
 }
 
 /**
- * Why a route's refusal does not satisfy a step, or `null` when the step said
- * the route refuses and it refused as the step says.
+ * Why a route's refusal does not satisfy a step that said the route refuses,
+ * or `null` when it refused as the step says.
  */
-function refusalMismatch(step: RouteStep, refusal: { code: string; message: string }): string | null {
-  const fails = step.fails;
-  if (fails === undefined) return `${step.route} was refused: ${refusal.message}`;
+function refusalMismatch(step: RouteStep, fails: NonNullable<RouteStep['fails']>, refusal: { code: string; message: string }): string | null {
   if (refusal.code === 'internal') {
     return `${step.route} failed with an internal error, which is not a refusal`;
   }
+  // Nothing runs examples on a paused child since activation stopped doing it
+  // (14e). Kept so that anything that starts again is told at once that a
+  // pause refused the step, rather than the route.
   if (refusal.code === 'unavailable' && refusal.message === CHECKING_PAUSE_REASON) {
     return `${step.route} was not run: activation checks a paused candidate, which refuses every write before the route sees it, so this refusal is not the route's`;
   }
@@ -104,7 +105,7 @@ export function caughtFailure(step: RouteStep, cause: unknown): string | null {
     return step.fails === undefined ? text : `${step.route} failed with an internal error, which is not a refusal: ${cut(text, 120)}`;
   }
   if (step.fails === undefined) return refusal.message;
-  return refusalMismatch(step, refusal);
+  return refusalMismatch(step, step.fails, refusal);
 }
 
 /** A value cut to `max` characters, with an ellipsis when it was longer. */

@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { refusedByRoute, routeRefusal, type ChildHandle } from 'broapp-autoapp/launcher';
 import { PublicError } from 'broapp/shared';
 import {
+  caughtFailure,
   contains,
   coverage,
   DESIGN_CHECK,
@@ -30,6 +31,7 @@ import {
 } from 'broapp-autoapp/engineer';
 import type { AcceptanceExample, RouteStep } from 'broapp-autoapp/spec';
 import type { ViewsSpec } from '../packages/broapp-autoapp/src/views/types.ts';
+import { CHECKING_PAUSE_REASON } from '../packages/broapp-autoapp/src/ipc/messages.ts';
 
 const views: ViewsSpec = {
   specVersion: 1,
@@ -381,6 +383,22 @@ describe('14d: an example can say "some number" and "this is refused"', () => {
     // A step with no `fails` is refused the way it always was.
     expect((await one([{ route: 'items.add', input: {} }])).detail).toBe('title: must be at least 1 character');
     expect(routeRefusal(new PublicError('invalid_input', 'x'))).toBeNull();
+  });
+
+  test('a refusal from a paused gate never satisfies fails: the guard, called directly', () => {
+    // Activation no longer runs examples on a paused child (14e), so nothing
+    // reaches this from there. The guard stays so the fault cannot come back
+    // unseen: a pause refusing a write is not the route refusing it.
+    const step: RouteStep = { route: 'items.add', input: { label: 'x' }, fails: { code: 'unavailable' } };
+    expect(caughtFailure(step, refusedByRoute('unavailable', CHECKING_PAUSE_REASON))).toBe(
+      "items.add was not run: activation checks a paused candidate, which refuses every write before the route sees it, so this refusal is not the route's",
+    );
+    // The same code with the route's own words is a refusal, and passes.
+    expect(caughtFailure(step, refusedByRoute('unavailable', 'the shelf is full'))).toBeNull();
+    // A step with no `fails` reads the refusal as it always did.
+    expect(caughtFailure({ route: 'items.add', input: {} }, refusedByRoute('unavailable', CHECKING_PAUSE_REASON))).toBe(
+      CHECKING_PAUSE_REASON,
+    );
   });
 
   test('a refusal does not stop the example: refused, and the list is unchanged, is two steps', async () => {

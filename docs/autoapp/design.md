@@ -143,9 +143,13 @@ release. An approval names a release, so an approval cannot survive a rebuild.
    `data-next/`.
 5. The launcher asks a child of the candidate release to migrate `data-next/`
    and report. Migrations are forward only.
-6. The candidate runs against `data-next/` in `preview` mode. Nothing external
-   is allowed to happen; `runs.sqlite` lives inside the data directory, so a
-   preview records into the copy and a live child into the real one.
+6. The acceptance examples run on `data-check/`, a copy of `data-next/`, in a
+   candidate child in `preview` mode: writes allowed, nothing external. The copy
+   is removed however that ends. Then the candidate starts on `data-next/`
+   itself with its gate paused, so nothing writes the data that is about to
+   become live, and is asked only whether it is serving. `runs.sqlite` lives
+   inside the data directory, so a preview records into its copy and a live
+   child into the real one.
 7. The owner activates. The live directory becomes `data-prev-<timestamp>/`,
    `data-next/` becomes `data/`, and `<root>/apps/<appId>/current` names the new
    release. The switch is recorded in `<root>/journal.sqlite`.
@@ -166,8 +170,14 @@ calls a route on a preview of the candidate and compares the output, whole
 (`expect`) or in part (`match`, where `{"$is": "number"}` and the other kinds
 say what a value is without saying what it equals), or asserts with `fails`
 that the route refuses, by code and by words; a crash is never a refusal.
-Activation checks a paused candidate, which refuses every write, so an example
-that writes passes a preview and not an activation. A **view step** asserts that a page, or a
+Activation runs the examples where the preview runs them: a child in `preview`
+mode on a copy that is thrown away, writes allowed and external effects
+refused, so an example that writes passes or fails in both places alike. The
+preview's copy is of the live data, which the preview child's own `start`
+brings to the release's schema; activation's is of the data after its
+`migrate` step, so a release whose `start` and `migrate` migrate differently
+can pass one and fail the other. Examples run in order on one copy in both
+places, so a later example sees the rows an earlier one wrote. A **view step** asserts that a page, or a
 component on it, is declared in the candidate's view specification, or is not,
 and what it declares. The first proves the host; the second proves what the
 page is told to draw. Neither renders a page, and every check report says so

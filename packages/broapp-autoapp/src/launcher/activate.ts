@@ -88,25 +88,72 @@ class InjectedCrash extends Error {
   }
 }
 
+/** What {@link runExamplesOnCopy} needs. */
+interface ExamplesOnCopy {
+  readonly supervisor: Supervisor;
+  readonly appId: string;
+  readonly releaseDir: string;
+  readonly releaseId: string;
+  /** The migrated data, copied and never opened here. */
+  readonly from: string;
+  /** Where the copy goes; removed before this returns or throws. */
+  readonly checkDir: string;
+  readonly examples: readonly AcceptanceExample[];
+  readonly views: ViewsSpec;
+  /** Told how long the copy took, once it has been made. */
+  readonly copied: (ms: number) => void;
+  /** Told once the copy is gone. */
+  readonly removed: () => void;
+}
+
 /**
- * Run every acceptance example against a running child, over its IPC channel.
+ * Copy the migrated data, run every acceptance example on the copy, and
+ * remove it. The first example that failed, as a sentence, or `null`.
  *
- * Not over HTTP with the launch URL, which is what this used to do: that URL
+ * Over the child's IPC channel, not over HTTP with its launch URL: that URL
  * carries a *single-use* token, and redeeming it here left nothing for the tab
- * the person opens next — every activated release answered 403 to its first
- * visitor. Over IPC the child runs each step on channel `user`, as it did when
- * the check arrived as a browser would, and the token stays unspent.
+ * the person opens next. Over IPC the child runs each step on channel `user`,
+ * as it did when the check arrived as a browser would.
+ *
+ * The same judge the preview's check uses, on the same kind of child: a
+ * preview, on a copy that is thrown away. With a copy of the judge of its own
+ * this compared by `JSON.stringify`; with a paused child of its own, every
+ * write was refused before the route saw it. Either way an example passed one
+ * and failed the other.
  */
-async function runExamples(
-  candidate: ChildHandle,
-  examples: readonly AcceptanceExample[],
-  views: ViewsSpec,
-): Promise<string | null> {
-  // The same judge the preview's check uses. With a copy of its own this
-  // compared by `JSON.stringify`, so an example whose keys were stored sorted
-  // passed the preview and failed here.
-  const failed = (await runAcceptance(candidate, examples, views)).find((result) => !result.passed);
-  return failed === undefined ? null : `${failed.id}: ${failed.detail ?? 'the example failed'}`;
+async function runExamplesOnCopy(params: ExamplesOnCopy): Promise<string | null> {
+  // A copy left by a launcher that died between making it and removing it is
+  // example rows and nothing else; recovery removes one at start, and so does
+  // this, rather than refusing to copy over it.
+  rmSync(params.checkDir, { recursive: true, force: true });
+  let crashed = false;
+  let child: ChildHandle | null = null;
+  try {
+    const began = performance.now();
+    snapshotDirectory(params.from, params.checkDir);
+    params.copied(Math.round(performance.now() - began));
+    child = await params.supervisor.start({
+      appId: params.appId,
+      releaseDir: params.releaseDir,
+      releaseId: params.releaseId,
+      dataDir: params.checkDir,
+      mode: 'preview',
+    });
+    const failed = (await runAcceptance(child, params.examples, params.views)).find((result) => !result.passed);
+    if (crashPoint() === 'checked-copy') {
+      // A launcher that dies here leaves the copy and its child behind; what
+      // follows must not run, or recovery would have nothing to recover.
+      crashed = true;
+      throw new InjectedCrash('checked-copy');
+    }
+    return failed === undefined ? null : `${failed.id}: ${failed.detail ?? 'the example failed'}`;
+  } finally {
+    if (!crashed) {
+      if (child !== null) await child.shutdown(SHUTDOWN_DEADLINE_MS);
+      rmSync(params.checkDir, { recursive: true, force: true });
+      params.removed();
+    }
+  }
 }
 
 /** Activate one release. */
@@ -237,8 +284,48 @@ export async function activate(params: ActivateParams): Promise<ActivateResult> 
       });
     }
 
-    // 5. checked — start the candidate on the copy, paused, and try it.
-    reach('checked');
+    // 5. checked — the examples on a throwaway copy, then the candidate on the
+    // copy that becomes live, paused, asked only for its health.
+    //
+    // Two starts, because the two copies need opposite things. Examples write
+    // (add an item, then list it), and `data-next` is renamed into place at
+    // the switch, so nothing may write it first: a paused gate refuses every
+    // write before the route sees it, and an example that writes passed the
+    // preview and failed here. So the examples get `data-check`, a copy of the
+    // migrated data that is removed however this ends, and a child in `preview`
+    // mode on it: writes allowed, external effects refused exactly as the
+    // preview refuses them, so the two places judge an example the same way.
+    // The paused start on `data-next` afterwards is what proves the release
+    // opens the data it will be given.
+    reach('checked', { checkDir: app.dataCheck });
+    const problem = await runExamplesOnCopy({
+      supervisor,
+      appId,
+      releaseDir: app.release(releaseId),
+      releaseId,
+      from: app.dataNext,
+      checkDir: app.dataCheck,
+      examples: spec.acceptance,
+      views: spec.views,
+      copied: (checkCopyMs) => journal.advance(id, 'checked', { checkCopyMs }),
+      removed: () => journal.advance(id, 'checked', { checkDir: null }),
+    }).catch((cause: unknown) => {
+      if (cause instanceof InjectedCrash) throw cause;
+      return { threw: String(cause instanceof Error ? cause.message : cause) };
+    });
+    if (typeof problem === 'string') {
+      return await giveUpBeforeSwitch('checked', `an acceptance example failed: ${problem}`, { removeNext: true });
+    }
+    if (problem !== null) {
+      return await giveUpBeforeSwitch('checked', `the candidate would not run the acceptance examples: ${problem.threw}`, {
+        removeNext: true,
+      });
+    }
+
+    // Said this way so the panel never reads a release that would not open
+    // the migrated data as an example that failed: the examples passed.
+    const wouldNotOpen = (why: string): string =>
+      `the acceptance examples passed, but the release would not open the migrated data: ${why}`;
     let candidate: ChildHandle | null = null;
     try {
       candidate = await supervisor.start({
@@ -251,21 +338,14 @@ export async function activate(params: ActivateParams): Promise<ActivateResult> 
       });
       const health = await candidate.health();
       if (health.state !== 'serving') {
-        return await giveUpBeforeSwitch('checked', `the candidate reported state ${health.state}`, {
-          removeNext: true,
-          stopCandidate: candidate,
-        });
-      }
-      const problem = await runExamples(candidate, spec.acceptance, spec.views);
-      if (problem !== null) {
-        return await giveUpBeforeSwitch('checked', `an acceptance example failed: ${problem}`, {
+        return await giveUpBeforeSwitch('checked', wouldNotOpen(`it reported state ${health.state}`), {
           removeNext: true,
           stopCandidate: candidate,
         });
       }
     } catch (cause) {
       if (cause instanceof InjectedCrash) throw cause;
-      return await giveUpBeforeSwitch('checked', `the candidate would not run: ${String(cause)}`, {
+      return await giveUpBeforeSwitch('checked', wouldNotOpen(String(cause instanceof Error ? cause.message : cause)), {
         removeNext: true,
         stopCandidate: candidate,
       });

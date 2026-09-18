@@ -11,12 +11,18 @@
  * Recovery never deletes a `data-prev-*` directory or a snapshot. Those are the
  * only copies of what the data used to be, and the moment to throw them away is
  * a decision somebody makes on purpose, not a side effect of starting up.
+ *
+ * `data-check` is the opposite case. It is a copy of migrated data that the
+ * acceptance examples wrote to, and it holds their rows and nothing a person
+ * wrote, so it is removed wherever it is found — never renamed, never read,
+ * never offered back as data somebody might want.
  */
-import { existsSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 import type { HostLogger } from 'broapp/host';
 
-import { readCurrent, setCurrent, type Layout } from '../spec/index.ts';
+import { APP_ID_PATTERN, readCurrent, setCurrent, type Layout } from '../spec/index.ts';
 
 import type { Activation, Journal } from './journal.ts';
 import { readServing, removeServing } from './serving.ts';
@@ -63,7 +69,26 @@ export async function recover(params: RecoverParams): Promise<readonly Recovered
       logger.error(`[autoapp] ${activation.appId} could not be started after recovery: ${String(cause)}`);
     }
   }
+  // After the loop, every activation the journal knew of is finished, so any
+  // examples' copy still on disk belongs to none: a launcher died between
+  // making one and removing it, or before its phase was written.
+  removeStrayCheckCopies(params.layout, logger);
   return results;
+}
+
+/** Remove every application's `data-check`; nothing is activating while this runs. */
+function removeStrayCheckCopies(root: Layout, logger: HostLogger): void {
+  const apps = join(root.root, 'apps');
+  if (!existsSync(apps)) return;
+  for (const appId of readdirSync(apps)) {
+    // Only names a layout would have made. Anything else under `apps/` is not
+    // the launcher's to reason about.
+    if (!APP_ID_PATTERN.test(appId)) continue;
+    const checkDir = root.app(appId).dataCheck;
+    if (!existsSync(checkDir)) continue;
+    rmSync(checkDir, { recursive: true, force: true });
+    logger.warn(`[autoapp] ${appId}: removed the acceptance examples' copy an interrupted activation left behind`);
+  }
 }
 
 /** Options for {@link restoreServing}. */
@@ -134,7 +159,8 @@ function resolveOne(
     case 'snapshotted':
     case 'migrated':
     case 'checked': {
-      const had = existsSync(app.dataNext);
+      const had = existsSync(app.dataNext) || existsSync(app.dataCheck);
+      rmSync(app.dataCheck, { recursive: true, force: true });
       rmSync(app.dataNext, { recursive: true, force: true });
       journal.advance(activation.id, 'failed-before-switch', {
         error: `interrupted at ${activation.phase}`,
@@ -187,6 +213,7 @@ function resolveOne(
 
       // Neither rename happened, so the candidate was checked but never
       // switched to. The live data is untouched.
+      rmSync(app.dataCheck, { recursive: true, force: true });
       rmSync(app.dataNext, { recursive: true, force: true });
       journal.advance(activation.id, 'failed-before-switch', {
         error: 'interrupted at switched, before either rename',

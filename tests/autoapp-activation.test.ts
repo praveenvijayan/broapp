@@ -14,6 +14,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -30,6 +31,7 @@ import {
   recover,
   snapshotDirectory,
   type Journal,
+  type Phase,
   type Supervisor,
 } from 'broapp-autoapp/launcher';
 import { runAcceptance } from 'broapp-autoapp/engineer';
@@ -159,21 +161,56 @@ function grantAll(where: World, releaseId: string, capabilities: unknown[] = [])
   });
 }
 
-/** What activation's check does: `runAcceptance` over a paused candidate of the release. */
-async function runAcceptancePaused(where: World, releaseId: string): Promise<{ passed: boolean; detail?: string }[]> {
+/** Write `acceptance` into the workspace's manifest, build, and grant what the release asks for. */
+async function withAcceptance(where: World, acceptance: unknown[]): Promise<string> {
+  const path = join(where.root.app('items').source, 'autoapp.json');
+  const manifest = JSON.parse(await Bun.file(path).text()) as { acceptance: unknown[] };
+  manifest.acceptance = acceptance;
+  writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+  const releaseId = await build(where);
+  grantAll(where, releaseId);
+  return releaseId;
+}
+
+/**
+ * What `candidate.check` does: `runAcceptance` over a preview of the release,
+ * on a fresh copy of the live data when there is any, as `startPreview` makes.
+ */
+async function previewCheck(where: World, releaseId: string): ReturnType<typeof runAcceptance> {
   const app = where.root.app('items');
-  const candidate = await where.supervisor.start({
+  const copy = join(mkdtempSync(join(where.directory, 'preview-')), 'data');
+  if (existsSync(app.data)) snapshotDirectory(app.data, copy);
+  else mkdirSync(copy, { recursive: true });
+  const preview = await where.supervisor.start({
     appId: 'items',
     releaseDir: app.release(releaseId),
     releaseId,
-    dataDir: mkdtempSync(join(where.directory, 'paused-')),
-    mode: 'live',
-    paused: true,
+    dataDir: copy,
+    mode: 'preview',
   });
   const spec = readRelease(where.root, 'items', releaseId);
-  const results = await runAcceptance(candidate, spec.acceptance, spec.views);
-  await candidate.shutdown(5_000);
+  const results = await runAcceptance(preview, spec.acceptance, spec.views);
+  await preview.shutdown(5_000);
   return results;
+}
+
+/** Activate, stop the new child, and say what happened in one string a test can compare. */
+async function activation(where: World, releaseId: string): Promise<string> {
+  const result = await activate({
+    layout: where.root,
+    supervisor: where.supervisor,
+    journal: where.journal,
+    appId: 'items',
+    releaseId,
+    logger: { warn: () => undefined, error: () => undefined },
+  });
+  if (result.ok) await result.child.shutdown(5_000);
+  return result.ok ? 'activated' : `${result.phase}: ${result.reason}`;
+}
+
+/** A sentence with its numbers and ids taken out, so two runs of one step compare equal. */
+function shape(text: string | undefined): string {
+  return (text ?? '').replace(/\d+/g, '#');
 }
 
 /** Count the rows in one items database, without migrating it. */
@@ -599,83 +636,44 @@ describe.skipIf(!available)('activation', () => {
     if (result.ok) await result.child.shutdown(5_000);
   }, 60_000);
 
-  test('an example with $is and fails gets the same answer from a preview check and from activation', async () => {
+  test('an example with $is and fails, reading and writing, gets the same answer from a preview check and from activation', async () => {
     const where = makeWorld();
-    const app = where.root.app('items');
-    const path = join(app.source, 'autoapp.json');
-    const write = async (acceptance: unknown[]): Promise<string> => {
-      const manifest = JSON.parse(await Bun.file(path).text()) as { acceptance: unknown[] };
-      manifest.acceptance = acceptance;
-      writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
-      const releaseId = await build(where);
-      grantAll(where, releaseId);
-      return releaseId;
-    };
-    /** What `candidate.check` does: `runAcceptance` over a preview of the release. */
-    const previewCheck = async (releaseId: string): Promise<{ passed: boolean; detail?: string }[]> => {
-      const preview = await where.supervisor.start({
-        appId: 'items',
-        releaseDir: app.release(releaseId),
-        releaseId,
-        dataDir: mkdtempSync(join(where.directory, 'preview-')),
-        mode: 'preview',
-      });
-      const spec = readRelease(where.root, 'items', releaseId);
-      const results = await runAcceptance(preview, spec.acceptance, spec.views);
-      await preview.shutdown(5_000);
-      return results;
-    };
-    const activation = async (releaseId: string): Promise<string> => {
-      const result = await activate({
-        layout: where.root,
-        supervisor: where.supervisor,
-        journal: where.journal,
-        appId: 'items',
-        releaseId,
-        logger: { warn: () => undefined, error: () => undefined },
-      });
-      if (result.ok) await result.child.shutdown(5_000);
-      return result.ok ? 'activated' : `${result.phase}: ${result.reason}`;
-    };
 
-    // Activation checks a paused candidate, so only reads run there: refused
-    // by the route's own input schema, then a list whose contents the example
-    // gives only by kind.
-    const holds = await write([
+    // Refused by the route's own input schema, a write that succeeds, then a
+    // list whose contents the example gives only by kind. Activation runs the
+    // examples where the preview does since 14e, so the write runs in both.
+    const holds = await withAcceptance(where, [
       {
         id: 'refused-then-listed',
-        title: 'A list with input is refused, and the list is still there',
+        title: 'A list with input is refused, an item is added, and the list holds it',
         steps: [
           { route: 'items.list', input: { page: 2 }, fails: { code: 'invalid_input' } },
+          { route: 'items.add', input: { label: 'from the example' }, match: { id: { $is: 'number' }, label: 'from the example' } },
           { route: 'items.list', input: null, match: { items: { $is: 'array' }, count: { $is: 'number' } } },
         ],
       },
     ]);
-    expect((await previewCheck(holds)).map((result) => result.passed)).toEqual([true]);
-    expect(await activation(holds)).toBe('activated');
+    expect((await previewCheck(where, holds)).map((result) => result.passed)).toEqual([true]);
+    expect(await activation(where, holds)).toBe('activated');
 
     // The same shapes, wrong: a read that succeeds where the example says it is
     // refused, a count that is a number where it says a string, and a write
-    // said to be refused. The preview runs the write and it succeeds; the
-    // paused candidate refuses it before the route sees it. Neither is the
-    // route refusing, so both fail it.
-    const wrong = await write([
+    // said to be refused that succeeds. Each fails in both places, for the same
+    // reason.
+    const wrong = await withAcceptance(where, [
       { id: 'not-refused', title: 'The list is refused', steps: [{ route: 'items.list', input: null, fails: {} }] },
       { id: 'wrong-kind', title: 'The count is a string', steps: [{ route: 'items.list', input: null, match: { count: { $is: 'string' } } }] },
       { id: 'write-refused', title: 'Adding is refused', steps: [{ route: 'items.add', input: { label: 'x' }, fails: {} }] },
     ]);
-    const checked = await previewCheck(wrong);
+    const checked = await previewCheck(where, wrong);
     expect(checked.map((result) => result.passed)).toEqual([false, false, false]);
     expect(checked[0]?.detail).toContain('items.list succeeded with');
     expect(checked[0]?.detail).toContain('but the example says it is refused');
     expect(checked[1]?.detail).toMatch(/count: expected a string, got \d+/);
     expect(checked[2]?.detail).toContain('items.add succeeded with');
-    const paused = await runAcceptancePaused(where, wrong);
-    expect(paused.map((result) => result.passed)).toEqual([false, false, false]);
-    expect(paused[2]?.detail).toContain('activation checks a paused candidate');
-    const refused = await activation(wrong);
+    const refused = await activation(where, wrong);
     expect(refused).toStartWith('checked:');
-    expect(refused).toContain('not-refused');
+    expect(refused).toContain(`not-refused: ${checked[0]?.detail ?? ''}`);
   }, 120_000);
 
   test('a drain that times out leaves the previous release serving', async () => {
@@ -758,7 +756,11 @@ describe.skipIf(!available)('activation', () => {
 
 describe.skipIf(!available)('recovery', () => {
   /** Run an activation that stops dead at `phase`, then recover from it. */
-  async function crashAt(phase: string): Promise<{
+  async function crashAt(
+    phase: string,
+    /** Looks at the disk the crash left, before recovery touches it. */
+    beforeRecover?: (where: World) => void,
+  ): Promise<{
     where: World;
     a: string;
     b: string;
@@ -802,6 +804,7 @@ describe.skipIf(!available)('recovery', () => {
     // A crashed launcher leaves its children behind; a fresh one would not know
     // about them. Stopping them here is what restarting the launcher does.
     await where.supervisor.stopAll(5_000);
+    beforeRecover?.(where);
 
     const recovered = await recover({
       layout: where.root,
@@ -825,6 +828,47 @@ describe.skipIf(!available)('recovery', () => {
       expect(countItems(app.data)).toBe(1);
     }, 60_000);
   }
+
+  test('a crash with the examples\' copy still on disk abandons the update and removes both copies', async () => {
+    let leftBehind: boolean[] = [];
+    const { where, a, recovered } = await crashAt('checked-copy', (at) => {
+      const app = at.root.app('items');
+      leftBehind = [existsSync(app.dataCheck), existsSync(app.dataNext)];
+    });
+    const app = where.root.app('items');
+    // The crash really did leave both copies behind, so recovery is what removed them.
+    expect(leftBehind).toEqual([true, true]);
+    expect(recovered[0]?.outcome).toBe('abandoned');
+    expect(recovered[0]?.serving).toBe(a);
+    expect(where.journal.history('items')[0]?.phase).toBe('failed-before-switch');
+    expect(existsSync(app.dataCheck)).toBe(false);
+    expect(existsSync(app.dataNext)).toBe(false);
+    expect(readCurrent(where.root, 'items')).toBe(a);
+    expect(countItems(app.data)).toBe(1);
+    expect(where.supervisor.children.map((child) => child.releaseId)).toEqual([a]);
+  }, 60_000);
+
+  test('a stray examples\' copy with no activation in flight is removed at start, and nothing else is', async () => {
+    const where = makeWorld();
+    const app = where.root.app('items');
+    const planted = [app.data, app.dataNext, app.dataPrev(1), join(app.snapshots, '1-none')];
+    for (const directory of [...planted, app.dataCheck]) {
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'marker'), 'x');
+    }
+
+    const recovered = await recover({
+      layout: where.root,
+      journal: where.journal,
+      supervisor: where.supervisor,
+      logger: { warn: () => undefined, error: () => undefined },
+    });
+
+    expect(recovered).toEqual([]);
+    expect(existsSync(app.dataCheck)).toBe(false);
+    for (const directory of planted) expect(existsSync(join(directory, 'marker'))).toBe(true);
+    expect(where.supervisor.children).toHaveLength(0);
+  }, 30_000);
 
   test('a crash between the two renames finishes the switch', async () => {
     const { where, b, recovered } = await crashAt('switched-half');
@@ -864,6 +908,194 @@ describe.skipIf(!available)('recovery', () => {
     expect(readdirSync(app.dir).filter((n) => n.startsWith('data-prev-'))).toHaveLength(1);
     expect(readdirSync(app.snapshots).length).toBeGreaterThan(0);
   }, 60_000);
+});
+
+describe.skipIf(!available)('examples at activation', () => {
+  /** Adds one item, then lists it with the row A wrote. Passes only where writes run. */
+  const ADD_THEN_LIST = {
+    id: 'add-then-list',
+    title: 'An added item is listed first',
+    steps: [
+      { route: 'items.add', input: { label: 'from the example' }, match: { label: 'from the example' } },
+      {
+        route: 'items.list',
+        input: null,
+        match: { items: [{ label: 'from the example' }, { label: 'written under A' }], count: 2 },
+      },
+    ],
+  };
+
+  /** A at schema 2 with one row serving, and B at schema 3 carrying `acceptance`. */
+  async function aThenB(where: World, acceptance: unknown[], edit?: (sourceDir: string) => void): Promise<{ a: string; b: string }> {
+    const a = await build(where, { schemaVersion: 2 });
+    grantAll(where, a);
+    const app = where.root.app('items');
+    mkdirSync(app.data, { recursive: true });
+    const first = await where.supervisor.start({
+      appId: 'items',
+      releaseDir: app.release(a),
+      releaseId: a,
+      dataDir: app.data,
+      mode: 'live',
+    });
+    const client = await connectToChild(first.url);
+    await client.call('items.add', { label: 'written under A' });
+    await client.close();
+    await first.shutdown(5_000);
+    setCurrent(where.root, 'items', a);
+    cpSync(join(fixture, 'src', 'host', 'db.ts'), join(app.source, 'src', 'host', 'db.ts'));
+    cpSync(join(fixture, 'autoapp.json'), join(app.source, 'autoapp.json'));
+    edit?.(app.source);
+    const b = await withAcceptance(where, acceptance);
+    return { a, b };
+  }
+
+  test('an example that writes passes a preview check and activation', async () => {
+    const where = makeWorld();
+    const { b } = await aThenB(where, [ADD_THEN_LIST]);
+    expect(await previewCheck(where, b)).toEqual([{ id: 'add-then-list', title: ADD_THEN_LIST.title, passed: true }]);
+    expect(await activation(where, b)).toBe('activated');
+    expect(readCurrent(where.root, 'items')).toBe(b);
+  }, 120_000);
+
+  test('after it, the live data holds nothing the example wrote, and the examples\' copy is gone', async () => {
+    const where = makeWorld();
+    const { b } = await aThenB(where, [ADD_THEN_LIST]);
+    const app = where.root.app('items');
+    expect(await activation(where, b)).toBe('activated');
+    expect(countItems(app.data)).toBe(1);
+    expect(existsSync(app.dataCheck)).toBe(false);
+    expect(existsSync(app.dataNext)).toBe(false);
+    // The migrated data became live and the release opened it: the note column
+    // B's migration added is there, and the row A wrote came across.
+    const db = new Database(join(app.data, 'items.sqlite'), { readonly: true });
+    try {
+      expect(db.query<{ label: string }, []>('SELECT label FROM items').all()).toEqual([{ label: 'written under A' }]);
+      expect(db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version).toBe(3);
+    } finally {
+      db.close();
+    }
+  }, 120_000);
+
+  test('an example that fails gives up before the switch and leaves no copy', async () => {
+    const where = makeWorld();
+    const { a, b } = await aThenB(where, [
+      {
+        id: 'add-then-wrong-count',
+        title: 'An added item makes a count nobody has',
+        steps: [
+          { route: 'items.add', input: { label: 'from the example' } },
+          { route: 'items.list', input: null, match: { count: 99 } },
+        ],
+      },
+    ]);
+    const app = where.root.app('items');
+    const said = await activation(where, b);
+    expect(said).toStartWith('checked: an acceptance example failed: add-then-wrong-count:');
+    expect(readCurrent(where.root, 'items')).toBe(a);
+    expect(where.supervisor.children.map((child) => [child.releaseId, child.mode])).toEqual([[a, 'live']]);
+    expect(existsSync(app.dataCheck)).toBe(false);
+    expect(existsSync(app.dataNext)).toBe(false);
+    expect(countItems(app.data)).toBe(1);
+  }, 120_000);
+
+  test('a write the route refuses passes in both places; a write said refused that succeeds fails in both, with one sentence', async () => {
+    const where = makeWorld();
+    const refuses = await withAcceptance(where, [
+      {
+        id: 'empty-label',
+        title: 'An empty label is refused, and nothing was added',
+        steps: [
+          { route: 'items.add', input: { label: '' }, fails: { code: 'invalid_input' } },
+          { route: 'items.list', input: null, match: { count: 0 } },
+        ],
+      },
+    ]);
+    expect((await previewCheck(where, refuses)).map((result) => result.passed)).toEqual([true]);
+    expect(await activation(where, refuses)).toBe('activated');
+
+    const succeeds = await withAcceptance(where, [
+      { id: 'add-refused', title: 'Adding is refused', steps: [{ route: 'items.add', input: { label: 'x' }, fails: {} }] },
+    ]);
+    const [checked] = await previewCheck(where, succeeds);
+    expect(checked?.passed).toBe(false);
+    expect(checked?.detail).toContain('items.add succeeded with');
+    const said = await activation(where, succeeds);
+    expect(said).toStartWith('checked: an acceptance example failed: add-refused: ');
+    expect(shape(said.slice('checked: an acceptance example failed: add-refused: '.length))).toBe(shape(checked?.detail));
+  }, 120_000);
+
+  test('a route that reaches outside is refused the same way, with the same words, in both places', async () => {
+    const where = makeWorld();
+    const pings = await withAcceptance(where, [
+      { id: 'ping', title: 'The ping answers', steps: [{ route: 'items.ping', input: null }] },
+    ]);
+    const [checked] = await previewCheck(where, pings);
+    expect(checked?.passed).toBe(false);
+    const said = await activation(where, pings);
+    expect(said).toBe(`checked: an acceptance example failed: ping: ${checked?.detail ?? ''}`);
+
+    // And an example that says so passes in both.
+    const refusedOutside = await withAcceptance(where, [
+      { id: 'ping-refused', title: 'The ping is refused here', steps: [{ route: 'items.ping', input: null, fails: {} }] },
+    ]);
+    expect((await previewCheck(where, refusedOutside)).map((result) => result.passed)).toEqual([true]);
+    expect(await activation(where, refusedOutside)).toBe('activated');
+  }, 120_000);
+
+  test('examples that pass, then a release that will not open the migrated data, says the second', async () => {
+    const where = makeWorld();
+    // The candidate starts in preview mode for the examples and refuses to start
+    // live: the one start that differs between the two is the one on data-next.
+    const { a, b } = await aThenB(where, [ADD_THEN_LIST], (sourceDir) => {
+      const path = join(sourceDir, 'src', 'host', 'app.ts');
+      const source = readFileSync(path, 'utf8');
+      writeFileSync(
+        path,
+        source.replace(
+          'export function start(context: AppStartContext): Promise<AppInstance> {',
+          "export function start(context: AppStartContext): Promise<AppInstance> {\n  if (context.mode === 'live') throw new Error('this release will not open live data');",
+        ),
+      );
+    });
+    const app = where.root.app('items');
+    const said = await activation(where, b);
+    expect(said).toStartWith('checked: the acceptance examples passed, but the release would not open the migrated data:');
+    expect(said).not.toContain('an acceptance example failed');
+    expect(readCurrent(where.root, 'items')).toBe(a);
+    expect(existsSync(app.dataCheck)).toBe(false);
+    expect(existsSync(app.dataNext)).toBe(false);
+  }, 120_000);
+
+  test('the checked phase records the copy\'s duration, and no phase was added', async () => {
+    const where = makeWorld();
+    const { b } = await aThenB(where, [ADD_THEN_LIST]);
+    expect(await activation(where, b)).toBe('activated');
+    const row = where.journal.history('items')[0];
+    expect(row?.phase).toBe('done');
+    expect(typeof row?.checkCopyMs).toBe('number');
+    expect(row?.checkCopyMs ?? -1).toBeGreaterThanOrEqual(0);
+    // Named while the copy existed, cleared once it was removed.
+    expect(row?.checkDir).toBeNull();
+
+    // Every phase, once. A phase added to `Phase` is a missing key here and a
+    // removed one an unknown key: either way this file stops typechecking.
+    const phases: Record<Phase, true> = {
+      requested: true,
+      drained: true,
+      snapshotted: true,
+      migrated: true,
+      checked: true,
+      switched: true,
+      serving: true,
+      done: true,
+      'failed-before-switch': true,
+      'failed-after-switch': true,
+      'rolled-back': true,
+      removed: true,
+    };
+    expect(Object.keys(phases)).toHaveLength(12);
+  }, 120_000);
 });
 
 describe.skipIf(!available)('serving', () => {

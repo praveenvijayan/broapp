@@ -21,6 +21,13 @@ export interface AppLayout {
   readonly source: string;
   readonly data: string;
   readonly dataNext: string;
+  /**
+   * A throwaway copy of `dataNext`, made after the migration, that activation
+   * runs the acceptance examples on. Examples write; the copy that becomes live
+   * must not be written before the switch, so they are given this one and it
+   * is removed however the activation ends.
+   */
+  readonly dataCheck: string;
   dataPrev(timestamp: number): string;
   readonly snapshots: string;
   /** Data copies a preview child runs against, one per release being looked at. */
@@ -85,6 +92,7 @@ export function layout(root: string): Layout {
         source: join(dir, 'source'),
         data: join(dir, 'data'),
         dataNext: join(dir, 'data-next'),
+        dataCheck: join(dir, 'data-check'),
         dataPrev: (timestamp: number) => join(dir, `data-prev-${String(timestamp)}`),
         snapshots: join(dir, 'snapshots'),
         preview(releaseId: string): string {
