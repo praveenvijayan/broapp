@@ -196,6 +196,9 @@ export function idleSentence(ms: number): string {
   return `The turn made no tool call for ${amount}.`;
 }
 
+/** The tools whose refusals are counted as refused edits. */
+const EDIT_TOOLS: readonly string[] = ['source.edit', 'source.change'];
+
 /** `once`, or `<n> times`. */
 function times(n: number): string {
   return n === 1 ? 'once' : `${String(n)} times`;
@@ -219,7 +222,9 @@ export function refusalSentences(refusals: readonly RefusalGroup[]): string[] {
     .filter((group) => group.route === 'candidate.cycle' || group.route === 'candidate.build')
     .slice(0, 3)
     .map((group) => `${group.route} was refused ${times(group.count)}: ${endSentence(refusalError(group))}`);
-  const edits = refusals.filter((group) => group.route.startsWith('source.'));
+  // Edits only: a refused `source.read` or `source.search` is not an edit,
+  // and the replay of 14c watched one be called one.
+  const edits = refusals.filter((group) => EDIT_TOOLS.includes(group.route));
   const most = edits[0];
   if (most !== undefined) {
     const total = edits.reduce((sum, group) => sum + group.count, 0);

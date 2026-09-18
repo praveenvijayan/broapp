@@ -1408,6 +1408,8 @@ describe('14c: what the tools refused', () => {
       step('candidate.cycle', 'confirmed', 'failed', 'the input is not what this tool takes: create: expected an array'),
       ...Array.from({ length: 15 }, () => step('source.edit', 'confirmed', 'failed', 'the input is not what this tool takes: message: expected a string')),
       ...Array.from({ length: 7 }, () => step('source.change', 'confirmed', 'failed', 'not found in src/a.ts: x.')),
+      // A refused read is not a refused edit.
+      step('source.read', 'allowed', 'failed', 'node_modules/broapp/package.json is not part of this application’s source'),
     ]);
     const reasons = verdictOf(task, nothing, 'a', 'b', {}, [], groups).reasons;
     const at = reasons.indexOf(NOTHING_BUILT);
