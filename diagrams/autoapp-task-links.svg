@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="autoapp-task-links-title autoapp-task-links-desc">
+      <title id="autoapp-task-links-title">The relationship index</title>
+      <desc id="autoapp-task-links-desc">Five kinds of recorded thing, task, run, file, case and lesson, joined by nine relations each read from one stored row: a task ran as runs, runs and tasks edited files, a task planned files, a case was opened and resolved in runs and edited files, and a lesson was distilled from a case and served to runs.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+      </defs>
+      <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap');</style>
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+      <!-- CONNECTORS (before boxes) -->
+      <path d="M120 220 V108 Q120 100 128 100 H400" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="236" y="80" width="44" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="258" y="89" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">RAN_AS</text>
+      <path d="M440 140 V400" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="452" y="252" width="44" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="474" y="261" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">EDITED</text>
+      <path d="M140 300 V416 Q140 424 148 424 H400" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="248" y="404" width="44" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="270" y="413" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">EDITED</text>
+      <path d="M100 300 V448 Q100 456 108 456 H400" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="244" y="436" width="50" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="269" y="445" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PLANNED</text>
+      <path d="M760 244 H544 Q536 244 536 236 V140" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="616" y="224" width="62" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="647" y="233" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">OPENED_IN</text>
+      <path d="M760 276 H512 Q504 276 504 268 V140" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="608" y="256" width="74" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="645" y="265" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">RESOLVED_IN</text>
+      <path d="M840 300 V432 Q840 440 832 440 H560" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="676" y="420" width="44" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="698" y="429" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">EDITED</text>
+      <path d="M760 100 H560" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="628" y="80" width="62" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="659" y="89" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SERVED_TO</text>
+      <path d="M840 140 V220" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="848" y="172" width="92" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="894" y="181" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">DISTILLED_FROM</text>
+      <!-- ENTITIES -->
+      <rect x="40" y="220" width="160" height="80" rx="6" fill="#f5f5f5"/>
+      <rect x="40" y="220" width="160" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="48" y="228" width="40" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.4" stroke-width="0.8"/>
+      <text x="68" y="237" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TABLE</text>
+      <text x="120" y="264" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Task</text>
+      <text x="120" y="280" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">slug · task_runs, tasks</text>
+      <rect x="400" y="60" width="160" height="80" rx="6" fill="#f5f5f5"/>
+      <rect x="400" y="60" width="160" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="408" y="68" width="40" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.4" stroke-width="0.8"/>
+      <text x="428" y="77" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TABLE</text>
+      <text x="480" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Run</text>
+      <text x="480" y="120" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">run_id · events</text>
+      <rect x="400" y="400" width="160" height="80" rx="6" fill="#f5f5f5"/>
+      <rect x="400" y="400" width="160" height="80" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <rect x="408" y="408" width="40" height="12" rx="2" fill="transparent" stroke="#eb6c36" stroke-opacity="0.4" stroke-width="0.8"/>
+      <text x="428" y="417" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">KEY</text>
+      <text x="480" y="444" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">File</text>
+      <text x="480" y="460" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">(app_id, path)</text>
+      <rect x="760" y="220" width="160" height="80" rx="6" fill="#f5f5f5"/>
+      <rect x="760" y="220" width="160" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="768" y="228" width="40" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.4" stroke-width="0.8"/>
+      <text x="788" y="237" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TABLE</text>
+      <text x="840" y="264" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Case</text>
+      <text x="840" y="280" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">episodes.id</text>
+      <rect x="760" y="60" width="160" height="80" rx="6" fill="#f5f5f5"/>
+      <rect x="760" y="60" width="160" height="80" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="768" y="68" width="40" height="12" rx="2" fill="transparent" stroke="#2d3142" stroke-opacity="0.4" stroke-width="0.8"/>
+      <text x="788" y="77" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TABLE</text>
+      <text x="840" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Lesson</text>
+      <text x="840" y="120" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">lessons.id</text>
+      <!-- LEGEND -->
+      <line x1="32" y1="548" x2="928" y2="548" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="32" y="564" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+      <rect x="104" y="556" width="12" height="10" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <text x="124" y="564" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace">FOCAL · where tier 2 joins</text>
+      <rect x="296" y="556" width="12" height="10" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="316" y="564" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace">RECORDED THING</text>
+      <line x1="440" y1="560" x2="464" y2="560" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <text x="472" y="564" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace">LINK · src REL dst · names its source row</text>
+    </svg>

@@ -15,7 +15,7 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 
 import { aiContract } from 'broapp/ai';
-import { createFakeAdapter, type FakeAdapter, type FakeStep, type ProviderAdapter } from 'broapp/ai/host';
+import { createFakeAdapter, type Ai, type FakeAdapter, type FakeStep, type ProviderAdapter } from 'broapp/ai/host';
 import type { BroappClient } from 'broapp/client';
 import { createGate } from 'broapp/host';
 import type { Approver, Envelope, Gate, HostLogger } from 'broapp/host';
@@ -30,12 +30,16 @@ import {
   SPLIT_RULES,
 } from 'broapp-autoapp/engineer';
 import {
+  createExecutor,
   DECIDE,
   idleSentence,
   INTENT_APPROVES,
   INTENT_REFUSES,
   LAUNCHER_STOPPED,
+  NOT_AN_ATTEMPT,
+  nothingDoneStopped,
   openIntents,
+  providerStopped,
   QUESTION_EXPIRED,
   RUN_FINISHED,
   standingAnswer,
@@ -43,7 +47,7 @@ import {
   type IntentStore,
   type TaskInput,
 } from 'broapp-autoapp/intent';
-import { createEventLog, createEvidence, openKnowledge, type Knowledge } from 'broapp-autoapp/knowledge';
+import { createEventLog, createEvidence, openKnowledge, sanitisedLogger, type Knowledge } from 'broapp-autoapp/knowledge';
 import {
   buildCandidate,
   createApplication,
@@ -63,6 +67,7 @@ import {
   RUN_DONE,
   shouldPoll,
 } from '../packages/broapp-autoapp/src/launcher/ui/IntentPanel.tsx';
+import { firstSelection } from '../packages/broapp-autoapp/src/launcher/ui/selection.ts';
 import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
 import { harness, type Harness } from './harness.ts';
 
@@ -147,7 +152,19 @@ interface WorldOptions {
   readonly idleTimeoutMs?: number;
   /** The fake model's delay between chunks, so a turn can be slow without a tool call. */
   readonly chunkDelayMs?: number;
+  /** From this model call on (0 is the first), the provider fails with {@link PROVIDER_FAILURE}. */
+  readonly failFrom?: number;
+  /** Choose the provider in Settings and no model, so a turn cannot start. */
+  readonly noModel?: boolean;
 }
+
+/**
+ * A provider's failure in the shape 13d's run printed: an out-of-credit
+ * sentence with the settings address that names the key. The key's id here is
+ * made up; no real one is in any fixture.
+ */
+const FAKE_KEY_ID = 'a'.repeat(24) + '0123456789abcdef'.repeat(2) + 'b'.repeat(8);
+const PROVIDER_FAILURE = `This request requires more credits, or fewer max_tokens. You requested up to 131072 tokens, but can only afford 83488. To increase, visit https://openrouter.ai/workspaces/default/keys/${FAKE_KEY_ID} and adjust the key's total limit`;
 
 interface World {
   readonly root: Layout;
@@ -193,11 +210,27 @@ async function world(script: readonly FakeStep[], options: WorldOptions = {}): P
     ],
   });
   const asked: string[] = [];
+  let calls = 0;
   const adapter: ProviderAdapter = {
     ...fake,
     model: (config, modelId) => {
       asked.push(modelId);
-      return fake.model(config, modelId);
+      const model = fake.model(config, modelId);
+      const failFrom = options.failFrom;
+      if (failFrom === undefined || typeof model !== 'object') return model;
+      // Every call from `failFrom` on is refused by the provider, as a spent
+      // key is: the stream never starts.
+      return new Proxy(model, {
+        get(target, property, receiver) {
+          const value: unknown = Reflect.get(target, property, receiver);
+          if (property !== 'doStream' || typeof value !== 'function') return value;
+          return (...args: unknown[]): unknown => {
+            calls += 1;
+            if (calls > failFrom) return Promise.reject(new Error(PROVIDER_FAILURE));
+            return (value as (...inner: unknown[]) => unknown).apply(target, args);
+          };
+        },
+      });
     },
   };
   const tab = createLauncherTab({
@@ -238,7 +271,7 @@ async function world(script: readonly FakeStep[], options: WorldOptions = {}): P
       await tab.executor?.idle();
     },
   );
-  await tab.ai.registry.update({ provider: 'fake', modelId: 'fake-1' });
+  await tab.ai.registry.update(options.noModel === true ? { provider: 'fake' } : { provider: 'fake', modelId: 'fake-1' });
   return { root, dataDir, intents, knowledge, runs, gate, tab, fake, asked };
 }
 
@@ -462,6 +495,115 @@ describe('step 0: corrections from the review of 13b', () => {
 });
 
 // ── 1. The verdict ──────────────────────────────────────────────────────────
+
+describe('step 0: corrections from the review of 13d', () => {
+  // a.
+  test('a turn the provider killed before any tool call interrupts its task, costs no attempt and asks no advice', async () => {
+    const w = await world([], { failFrom: 0 });
+    const { id, slugs } = submitted(w.intents, [plan('first-part'), plan('second-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const detail = w.intents.get(id);
+    const [first, second] = detail?.tasks ?? [];
+    expect(first?.stored).toBe('interrupted');
+    expect(first?.attempts).toBe(0);
+    expect(second?.stored).toBe('in-queue');
+    expect(detail?.intent.status).toBe('stopped');
+    expect(detail?.intent.stopReason).toBe(providerStopped(slugs[0] ?? ''));
+    expect(first?.events.some((event) => event.to === 'failed')).toBe(false);
+    const interrupted = first?.events.find((event) => event.to === 'interrupted');
+    expect(interrupted?.note.startsWith(NOT_AN_ATTEMPT)).toBe(true);
+    expect(interrupted?.note).toContain('the AI provider failed: The AI provider returned an error.');
+    // The provider's own words reached neither the history nor the panel's reason.
+    expect(JSON.stringify(detail)).not.toContain('openrouter');
+    // One model call for the turn, and none for advice.
+    expect(w.asked).toHaveLength(1);
+    expect(w.intents.attemptNotes(first?.id ?? 0).map((row) => row.notAnAttempt)).toEqual([true]);
+  }, 60_000);
+
+  // b.
+  test('a turn that cannot start is treated the same way', async () => {
+    const w = await world([], { noModel: true });
+    const { id, slugs } = submitted(w.intents, [plan('first-part'), plan('second-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const detail = w.intents.get(id);
+    const [first, second] = detail?.tasks ?? [];
+    expect(first?.stored).toBe('interrupted');
+    expect(first?.attempts).toBe(0);
+    expect(second?.stored).toBe('in-queue');
+    expect(detail?.intent.stopReason).toBe(providerStopped(slugs[0] ?? ''));
+    expect(first?.events.find((event) => event.to === 'interrupted')?.note).toBe(
+      `${NOT_AN_ATTEMPT}the AI provider failed: Choose a model for Fake provider.`,
+    );
+    expect(first?.events.some((event) => event.to === 'failed')).toBe(false);
+    expect(w.asked).toHaveLength(0);
+  }, 60_000);
+
+  // c.
+  test('a turn that ended failed with no tool call and no error is not an attempt either', async () => {
+    const w = await world([]);
+    const { id, slugs } = submitted(w.intents, [plan('only-part')]);
+    const real = w.tab.ai;
+    const silent: Ai = { ...real, turn: () => Promise.resolve({ status: 'failed', events: [] }) };
+    const executor = createExecutor({ intents: w.intents, ai: () => silent, states: w.tab.states, layout: w.root, logger: quiet });
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const detail = w.intents.get(id);
+    const task = detail?.tasks[0];
+    expect(task?.stored).toBe('interrupted');
+    expect(task?.attempts).toBe(0);
+    expect(detail?.intent.stopReason).toBe(nothingDoneStopped(slugs[0] ?? ''));
+    expect(task?.events.find((event) => event.to === 'interrupted')?.note).toBe(
+      `${NOT_AN_ATTEMPT}the turn ended before the model did anything`,
+    );
+  }, 60_000);
+
+  // d.
+  test('a provider failure after an edit is still an interruption, and the edit stays', async () => {
+    const w = await world([editOnly('0001-only-part', ['c1'])], { failFrom: 1 });
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(task?.stored).toBe('interrupted');
+    expect(task?.attempts).toBe(0);
+    expect(readFileSync(join(w.root.app('items').source, 'autoapp.json'), 'utf8')).toContain('0001-only-part-c1');
+    expect(w.intents.get(id)?.tasks[0]?.events.some((event) => event.to === 'failed')).toBe(false);
+  }, 60_000);
+
+  // e.
+  test('the launcher’s printed log is sanitised the way the knowledge log is', () => {
+    const lines: string[] = [];
+    const printed = sanitisedLogger({ warn: (line) => lines.push(`warn ${line}`), error: (line) => lines.push(`error ${line}`) });
+    printed.error(`[broapp] ai.chat provider error: AI_APICallError: ${PROVIDER_FAILURE}`);
+    printed.warn(`[autoapp] ${PROVIDER_FAILURE}`);
+    printed.warn('[autoapp] the preview of items stopped');
+    expect(lines).toHaveLength(3);
+    for (const line of lines.slice(0, 2)) {
+      expect(line).not.toContain(FAKE_KEY_ID);
+      expect(line).toContain('https://openrouter.ai/workspaces/default/keys/<redacted>');
+    }
+    expect(lines[2]).toBe('warn [autoapp] the preview of items stopped');
+  });
+
+  // f.
+  test('the launcher’s page starts on the application the person last chose, not the first row', async () => {
+    const w = await world([]);
+    w.tab.session.select('items');
+    const client = await connect(w.tab);
+    const listed = await client.call('launcher.appsList', undefined);
+    expect(listed.apps.map((row) => row.appId)).toEqual(['empty', 'items']);
+    expect(listed.selected).toBe('items');
+    // What the page selects, and so what the Backlog panel lists, on first open.
+    expect(firstSelection(listed.apps, listed.selected)).toBe('items');
+    expect(firstSelection(listed.apps, null)).toBe('empty');
+    expect(firstSelection(listed.apps, 'gone')).toBe('empty');
+  }, 60_000);
+});
 
 describe('verdictOf', () => {
   const task = {

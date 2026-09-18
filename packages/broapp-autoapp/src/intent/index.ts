@@ -8,6 +8,7 @@ export {
   INTENT_STATUSES,
   isAllowedMove,
   LABELS,
+  NOT_AN_ATTEMPT,
   PRIORITIES,
   REASONING,
   RISKS,
@@ -16,6 +17,7 @@ export {
   TIERS,
 } from './types.ts';
 export type {
+  AttemptNote,
   Criterion,
   CriterionInput,
   IntentAnalysis,
@@ -30,6 +32,7 @@ export type {
   TaskEvent,
   TaskInput,
   TaskRecord,
+  TaskRun,
   TaskStatus,
   Tier,
 } from './types.ts';
@@ -70,7 +73,10 @@ export {
   INTENT_APPROVES,
   INTENT_REFUSES,
   MAX_QUESTIONS_PER_TASK,
+  nothingDoneStopped,
+  providerStopped,
   QUESTION_EXPIRED,
+  reasonsFromNote,
   RUN_FINISHED,
   standingAnswer,
   TASK_IDLE_TIMEOUT_MS,

@@ -141,6 +141,35 @@ export interface TaskInput {
 }
 
 /** One change of a task's status, as `task_events` keeps it. */
+/**
+ * The start of a note on a move that was not an attempt of the builder's.
+ *
+ * A turn the AI provider killed, one that could not start, and one that ended
+ * before the model did anything tell nothing about the task: the model never
+ * tried. The move is written down, because a history that skips a move lies,
+ * and marked with this, so that nothing reads it as an attempt: neither the
+ * attempts document nor the reasons a retry is told.
+ */
+export const NOT_AN_ATTEMPT = 'not an attempt: ';
+
+/** How one attempt at a task ended, read back from its history. */
+export interface AttemptNote {
+  /** The turn it ended: the first run of the task is attempt 1. */
+  readonly attempt: number;
+  readonly to: 'failed' | 'interrupted';
+  readonly note: string;
+  readonly at: number;
+  /** The note starts with {@link NOT_AN_ATTEMPT}. */
+  readonly notAnAttempt: boolean;
+}
+
+/** One run of a task, from `task_runs`. */
+export interface TaskRun {
+  readonly runId: string;
+  readonly attempt: number;
+  readonly at: number;
+}
+
 export interface TaskEvent {
   readonly id: number;
   readonly at: number;

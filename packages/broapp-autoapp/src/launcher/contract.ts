@@ -365,7 +365,15 @@ export const launcherContract = defineContract({
     'launcher.appsList': {
       effect: 'read',
       input: s.void(),
-      output: s.object({ apps: s.array(appSummary, { max: 500 }) }),
+      output: s.object({
+        apps: s.array(appSummary, { max: 500 }),
+        /**
+         * The application the person last chose, when it is still listed:
+         * what the page selects when it opens, so the panels and the next
+         * turn start on the same one.
+         */
+        selected: s.optional(s.nullable(s.string({ max: 40 }))),
+      }),
       summary: 'Every application on this computer, and whether it is running.',
     },
     'launcher.appCreate': {

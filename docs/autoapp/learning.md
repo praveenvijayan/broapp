@@ -180,9 +180,11 @@ change by three sentences only: read the documents first, and treat a build's
    `(provisional)`, and one a person should look at again
    `(needs review: <reason>)`.
 
-**Which application.** The one the message names by its id or a word of its
-name; else the one last selected; else the only one there is; else none, and
-the engineer uses `apps.list`.
+**Which application.** A builder's turn in a backlog run: its task's, found by
+the turn's exact run id (below). Any other turn: the one the message declares
+on a first line `Application: <appId>`; else the one it names by its id or a
+word of its name; else the one last selected; else the only one there is; else
+none, and the engineer uses `apps.list`.
 
 **How an entry is known.** `declared` comes from the release specification the
 build validated — the candidate's when one was built, else the current one.
@@ -244,6 +246,80 @@ was tried and ask how to go on, and a fourth in the same turn is refused. The
 person's next message is a new turn and the count starts again. A read the turn
 has already made twice, with nothing changed since, says so the third time;
 nothing is refused for it.
+
+## What a task's turn is given
+
+A backlog run builds each task in a turn of its own (see
+[intents.md](intents.md#how-a-backlog-runs)). The executor moves the task to
+`in-progress` with the turn's run id before the turn starts, and the backlog
+records that pair in `task_runs`. `search` looks the run id up there, by
+equality: a run id is never parsed. When it names a task, the turn is that
+task's, whatever its message says.
+
+**The documents, in order.** `digest:<appId>`, `attempts:<appId>`,
+`intent:<appId>`, `evidence:<appId>`, then the lessons. The AI layer offers at
+most eight refs a turn and cuts from the end when the budget is short, so the
+attempts document sits second: for a retry it is worth most. Five documents and
+three lessons fit the eight.
+
+**Earlier attempts at `<slug>`** (`attempts:<appId>`, at most 1,500 characters,
+cut at a line). Offered only when the task has at least one earlier run. Per
+earlier attempt, oldest first, the newest never cut:
+
+1. **Changed:** the distinct paths the run's `edit` events name, at most eight,
+   then "and <k> more".
+2. **Ended with:** the reasons its move to `failed` gave, sentence by sentence.
+3. **Still wrong at the end:** the problems of the run's last build, and the
+   failed examples of its last check when that check came after the build.
+
+Then, once, **Came back:** any build problem, by signature, in the last build of
+two or more attempts, with the attempts named, so a builder does not try the
+same repair again. Then, when the planning model diagnosed the task's last
+failure, **How the planning model read it:** the diagnosis only; its advice and
+its note are for the person. An attempt that was interrupted says "stopped
+before it finished" and lists only what it changed. A move marked
+`not an attempt:` (a turn the provider killed, one that could not start, one
+that ended before the model did anything) is left out entirely. Everything
+passes `sanitise`; no model prose but the diagnosis is shown.
+
+**A task's lessons.** Three tiers, filled in order up to three, no lesson twice:
+
+1. **Pinned** — as for every turn.
+2. **Related** — at most two lessons distilled from a case whose window edited a
+   file this task edited in an earlier attempt or named in its `locks`, with the
+   same scope, status and `method_unclear` rules as a match, confirmed first,
+   then newest. File overlap is a signal, not proof: two changes to one file can
+   be about different things.
+3. **Words** — full-text matches on the task's own title, summary and criteria,
+   never on the builder's message, whose fixed sentences are the same for every
+   task. Among them, a lesson about a stage the task's labels point at
+   (`STAGES_FOR_LABEL`) sorts first.
+
+A turn with no task is served exactly as before. A replay or an evaluation can
+turn the second tier off (`corpus.related: false`) and the attempts document
+off (`documents.attempts: false`). Nothing here ranks by outcome.
+
+**Why each document was there.** The `search` event carries `why`, one entry per
+delivered document and per lesson whose line reached the model, each with a
+reason from a closed list: `application`, `backlog`, `attempts`, `pinned`,
+`related:<file>`, `words`.
+
+**The relationship index.**
+
+![Five kinds of recorded thing, task, run, file, case and lesson, joined by nine relations, each read from one stored row.](../../diagrams/autoapp-task-links.svg)
+
+`links` in `knowledge.sqlite` records which recorded things touched which: a
+task ran as a run, a run and its task edited a file, a task planned a file, a
+case was opened and resolved in runs and edited files in its window, a lesson
+was distilled from a case and served to a run. A file is `(app_id, path)`, the
+path relative to the workspace; two applications' files of the same name never
+join. Every row names the row it was read from (`task_runs:<run_id>`,
+`events:<id>`, `episodes:<id>`, `lessons:<id>`, `servings:<id>`, `tasks:<id>`)
+and carries no weight. It is derived: `rebuildLinks` rewrites it in one
+transaction when the launcher opens its stores and whenever a task's attempt
+ends, and dropping the table loses nothing. `broapp-autoapp knowledge links
+[--app <id>] [--rebuild]` prints the rows per relation and the `locks` entries
+that are not a file of the workspace; those are skipped, never guessed at.
 
 ## Distillation
 

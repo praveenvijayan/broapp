@@ -77,6 +77,21 @@ function anyChanged(columns: readonly string[]): string {
 }
 
 /**
+ * The relationship index (14a): which recorded things touched which, each row
+ * naming the row it was read from. Derived: `rebuildLinks` deletes and
+ * rewrites every row, and runs this again first, so dropping the table loses
+ * nothing. A link carries no weight and no score.
+ */
+export const LINKS_TABLE = `CREATE TABLE IF NOT EXISTS links (
+     id INTEGER PRIMARY KEY, app_id TEXT NOT NULL,
+     src_kind TEXT NOT NULL, src_id TEXT NOT NULL, rel TEXT NOT NULL,
+     dst_kind TEXT NOT NULL, dst_id TEXT NOT NULL,
+     source TEXT NOT NULL, at INTEGER NOT NULL);
+   CREATE UNIQUE INDEX IF NOT EXISTS links_once ON links(app_id, src_kind, src_id, rel, dst_kind, dst_id);
+   CREATE INDEX IF NOT EXISTS links_src ON links(app_id, src_kind, src_id);
+   CREATE INDEX IF NOT EXISTS links_dst ON links(app_id, dst_kind, dst_id);`;
+
+/**
  * The migrations, in order. Append; never edit one that has shipped.
  *
  * The first creates every table the knowledge loop will need, including the
@@ -154,6 +169,8 @@ const MIGRATIONS: readonly string[] = [
      outcome TEXT NOT NULL, steps INTEGER NOT NULL, ms INTEGER NOT NULL, input_tokens INTEGER, output_tokens INTEGER,
      build_reached INTEGER NOT NULL, manifest_blob TEXT NOT NULL, at INTEGER NOT NULL);
    CREATE INDEX replays_lesson ON replays(lesson_id, at);`,
+  // 14a: which recorded things touched which. See `LINKS_TABLE`.
+  LINKS_TABLE,
 ];
 
 /** The `sha256` of a string's UTF-8 bytes, hex. */

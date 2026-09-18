@@ -32,9 +32,11 @@ import {
   createEventLog,
   createEvidence,
   openKnowledge,
-  runEvaluateCommand,
   openSession,
+  rebuildLinks,
+  runEvaluateCommand,
   runKnowledgeCommand,
+  runLinksCommand,
   runReplayCommand,
   type EventLog,
   type Knowledge,
@@ -53,6 +55,7 @@ import {
 } from '../spec/index.ts';
 
 import { activate } from './activate.ts';
+import { appIds } from './apps.ts';
 import { buildCandidate } from './candidate.ts';
 import { startControl, type Control } from './control.ts';
 import { openJournal, type Journal } from './journal.ts';
@@ -124,6 +127,7 @@ Usage:
   broapp-autoapp knowledge confirm <id> [--by <name>] [--yes]
   broapp-autoapp knowledge retire <id>
   broapp-autoapp knowledge export [--json]
+  broapp-autoapp knowledge links [--app <id>] [--rebuild]
                                         Review what the engineer learnt. A lesson
                                         stays provisional until a person confirms it.
   broapp-autoapp knowledge replay <caseId> [--with <lessonId>] [--runs n]
@@ -706,6 +710,15 @@ async function main(): Promise<number> {
     knowledge === null || intents === null
       ? null
       : { knowledge, log: createEventLog(knowledge, { source: 'launcher', tee: console }), intents };
+  if (recording !== null) {
+    // Derived, so rebuilt whenever the stores open: it can never be further
+    // behind than the last task that ended while nothing was listening.
+    try {
+      rebuildLinks({ knowledge: recording.knowledge, intents: recording.intents, layout: root, apps: appIds(root) });
+    } catch (cause) {
+      recording.log.error(`[autoapp] the relationship index could not be rebuilt: ${String(cause instanceof Error ? cause.message : cause)}`);
+    }
+  }
   const supervisor = createSupervisor(loggerOf(recording));
   stopChildrenOnExit(supervisor);
 
@@ -808,6 +821,18 @@ async function main(): Promise<number> {
         const providers = [anthropic(), ollama(), openai(), customServer()];
         const aiDataDir = join(root.root, 'launcher');
         if (argv[1] === 'replay') return await runReplayCommand({ root, argv: argv.slice(2), providers, aiDataDir });
+        if (argv[1] === 'links') {
+          // Both stores, each through its own handle; the backlog without
+          // recovery, because a launcher may be running one.
+          const store = openKnowledge(aiDataDir);
+          const backlog = openIntents(aiDataDir);
+          try {
+            return runLinksCommand({ argv: argv.slice(2), knowledge: store, intents: backlog, layout: root, apps: appIds(root) });
+          } finally {
+            backlog.close();
+            store.close();
+          }
+        }
         if (argv[1] === 'evaluate') {
           return await runEvaluateCommand({
             root,

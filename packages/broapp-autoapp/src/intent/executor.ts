@@ -37,7 +37,7 @@ import type { Layout } from '../spec/index.ts';
 import { modelFor, readTierModels, type TierModels } from './models.ts';
 import { exampleIdFor, renderPlan, validateGraph } from './plan.ts';
 import type { IntentStore } from './store.ts';
-import type { StoredTaskStatus, TaskRecord } from './types.ts';
+import { NOT_AN_ATTEMPT, type StoredTaskStatus, type TaskRecord } from './types.ts';
 
 /**
  * The run's standing answer: the tools a builder's turn is approved for
@@ -89,6 +89,42 @@ export const RUN_FINISHED =
 export const DECIDE = 'Decide with what you have.';
 /** What `intent.ask` returns. */
 export const ASKED_NEXT = 'Stop now. The person will answer and the task will be run again.';
+
+/**
+ * The start of a note on a move that was not an attempt of the builder's.
+ * Defined beside the task types, so the store can mark such a row; exported
+ * here, where the notes are written.
+ */
+export { NOT_AN_ATTEMPT } from './types.ts';
+
+/** Why a run stopped when the provider failed while a task was being built. */
+export function providerStopped(slug: string): string {
+  return `The AI provider returned an error while building ${slug}. Nothing was judged. The launcher's log has the detail.`;
+}
+
+/** Why a run stopped when a builder's turn ended before the model did anything. */
+export function nothingDoneStopped(slug: string): string {
+  return `The turn building ${slug} ended before the model did anything. Nothing was judged. The launcher's log has the detail.`;
+}
+
+/**
+ * The reasons a note on a move to `failed` or `interrupted` gives, as the
+ * sentences a builder is told; empty for a move that was not an attempt.
+ *
+ * A retry inside one run is told the verdict's reasons from a variable; a task
+ * resumed after a stop or a restart has only the history, so the history is
+ * read back into the same sentences. An interrupted attempt says so, because
+ * "stopped by the person" is not a reason the plan failed.
+ */
+export function reasonsFromNote(to: 'failed' | 'interrupted', note: string): string[] {
+  if (note.startsWith(NOT_AN_ATTEMPT)) return [];
+  if (to === 'interrupted') return [`The attempt was stopped before it finished (${note}).`];
+  const text = note.replace(/^attempt \d+: /, '');
+  return text
+    .split(/(?<=\.)\s+(?=[A-Z0-9])/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence !== '');
+}
 
 /** How the gate's question to a builder's turn is answered. */
 export type StandingAnswer = boolean | 'defer';
@@ -304,6 +340,12 @@ export interface CreateExecutorOptions {
   readonly maxTurns?: number;
   /** How long a turn may go without a tool call. */
   readonly idleTimeoutMs?: number;
+  /**
+   * Called after a task moves to `completed`, `failed` or `interrupted`: the
+   * moment the record an attempt left is whole. The launcher rebuilds its
+   * relationship index here.
+   */
+  readonly onTaskEnded?: (task: TaskRecord) => void;
 }
 
 /** The executor. One run per launcher, one task at a time. */
@@ -335,7 +377,9 @@ export interface Executor {
 type Ending =
   | { readonly kind: 'stopped'; readonly by: string }
   | { readonly kind: 'asked'; readonly slug: string }
-  | { readonly kind: 'expired' };
+  | { readonly kind: 'expired' }
+  /** Not the builder's attempt: the provider failed, or the model never acted. */
+  | { readonly kind: 'provider'; readonly note: string; readonly reason: string };
 
 interface Active {
   readonly intentId: number;
@@ -350,6 +394,10 @@ interface Active {
   inFlight: Set<string>;
   /** The turn's idle clock, while a turn runs. */
   clock: IdleClock | null;
+  /** The first `error` event of this turn: the AI layer's own reduced sentence. */
+  providerError: string | null;
+  /** How many tool calls this turn made. */
+  toolCalls: number;
 }
 
 /** A clock that ends a turn after a stretch with no tool call. */
@@ -399,6 +447,15 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
   let current: Active | null = null;
   let loop: Promise<void> = Promise.resolve();
 
+  /** Tell whoever keeps derived data that a task's attempt is over. Never a reason to fail. */
+  const ended = (task: TaskRecord): void => {
+    try {
+      options.onTaskEnded?.(task);
+    } catch (cause) {
+      logger.error(`[autoapp] could not note the end of ${task.slug}: ${String(cause instanceof Error ? cause.message : cause)}`);
+    }
+  };
+
   /** One knowledge event, never a reason for the run to fail. */
   const note = (message: string, appId: string, runId?: string, callId?: string): void => {
     try {
@@ -416,6 +473,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
   const move = (task: TaskRecord, to: StoredTaskStatus, why: string, runId?: string): TaskRecord => {
     const moved = store.moveTask(task.id, to, why, runId);
     note(`task ${task.slug}: ${task.stored} → ${to} (${why})`, task.appId, runId);
+    if (to === 'completed' || to === 'failed' || to === 'interrupted') ended(moved);
     return moved;
   };
 
@@ -503,6 +561,12 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       const run = active.run;
       const callId = event.callId ?? '';
       const parent = callId.split('.')[0] ?? callId;
+      // The AI layer has already reduced a provider's failure to a sentence
+      // that is safe to keep; the raw text went to the launcher's log.
+      if (event.type === 'error' && active.providerError === null) {
+        active.providerError = event.message ?? 'The AI provider returned an error.';
+      }
+      if (event.type === 'tool-call') active.toolCalls += 1;
       if (event.type === 'tool-call' && run !== null) {
         active.run = { ...run, lastTool: event.tool ?? null, lastToolAt: Date.now() };
       } else if (event.type === 'confirm' && run !== null) {
@@ -564,7 +628,16 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
   async function runTask(active: Active, first: TaskRecord): Promise<boolean> {
     const sourceDir = layout.app(active.appId).source;
     let task = first;
+    // What the last attempt ended with, from the task's own history, so that a
+    // task resumed after a stop or a restart is told what a retry inside one
+    // run is told. A move that was not an attempt is skipped: the builder is
+    // told about attempts, and that was not one.
     let lastReasons: readonly string[] = [];
+    for (const row of [...store.attemptNotes(task.id)].reverse()) {
+      if (row.notAnAttempt) continue;
+      lastReasons = reasonsFromNote(row.to, row.note);
+      break;
+    }
     const runIds: string[] = [];
     // Attempts that count against `maxAttempts`, and the most criteria any
     // attempt of this run has passed: an attempt that gets further than every
@@ -599,6 +672,8 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       active.taskId = task.id;
       active.questions = [];
       active.inFlight = new Set();
+      active.providerError = null;
+      active.toolCalls = 0;
       active.run = { taskId: task.id, attempt: turnNumber, startedAt: Date.now(), lastTool: null, lastToolAt: null, approvals: 0 };
 
       const limit = AbortSignal.timeout(turnTimeoutMs);
@@ -614,12 +689,14 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       active.clock = clock;
       clock.arm();
       let error: string | undefined;
+      let turnStatus: 'succeeded' | 'failed' | 'cancelled' = 'succeeded';
       try {
         const result = await options.ai().turn(
           { runId, message: builderMessage(task, lastReasons), ...(modelId === null ? {} : { modelId }) },
           { answer: answerFor(active, runId), signal: AbortSignal.any([controller.signal, limit]), onEvent: followerFor(active) },
         );
         error = result.error;
+        turnStatus = result.status;
       } finally {
         clock.disarm();
         active.clock = null;
@@ -632,6 +709,26 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
 
       task = store.task(task.id) ?? task;
       if (active.ending !== null) return finishEnded(active, task);
+
+      // A turn the provider killed, or one that could not start, or one that
+      // ended before the model did anything, is not the builder's attempt: a
+      // verdict over it only re-reads what the last attempt left. It does not
+      // go on to the next task either, which would meet the same provider.
+      // Only when nothing here ended the turn: the idle clock and the limit
+      // abort it too, and the AI layer reports that as an error of its own.
+      if (!controller.signal.aborted && !limit.aborted) {
+        const failure = active.providerError ?? (error === undefined ? null : sanitise(error).slice(0, 300));
+        if (failure !== null) {
+          active.ending = { kind: 'provider', note: `${NOT_AN_ATTEMPT}the AI provider failed: ${failure}`, reason: providerStopped(task.slug) };
+        } else if (turnStatus === 'failed' && active.toolCalls === 0) {
+          active.ending = {
+            kind: 'provider',
+            note: `${NOT_AN_ATTEMPT}the turn ended before the model did anything`,
+            reason: nothingDoneStopped(task.slug),
+          };
+        }
+        if (active.ending !== null) return finishEnded(active, task);
+      }
 
       const revNow = sourceRevision(sourceDir);
       // `editsSinceBuild` is derived from a revision the states cache for a
@@ -696,6 +793,13 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       stopIntent(active, `${ending.slug} needs an answer`);
       return false;
     }
+    if (ending.kind === 'provider') {
+      // Interrupted, which gives the attempt back; no verdict, no advice —
+      // the advice question would go to the same provider.
+      if (task?.stored === 'in-progress') move(task, 'interrupted', ending.note);
+      stopIntent(active, ending.reason);
+      return false;
+    }
     if (task?.stored === 'in-progress') {
       move(task, 'interrupted', ending.kind === 'expired' ? QUESTION_EXPIRED : `stopped by ${ending.by}`);
     }
@@ -736,7 +840,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       logger.error(`[autoapp] a backlog run stopped on an error: ${message}`);
       const task = active.taskId === null ? null : store.task(active.taskId);
       try {
-        if (task?.stored === 'in-progress') store.moveTask(task.id, 'interrupted', 'the run stopped on an error');
+        if (task?.stored === 'in-progress') ended(store.moveTask(task.id, 'interrupted', 'the run stopped on an error'));
       } catch {
         // The intent is still stopped below.
       }
@@ -802,6 +906,8 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         ending: null,
         inFlight: new Set(),
         clock: null,
+        providerError: null,
+        toolCalls: 0,
       };
       current = active;
       loop = drive(active).finally(() => {

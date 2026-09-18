@@ -17,7 +17,7 @@ export {
 } from './store.ts';
 export type { Knowledge, OpenKnowledgeOptions } from './store.ts';
 
-export { createEventLog, eventData, sanitise } from './log.ts';
+export { createEventLog, eventData, sanitise, sanitisedLogger } from './log.ts';
 export type { EventKind, EventLog, EventLogOptions, Origin } from './log.ts';
 
 export { origin, sourceRevision } from './ids.ts';
@@ -30,6 +30,23 @@ export { EVIDENCE_MAX_CHARS, ORIENTATION_MAX_CHARS, indexWorkspace, orientation,
 export type { EvidenceEntry, IndexedSymbol, Orientation, SymbolIndex, TaskEvidence } from './path.ts';
 
 export { BACKLOG_DOCUMENT_CHARS, backlogDocument, createServe } from './serve.ts';
+export type { WhyReason } from './serve.ts';
+
+export { ATTEMPTS_DOCUMENT_CHARS, attemptsDocument, attemptsInput, editedPaths, runRecord } from './attempts.ts';
+export type { AttemptCheck, AttemptProblem, AttemptRecord, AttemptsInput } from './attempts.ts';
+
+export {
+  fileKey,
+  LINK_RELATIONS,
+  linksReport,
+  plannedFiles,
+  rebuildLinks,
+  runLinksCommand,
+  skippedLocks,
+  STAGES_FOR_LABEL,
+  stagesFor,
+} from './links.ts';
+export type { LinkKind, LinksCommandOptions, RebuildLinksInput, RebuildLinksResult, SkippedLock } from './links.ts';
 export type { Corpus, CreateServeInput, Hint, Serve, ServedDocuments, ServedTurn } from './serve.ts';
 
 export { problemSignature, scoreBuild, scoreCheck, scoreRunEnd, unrelatedHintCredit } from './scoring.ts';

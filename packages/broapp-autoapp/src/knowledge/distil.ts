@@ -218,6 +218,22 @@ function priorLesson(knowledge: Knowledge, episode: EpisodeRow): Prior | null {
 }
 
 /**
+ * The `edit` events of an application inside a case's window, oldest first.
+ *
+ * A case records no run of its own for its edits: whatever the application's
+ * workspace went through between the failure and its repair is the case's.
+ * One query, read by the distiller and by the relationship index, so the two
+ * never disagree about what a case touched.
+ */
+export function caseEdits(knowledge: Knowledge, appId: string, from: number, until: number): { id: number; data: string | null }[] {
+  return knowledge.db
+    .query<{ id: number; data: string | null }, [string, number, number]>(
+      "SELECT id, data FROM events WHERE kind = 'edit' AND app_id = ? AND at >= ? AND at <= ? ORDER BY id",
+    )
+    .all(appId, from, until);
+}
+
+/**
  * The question about one case, assembled from what was recorded.
  *
  * Exported so a report can say how large the question is, and so a test can
@@ -271,11 +287,7 @@ function assemble(knowledge: Knowledge, episode: EpisodeRow, prior: Prior | null
 
   parts.push('# The edits that followed', episode.edits === '' ? '(none recorded)' : episode.edits);
   const until = episode.resolved_at ?? Date.now();
-  const edits = db
-    .query<{ data: string | null }, [string, number, number]>(
-      "SELECT data FROM events WHERE kind = 'edit' AND app_id = ? AND at >= ? AND at <= ? ORDER BY id",
-    )
-    .all(episode.app_id, episode.opened_at, until);
+  const edits = caseEdits(knowledge, episode.app_id, episode.opened_at, until);
   for (const edit of edits) {
     try {
       const data = JSON.parse(edit.data ?? '{}') as { paths?: unknown; matchedBy?: unknown };

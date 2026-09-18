@@ -155,9 +155,11 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   }
 
   // The same rows the engineer's `apps.list` gets, from the same helper.
-  host.operation('launcher.appsList', () => ({
-    apps: listApps(root, supervisor, journal).map((row) => ({ ...row })),
-  }));
+  host.operation('launcher.appsList', () => {
+    const apps = listApps(root, supervisor, journal).map((row) => ({ ...row }));
+    const chosen = options.session?.get().selectedAppId ?? null;
+    return { apps, selected: chosen !== null && apps.some((row) => row.appId === chosen) ? chosen : null };
+  });
 
   /**
    * Start an application if it is not running, and open its tab.

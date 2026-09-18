@@ -42,6 +42,7 @@ import { KnowledgePanel } from './KnowledgePanel.tsx';
 import { LogsPanel } from './LogsPanel.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
 import { readScheme, applyScheme, SCHEME_KEY } from './scheme.ts';
+import { firstSelection } from './selection.ts';
 
 /** Where the columns' open state and the chosen conversation are remembered. */
 const HISTORY_OPEN = 'broapp-autoapp:history-open';
@@ -176,9 +177,10 @@ export function App(): React.ReactElement {
   }, [ready, refreshApps, changed]);
 
   const rows = apps.data?.apps ?? [];
+  const lastChosen = apps.data?.selected;
   useEffect(() => {
-    if (selected === null && rows.length > 0) setSelected(rows[0]?.appId ?? null);
-  }, [rows, selected]);
+    if (selected === null && rows.length > 0) setSelected(firstSelection(rows, lastChosen));
+  }, [rows, selected, lastChosen]);
 
   // An application that has just been made, waiting for the list it is in.
   // Selecting it before `appsList` has been read again would put the panels

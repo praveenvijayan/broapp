@@ -222,8 +222,9 @@ measured what a local model does with one long open-ended turn.
    `intent-<intentId>-<slug>-a<n>`, with no history, on `modelFor(task)`: its own
    model, its tier's, or the Settings model. A model the provider no longer
    offers fails the task without a turn.
-4. The builder's message starts `Application: <appId>`, which is how the turn's
-   documents are chosen, says to build this one task with one example per
+4. The builder's message starts `Application: <appId>` (the turn's documents are
+   chosen from its run id, which the backlog records in `task_runs`; the line is
+   for a reader), says to build this one task with one example per
    criterion under exactly the ids `<slug>-c<n>`, to use `candidate.cycle`
    until every check passes, not to remove or rename an example already there,
    and not to activate or plan. Then the plan, then any answers the person
@@ -271,6 +272,29 @@ does not parse stores nothing and changes no status. From there the person runs
 again (failed and interrupted tasks are queued, and the run continues from the
 first unfinished task), or asks the engineer to revise the failed task with
 `intent.task` and `replaces`, which returns it to `proposed`.
+
+**What a retry is told, and where it is read from.** An attempt after the first
+is told, in its message, "The last attempt ended with:" and the reasons. Inside
+one run those come from the verdict just taken; at the start of a run they come
+from the task's own history, the newest move from `in-progress` to `failed` or
+`interrupted` (`attemptNotes`), so a task resumed after a stop or a launcher
+restart is told the same. The message cannot be cut by the context budget. The
+turn is also given the attempts document (see
+[learning.md](learning.md#what-a-tasks-turn-is-given)): what each earlier attempt
+changed, how it ended, what was still wrong, what came back, and the planning
+model's diagnosis, read from the knowledge log's events for each run id in
+`task_runs`.
+
+**A turn the provider killed is not an attempt.** When the AI provider fails
+during a builder's turn, the turn cannot start, or it ends `failed` before the
+model made a single tool call, no verdict is taken: the task moves to
+`interrupted` (the attempt is given back) with a note beginning
+`not an attempt:`, the intent stops with "The AI provider returned an error
+while building <slug>. Nothing was judged. The launcher's log has the detail."
+(or "…ended before the model did anything…"), no advice is asked, and the next
+task is not started, because it would meet the same provider. The note carries
+the AI layer's reduced sentence, never the provider's raw text. A turn the idle
+clock, the time limit or a Stop ended is judged as before.
 
 **A builder that is unsure asks.** `intent.ask` records one question on the
 task, moves it to `needs-answer`, stops the intent with "<slug> needs an

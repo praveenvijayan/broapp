@@ -30,6 +30,7 @@ import {
 import { tierOf } from './tier.ts';
 import {
   isAllowedMove,
+  NOT_AN_ATTEMPT,
   TASK_STATUSES,
   type Criterion,
   type IntentAnalysis,
@@ -40,10 +41,12 @@ import {
   type Priority,
   type Reasoning,
   type Risk,
+  type AttemptNote,
   type StoredTaskStatus,
   type TaskEvent,
   type TaskInput,
   type TaskRecord,
+  type TaskRun,
   type TaskStatus,
   type Tier,
 } from './types.ts';
@@ -91,6 +94,22 @@ const MIGRATIONS: readonly string[] = [
    BEGIN SELECT RAISE(ABORT, 'a task''s history is appended to, never rewritten'); END;
    CREATE TRIGGER task_events_append_only_delete BEFORE DELETE ON task_events
    BEGIN SELECT RAISE(ABORT, 'a task''s history is appended to, never rewritten'); END;`,
+  // 14a: one row per run of a task, so a turn is found from its run id by
+  // equality and never by reading the id's shape. Backfilled from every task's
+  // `run_ids`, the attempt by position; `run_ids` stays, because the panel and
+  // 13c's tests read it.
+  `CREATE TABLE task_runs (
+     run_id TEXT PRIMARY KEY, task_id INTEGER NOT NULL REFERENCES tasks(id),
+     attempt INTEGER NOT NULL, at INTEGER NOT NULL);
+   CREATE INDEX task_runs_task ON task_runs(task_id, at);
+   INSERT INTO task_runs (run_id, task_id, attempt, at)
+     SELECT r.value, t.id, CAST(r.key AS INTEGER) + 1, COALESCE(s.at, t.started_at, 0)
+       FROM tasks t
+       JOIN json_each(CASE WHEN json_valid(t.run_ids) THEN t.run_ids ELSE '[]' END) AS r
+       LEFT JOIN (SELECT task_id, at, ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY id) AS n
+                    FROM task_events WHERE to_status = 'in-progress') AS s
+         ON s.task_id = t.id AND s.n = CAST(r.key AS INTEGER) + 1
+      WHERE r.type = 'text';`,
 ];
 
 /** An intent as the list shows it. */
@@ -187,6 +206,17 @@ export interface IntentStore {
   list(filter?: { readonly appId?: string; readonly limit?: number }): IntentSummary[];
   /** An intent's tasks: blockers first, then priority, then slug. */
   runOrder(intentId: number): TaskRecord[];
+  /** The task a run built, found by its exact run id; `null` for any other run. */
+  taskForRun(runId: string): TaskRecord | null;
+  /** A task's runs, oldest first. */
+  runsOf(taskId: number): TaskRun[];
+  /**
+   * How each of a task's attempts ended: every move from `in-progress` to
+   * `failed` or `interrupted`, oldest first, with the attempt it ended. A row
+   * whose note starts with {@link NOT_AN_ATTEMPT} is marked, not left out: the
+   * history is whole, and the reader decides.
+   */
+  attemptNotes(taskId: number): AttemptNote[];
   close(): void;
 }
 
@@ -615,6 +645,13 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
       db.query<null, [number, string, number]>(
         'UPDATE tasks SET started_at = ?, ended_at = NULL, attempts = attempts + 1, run_ids = ? WHERE id = ?',
       ).run(now(), JSON.stringify(runs), taskId);
+      // The primary key refuses a run id used twice, and the transaction this
+      // runs in takes the move back with it.
+      if (runId !== undefined) {
+        db.query<null, [string, number, number, number]>(
+          'INSERT INTO task_runs (run_id, task_id, attempt, at) VALUES (?, ?, ?, ?)',
+        ).run(runId, taskId, runs.length, now());
+      }
     } else if (to === 'completed' || to === 'failed') {
       db.query<null, [number, number]>('UPDATE tasks SET ended_at = ? WHERE id = ?').run(now(), taskId);
     } else if (row.status === 'in-progress' && (to === 'interrupted' || to === 'needs-answer')) {
@@ -1028,6 +1065,44 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
     },
 
     runOrder: orderOf,
+
+    taskForRun(runId) {
+      const row = db
+        .query<TaskRow, [string]>('SELECT t.* FROM task_runs r JOIN tasks t ON t.id = r.task_id WHERE r.run_id = ?')
+        .get(runId);
+      return row === null ? null : toTask(row, statuses(row.app_id));
+    },
+
+    runsOf(taskId) {
+      return db
+        .query<{ run_id: string; attempt: number; at: number }, [number]>(
+          'SELECT run_id, attempt, at FROM task_runs WHERE task_id = ? ORDER BY attempt, at',
+        )
+        .all(taskId)
+        .map((row) => ({ runId: row.run_id, attempt: row.attempt, at: row.at }));
+    },
+
+    attemptNotes(taskId) {
+      // An attempt is numbered by the moves to `in-progress` before it, which
+      // is how its run id was numbered: every such move names a run.
+      const out: AttemptNote[] = [];
+      let attempt = 0;
+      for (const event of db
+        .query<EventRow, [number]>('SELECT * FROM task_events WHERE task_id = ? ORDER BY id')
+        .all(taskId)) {
+        if (event.to_status === 'in-progress') attempt += 1;
+        if (event.from_status !== 'in-progress') continue;
+        if (event.to_status !== 'failed' && event.to_status !== 'interrupted') continue;
+        out.push({
+          attempt,
+          to: event.to_status,
+          note: event.note,
+          at: event.at,
+          notAnAttempt: event.note.startsWith(NOT_AN_ATTEMPT),
+        });
+      }
+      return out;
+    },
 
     close() {
       if (closed) return;

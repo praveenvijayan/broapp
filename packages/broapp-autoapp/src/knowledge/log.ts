@@ -163,6 +163,9 @@ const ALLOWED: Readonly<Record<EventKind, Readonly<Record<string, FieldRule>>>> 
     included: 'keep',
     miss: 'keep',
     lessonId: 'keep',
+    // 14a: why each delivered document was there. Both are host-made: a ref,
+    // and a reason from a closed list.
+    why: { ref: 'keep', reason: 'keep' },
   },
   stderr: { pid: 'keep' },
   log: {},
@@ -200,6 +203,23 @@ export function sanitise(text: string): string {
   const home = homedir();
   if (home !== '' && home !== '/') out = out.split(home).join('~');
   return out;
+}
+
+/**
+ * A logger that passes every line through {@link sanitise} before it goes on.
+ *
+ * The launcher's log prints warnings and errors to its terminal as well as
+ * writing them down, and the copy it writes down is sanitised: without this,
+ * the printed copy was not. 13d's run printed a provider's error with the
+ * settings address that names the key that ran out of credit, and the
+ * knowledge log's copy of the same line had it redacted. What a person
+ * debugging needs is still there; what names a credential is not.
+ */
+export function sanitisedLogger(logger: HostLogger): HostLogger {
+  return {
+    warn: (message) => logger.warn(sanitise(message)),
+    error: (message) => logger.error(sanitise(message)),
+  };
 }
 
 /** Sanitise every string inside a value, at any depth. */

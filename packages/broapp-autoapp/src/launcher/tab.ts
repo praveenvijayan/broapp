@@ -24,16 +24,17 @@ import { createExecutor, type Executor, type IntentStore } from '../intent/index
 import { createDistiller, pendingCases, type Distiller } from '../knowledge/distil.ts';
 import { recordContext, type Evidence } from '../knowledge/evidence.ts';
 import { instructionsHash, reviewFlags } from '../knowledge/freshness.ts';
-import type { EventLog } from '../knowledge/log.ts';
+import { sanitisedLogger, type EventLog } from '../knowledge/log.ts';
 import { scoreRunEnd } from '../knowledge/scoring.ts';
 import { createServe, type CreateServeInput, type Serve, type ServedTurn } from '../knowledge/serve.ts';
 import { openSession, type Session } from '../knowledge/session.ts';
+import { rebuildLinks } from '../knowledge/links.ts';
 import type { Knowledge } from '../knowledge/store.ts';
 import { AUTOAPP_VERSION } from '../knowledge/version.ts';
 import type { Layout } from '../spec/index.ts';
 
 import { createLauncherApp, LAUNCHER_CONFIRM_TIMEOUT_MS, LAUNCHER_MAX_STEPS, type LauncherApp } from './app.ts';
-import { listApps } from './apps.ts';
+import { appIds, listApps } from './apps.ts';
 import type { Journal } from './journal.ts';
 import type { Templates } from './starter.ts';
 import type { Supervisor } from './supervisor.ts';
@@ -144,6 +145,12 @@ const PURPOSE =
 /** Assemble the launcher's tab. */
 export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTab {
   const logger: HostLogger = options.logger ?? console;
+  // What the AI layer, the engineer's tools and the backlog run log goes
+  // through the sanitiser before it is printed: the AI layer logs a provider's
+  // raw error, and that text can name a credential. Not the launcher's own
+  // routes: they print the launch address a person has to open, whose token
+  // the sanitiser would take.
+  const printed: HostLogger = sanitisedLogger(logger);
   // Over the layout, so the candidate a person left is the one they come back to.
   const states = createCandidateStates(options.layout, logger);
   const knowledge = options.knowledge;
@@ -225,12 +232,24 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           states,
           layout: options.layout,
           ...(knowledge === undefined ? {} : { log: knowledge.log }),
-          logger,
+          logger: printed,
           confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
           ...(options.run?.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: options.run.turnTimeoutMs }),
           ...(options.run?.maxAttempts === undefined ? {} : { maxAttempts: options.run.maxAttempts }),
           ...(options.run?.maxTurns === undefined ? {} : { maxTurns: options.run.maxTurns }),
           ...(options.run?.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.run.idleTimeoutMs }),
+          // The relationship index is derived from what an attempt left; the
+          // moment a task's attempt ends is when that record is whole.
+          ...(knowledge === undefined
+            ? {}
+            : {
+                onTaskEnded: () => {
+                  const intents = options.intents;
+                  if (intents !== undefined) {
+                    rebuildLinks({ knowledge: knowledge.store, intents, layout: options.layout, apps: appIds(options.layout) });
+                  }
+                },
+              }),
         });
   const busy = executor === null ? undefined : (appId: string, runId: string | null) => executor.busy(appId, runId);
 
@@ -295,7 +314,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       // The same gate the tab's own clicks pass. One door, two directions.
       gate: options.gate,
       states,
-      logger,
+      logger: printed,
       templates: options.templates,
       versions: options.versions,
       confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
@@ -387,7 +406,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       }
       options.store.finishRun(runId, status, summary);
     },
-    logger,
+    logger: printed,
   });
 
   return {

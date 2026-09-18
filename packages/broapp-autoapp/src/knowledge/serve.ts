@@ -4,9 +4,15 @@
  * The AI layer's context providers are the one door: `search` names the
  * documents a turn should have, `resolve` renders them, and the AI layer fits
  * them into its budget and puts them under the Rules that say documents are
- * data. Three documents at most — the orientation, the task evidence, and the
- * lessons the request's words match — and nothing from here reaches the
- * instructions, which stay the one trusted statement of how to work.
+ * data. The orientation, the task evidence, the lessons the request's words
+ * match, and, for a builder's turn in a backlog run, what the task's earlier
+ * attempts did — and nothing from here reaches the instructions, which stay
+ * the one trusted statement of how to work.
+ *
+ * A builder's turn is known by its exact run id (14a): the backlog records
+ * which task each run built, and `search` looks the run up. Its lessons are
+ * then chosen by fixed rules — pinned, then at most two that share a file with
+ * the task, then the task's own words — and never by any outcome.
  *
  * A serving is written only once `onContext` shows what was delivered. A
  * lesson that was found, rendered and then cut by the budget was never seen by
@@ -27,7 +33,9 @@ import type { AppRow } from '../launcher/apps.ts';
 import type { BuildProblem } from '../launcher/candidate.ts';
 import type { Layout } from '../spec/index.ts';
 
+import { attemptsDocument, attemptsInput } from './attempts.ts';
 import { sourceRevision, type FullOrigin } from './ids.ts';
+import { stagesFor } from './links.ts';
 import type { EventLog } from './log.ts';
 import { indexWorkspace, orientation, taskEvidence, type SymbolIndex, type TaskEvidence } from './path.ts';
 import { problemSignature } from './scoring.ts';
@@ -94,13 +102,27 @@ export interface Corpus {
   readonly pinned?: readonly number[];
   /** Which other lessons may match: all of them (the default), the curated seeds, the confirmed ones, or none. */
   readonly match?: 'all' | 'curated' | 'confirmed' | 'none';
+  /**
+   * Whether a task's turn may be given lessons that share a file with the
+   * task (the second tier). Defaults to `true`; a replay or an evaluation
+   * turns it off to measure without it.
+   */
+  readonly related?: boolean;
 }
 
-/** Which of an application's two documents a turn is given. Both, unless said otherwise. */
+/** Which of an application's documents a turn is given. All of them, unless said otherwise. */
 export interface ServedDocuments {
   readonly digest: boolean;
   readonly evidence: boolean;
+  /** What a task's earlier attempts did, for a builder's retry. Defaults to `true`. */
+  readonly attempts?: boolean;
 }
+
+/**
+ * Why a document was in a turn: the closed list the `search` event records.
+ * `related:<file>` names the file the lesson and the task share.
+ */
+export type WhyReason = 'application' | 'backlog' | 'attempts' | 'pinned' | 'words' | `related:${string}`;
 
 /** What {@link createServe} needs. */
 export interface CreateServeInput {
@@ -204,11 +226,25 @@ interface LessonHit {
   applies: string;
 }
 
+/** A lesson chosen for a turn, and the tier that chose it. */
+interface ChosenLesson extends LessonHit {
+  reason: WhyReason;
+}
+
+/** How many lessons the second tier — a shared file — may give one task. */
+const TURN_RELATED = 2;
+
 /** What one turn has been offered so far. */
 interface Turn {
   readonly appId: string | null;
+  /** The task a builder's turn is building, found by its run id; `null` for any other turn. */
+  readonly task: TaskRecord | null;
+  /** The attempts document, rendered once in `search`. */
+  readonly attempts: string | null;
   readonly tokens: readonly string[];
-  readonly lessons: readonly LessonHit[];
+  readonly lessons: readonly ChosenLesson[];
+  /** Why each offered ref was offered. */
+  readonly why: ReadonlyMap<string, WhyReason>;
   /** Computed once in `search`, rendered in `resolve`: the same words, the same answer. */
   readonly evidence: TaskEvidence | null;
   readonly at: number;
@@ -256,6 +292,21 @@ function strongMatch(lesson: LessonHit, words: readonly string[], routes: Readon
   if (appliesList(lesson.applies, 'routes').some((route) => routes.has(route))) return true;
   const own = wordsOf(`${lesson.summary} ${lesson.trigger}`);
   return words.filter((word) => own.has(word)).length >= TURN_MIN_SHARED;
+}
+
+/** A task's own words: its title, summary and criteria, never the builder's fixed sentences. */
+function taskText(task: TaskRecord): string {
+  return [task.title, task.summary, ...task.criteria.map((criterion) => criterion.text)].join('\n');
+}
+
+/** A lesson's `applies.stage`, or `null`. */
+function stageOf(applies: string): string | null {
+  try {
+    const stage = (JSON.parse(applies) as { stage?: unknown }).stage;
+    return typeof stage === 'string' ? stage : null;
+  } catch {
+    return null;
+  }
 }
 
 /** `\b` for identifiers that may contain a hyphen. */
@@ -374,6 +425,11 @@ export function createServe(input: CreateServeInput): Serve {
             AND (l.diagnosis IS NULL OR l.diagnosis <> 'method_unclear')
             AND (l.scope = 'global' OR l.scope = ?)
             AND (? IS NULL OR json_extract(l.applies, '$.stage') = ?)
+          -- bm25 is negative and the sort ascends, so the best match is the most
+          -- negative. Every factor in this product is positive and larger means
+          -- better, which is why multiplying by 0.6 moves a provisional lesson
+          -- down. Never add a term here by addition, or a factor that can be
+          -- zero or negative: either would invert or erase the order.
           ORDER BY bm25(lessons_fts, 1.0, 2.0) * CASE l.status WHEN 'confirmed' THEN 1.0 ELSE 0.6 END
           LIMIT ?`,
       )
@@ -394,6 +450,72 @@ export function createServe(input: CreateServeInput): Serve {
           ORDER BY l.id`,
       )
       .all(`app:${appId}`);
+  }
+
+  /**
+   * Lessons distilled from a case that edited a file this task edited in an
+   * earlier attempt or planned in its `locks`: the second tier, read from the
+   * relationship index. The same admission, status, `method_unclear` and scope
+   * rules as {@link findLessons}; confirmed before provisional, then newest.
+   * Each comes with the file it shares.
+   *
+   * File overlap is a signal, not proof: two changes to one file can be about
+   * different things, which is why this tier is capped and sits under pinned.
+   */
+  function relatedLessons(appId: string, slug: string, limit: number): (LessonHit & { file: string })[] {
+    const admit = admitted('corpus');
+    if (admit === null || limit <= 0) return [];
+    const rows = db
+      .query<LessonHit & { file: string }, [string, string, string]>(
+        `SELECT l.id, l.status, l.review, l.summary, l.trigger, l.applies, mine.dst_id AS file
+           FROM links mine
+           JOIN links touched ON touched.app_id = mine.app_id AND touched.src_kind = 'case' AND touched.rel = 'edited'
+                              AND touched.dst_kind = 'file' AND touched.dst_id = mine.dst_id
+           JOIN links taught ON taught.app_id = mine.app_id AND taught.src_kind = 'lesson' AND taught.rel = 'distilled_from'
+                             AND taught.dst_kind = 'case' AND taught.dst_id = touched.src_id
+           JOIN lessons l ON l.id = CAST(taught.src_id AS INTEGER)
+          WHERE mine.app_id = ? AND mine.src_kind = 'task' AND mine.src_id = ?
+            AND mine.rel IN ('edited', 'planned') AND mine.dst_kind = 'file'
+            AND ${admit}
+            AND l.status IN ('confirmed', 'provisional')
+            AND (l.diagnosis IS NULL OR l.diagnosis <> 'method_unclear')
+            AND (l.scope = 'global' OR l.scope = ?)
+          ORDER BY CASE l.status WHEN 'confirmed' THEN 0 ELSE 1 END, l.created_at DESC, l.id DESC, mine.dst_id`,
+      )
+      .all(appId, slug, `app:${appId}`);
+    const out: (LessonHit & { file: string })[] = [];
+    for (const row of rows) {
+      if (out.length >= limit) break;
+      if (!out.some((held) => held.id === row.id)) out.push(row);
+    }
+    return out;
+  }
+
+  /**
+   * A task's lessons, in three tiers filled in order up to {@link TURN_LESSONS},
+   * no lesson twice: pinned; at most {@link TURN_RELATED} sharing a file; then
+   * the task's own words, a lesson about a stage its labels point at first.
+   */
+  function taskLessons(task: TaskRecord, appId: string, routes: ReadonlySet<string>): ChosenLesson[] {
+    const chosen: ChosenLesson[] = [];
+    const take = (lesson: LessonHit, reason: WhyReason): void => {
+      if (chosen.length < TURN_LESSONS && !chosen.some((held) => held.id === lesson.id)) chosen.push({ ...lesson, reason });
+    };
+    for (const lesson of pinnedLessons(appId)) take(lesson, 'pinned');
+    if (input.corpus?.related !== false) {
+      for (const lesson of relatedLessons(appId, task.slug, TURN_RELATED)) take(lesson, `related:${lesson.file}`);
+    }
+    const text = taskText(task);
+    const words = tokens(text);
+    const stages = stagesFor(task.labels);
+    const matched = findLessons(text, appId, TURN_CANDIDATES).filter((lesson) => strongMatch(lesson, words, routes));
+    // A stable sort: within each half, full-text order stands.
+    const ordered = [
+      ...matched.filter((lesson) => stages.has(stageOf(lesson.applies) ?? '')),
+      ...matched.filter((lesson) => !stages.has(stageOf(lesson.applies) ?? '')),
+    ];
+    for (const lesson of ordered) take(lesson, 'words');
+    return chosen;
   }
 
   /** Write one serving; the unique index makes a repeat a no-op. */
@@ -427,6 +549,10 @@ export function createServe(input: CreateServeInput): Serve {
       const text = input.intents === undefined ? null : backlogDocument(input.intents, appId);
       return text === null ? null : { ref, title: `The backlog for ${appId}`, content: text };
     }
+    if (kind === 'attempts') {
+      if (turn?.task === null || turn?.task === undefined || turn.attempts === null) return null;
+      return { ref, title: `Earlier attempts at ${turn.task.slug}`, content: turn.attempts };
+    }
     if (kind === 'evidence') {
       const evidence =
         turn?.evidence ?? taskEvidence({ layout, appId, tokens: turn?.tokens ?? [], index: indexOf(appId) });
@@ -442,25 +568,45 @@ export function createServe(input: CreateServeInput): Serve {
         for (const [runId, turn] of turns) if (now - turn.at > TURN_TTL_MS) forget(runId);
         const words = tokens(query.text);
         const rows = input.apps();
-        const appId = chooseApp(query.text, words, rows);
+        // A builder's turn is found by its exact run id, which the executor
+        // wrote into the backlog before the turn began. Its task names its
+        // application; the message's first line is for every other caller.
+        const task =
+          query.runId === undefined || input.intents === undefined ? null : input.intents.taskForRun(query.runId);
+        const appId = task !== null ? task.appId : chooseApp(query.text, words, rows);
         const evidence = appId === null ? null : taskEvidence({ layout, appId, tokens: words, index: indexOf(appId) });
         const routes = new Set(
           (evidence?.entries ?? []).filter((entry) => entry.kind === 'route').map((entry) => entry.name),
         );
-        const lessons: LessonHit[] = [];
-        if (appId !== null) {
+        const lessons: ChosenLesson[] = [];
+        if (appId !== null && task !== null) {
+          lessons.push(...taskLessons(task, appId, routes));
+        } else if (appId !== null) {
           const matched = findLessons(query.text, appId, TURN_CANDIDATES).filter((lesson) =>
             strongMatch(lesson, words, routes),
           );
-          for (const lesson of [...pinnedLessons(appId), ...matched]) {
-            if (lessons.length < TURN_LESSONS && !lessons.some((held) => held.id === lesson.id)) lessons.push(lesson);
+          const pinnedHere = pinnedLessons(appId);
+          for (const lesson of [...pinnedHere, ...matched]) {
+            if (lessons.length < TURN_LESSONS && !lessons.some((held) => held.id === lesson.id)) {
+              lessons.push({ ...lesson, reason: pinnedHere.includes(lesson) ? 'pinned' : 'words' });
+            }
           }
         }
+        const attempts =
+          appId === null || task === null || input.intents === undefined || documents.attempts === false
+            ? null
+            : attemptsDocument(attemptsInput(knowledge, input.intents, task, query.runId ?? null));
+        const why = new Map<string, WhyReason>();
         const refs: ContextRef[] =
           appId === null
             ? []
             : [
                 ...(documents.digest ? [{ ref: `digest:${appId}`, title: `Where ${appId} stands` }] : []),
+                // Second: for a retry this is the document worth most, and the
+                // budget cuts from the end.
+                ...(attempts !== null && task !== null
+                  ? [{ ref: `attempts:${appId}`, title: `Earlier attempts at ${task.slug}` }]
+                  : []),
                 ...(input.intents !== undefined && input.intents.live(appId).length > 0
                   ? [{ ref: `intent:${appId}`, title: `The backlog for ${appId}` }]
                   : []),
@@ -469,12 +615,22 @@ export function createServe(input: CreateServeInput): Serve {
                   : []),
                 ...lessons.map((lesson) => ({ ref: `lesson:${String(lesson.id)}`, title: 'A lesson from earlier work' })),
               ];
+        if (appId !== null) {
+          why.set(`digest:${appId}`, 'application');
+          why.set(`attempts:${appId}`, 'attempts');
+          why.set(`intent:${appId}`, 'backlog');
+          why.set(`evidence:${appId}`, 'application');
+        }
+        for (const lesson of lessons) why.set(`lesson:${String(lesson.id)}`, lesson.reason);
         const offered = refs.slice(0, query.limit);
         if (query.runId !== undefined) {
           turns.set(query.runId, {
             appId,
+            task,
+            attempts,
             tokens: words,
             lessons,
+            why,
             evidence,
             at: now,
             requested: offered.map((ref) => ref.ref),
@@ -530,11 +686,19 @@ export function createServe(input: CreateServeInput): Serve {
 
       const included = delivered.documents.map((document) => document.ref);
       const lessonsDocument = delivered.documents.find((document) => document.ref.startsWith('lessons:'));
+      // Why each delivered document was there: one entry per delivered
+      // document, and per lesson whose whole line reached the model.
+      const why: { ref: string; reason: WhyReason }[] = [];
+      for (const ref of included) {
+        const reason = turn.why.get(ref);
+        if (reason !== undefined) why.push({ ref, reason });
+      }
       for (const lesson of turn.lessons) {
         if (!turn.resolved.includes(`lesson:${String(lesson.id)}`)) continue;
         // Included only when its whole line reached the model: a lesson cut in
         // half by the budget was not delivered as written.
         const reached = lessonsDocument?.content.split('\n').includes(bullet(lesson)) === true;
+        if (reached) why.push({ ref: `lesson:${String(lesson.id)}`, reason: lesson.reason });
         let stage = '';
         try {
           const applies = JSON.parse(lesson.applies) as { stage?: unknown };
@@ -555,7 +719,7 @@ export function createServe(input: CreateServeInput): Serve {
       log.event(
         'search',
         `a turn was served ${String(included.length)} document(s)`,
-        { tokens: turn.tokens, hits: turn.requested.length, requested: turn.requested, resolved: turn.resolved, included },
+        { tokens: turn.tokens, hits: turn.requested.length, requested: turn.requested, resolved: turn.resolved, included, why },
         { runId, ...(turn.appId === null ? {} : { appId: turn.appId }) },
       );
       return { appId: turn.appId, requested: turn.requested, resolved: turn.resolved };
