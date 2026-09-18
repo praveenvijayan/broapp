@@ -202,14 +202,17 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.11: a window on the knowledge layer. A book icon on the rail
-opens a Knowledge panel with three views: the turns (what each was given,
-whether it was cut, and what came of each served lesson), the lessons (their
-servings, provenance and replay evidence) and the cases; a person can
-confirm, retire, write or replace a lesson from it, writing the same rows the
-command line writes, served on the next turn. Launcher only: `broapp-autoapp`
-0.3.10; `broapp-ai-elements` stays at 0.4.5, `broapp` at 0.4.2, the
-providers and `create-broapp` at 0.4.1. Earlier: 0.4.10 (the log in the
+Version 0.4.12: a backlog. The engineer restates a request, checks it against
+the application's real routes and pages, and splits it into tasks a person
+reviews in a Backlog panel; **Run** builds each task as its own turn on the
+model chosen for it, the host marking a task completed only when a verified
+build passes an example for every criterion, and nothing is activated. A
+retry, or a task resumed after a stop, is told what earlier attempts changed
+and how they ended; a turn the provider killed costs no attempt. Every
+launcher-served application has a way back to the panel. Three packages:
+`broapp` 0.4.3, `broapp-ai-elements` 0.4.6 and `broapp-autoapp` 0.3.11; the
+providers and `create-broapp` stay at 0.4.1. Earlier: 0.4.11 (the Knowledge
+panel), 0.4.10 (the log in the
 tab), 0.4.9 (approving a change cycle
 works), 0.4.8 (the host keeps each turn's tool
 calls and results and gives them back on "continue"), 0.4.7 (`.DS_Store`, expired

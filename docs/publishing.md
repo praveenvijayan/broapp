@@ -6,15 +6,19 @@ what a maintainer has to do, and what they have to decide.
 ## Status
 
 Published on npm from the `Publish to npm` workflow, each with provenance:
-`broapp` at 0.4.2, `create-broapp`, `broapp-ai-anthropic` and
-`broapp-ai-compatible` at 0.4.1, `broapp-ai-elements` at 0.4.5, and
-`broapp-autoapp` at 0.3.10 (2026-09-13). Earlier: 0.4.10 with the launcher at 0.3.9, 0.4.9 with the launcher at 0.3.8 and the panel at 0.4.5, 0.4.8 with the launcher at 0.3.7 and the panel at 0.4.4, 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
+`broapp` at 0.4.3, `create-broapp`, `broapp-ai-anthropic` and
+`broapp-ai-compatible` at 0.4.1, `broapp-ai-elements` at 0.4.6, and
+`broapp-autoapp` at 0.3.11 (2026-09-18). Earlier: 0.4.11 with the launcher at 0.3.10 (2026-09-13), 0.4.10 with the launcher at 0.3.9, 0.4.9 with the launcher at 0.3.8 and the panel at 0.4.5, 0.4.8 with the launcher at 0.3.7 and the panel at 0.4.4, 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
 0.4.0 with 0.2.0, all on 2026-09-11; 0.3.0 on 2026-09-08; 0.2.0 and 0.1.0
 before that. To generate from an unreleased checkout instead, see
 [troubleshooting.md](troubleshooting.md).
 
-Repository release v0.4.11 ships the launcher binaries built from the same
-commit; it moves only the launcher, for the Knowledge panel. v0.4.10 before
+Repository release v0.4.12 ships the launcher binaries built from the same
+commit; it moves three packages: the core, whose in-process turn may defer a
+question to somebody else and which takes Brobridge 0.2.2 for more than one
+launch address; the AI panel, which reports when a turn is running; and the
+launcher, which depends on both, for the backlog. v0.4.11 before it moved
+only the launcher, for the Knowledge panel. v0.4.10 before
 it moved only the launcher, for the log in its tab. v0.4.9
 moved the AI panel, whose transport now puts a step's question on its call's
 card instead of cancelling the turn, and the launcher, which depends on it.
@@ -30,8 +34,8 @@ packages: the launcher, because a created application installs
 `broapp-autoapp@^<the launcher's version>` and 0.3.2 carries the theme contract
 its starter now relies on; and the AI panel, because its portalled components
 and its corner radius were fixed. The launcher's peer range on the panel is
-`>=0.4.5`. A created application installs `broapp@^0.4.2` and
-`broapp-autoapp@^0.3.10`.
+`>=0.4.6`. A created application installs `broapp@^0.4.3` and
+`broapp-autoapp@^0.3.11`.
 
 ## Before publishing
 
