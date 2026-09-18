@@ -102,7 +102,12 @@ jobs:
       # removing a preview's data copy after its child has stopped, a symlink
       # inside `src/` that the symbol index must not follow, and the `knowledge`
       # command refusing while a launcher's pid is alive.
-      - run: bun test tests/autoapp-spike.test.ts tests/autoapp-spec.test.ts tests/autoapp-activation.test.ts tests/autoapp-mcp.test.ts tests/autoapp-create.test.ts tests/autoapp-knowledge.test.ts
+      # `autoapp-task-context` is here for two: `fileKey` must turn a
+      # back-slashed path into the same key as a forward-slashed one, which
+      # only a Windows path can test honestly; and the file opens and closes
+      # both stores and a launcher tab, where Windows has refused cleanup
+      # before (`EBUSY`, report 12j).
+      - run: bun test tests/autoapp-spike.test.ts tests/autoapp-spec.test.ts tests/autoapp-activation.test.ts tests/autoapp-mcp.test.ts tests/autoapp-create.test.ts tests/autoapp-knowledge.test.ts tests/autoapp-task-context.test.ts
       # Drives the compiled binary end to end — import, serve, the control
       # connection, build, activate, a crash past the switch, and recovery.
       # This is the step that catches a packaging fault the module tests

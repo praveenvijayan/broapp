@@ -21,6 +21,7 @@ import { intentTools, type IntentTools } from '../engineer/intent-tools.ts';
 import { engineerTools, type TurnRecord } from '../engineer/tools.ts';
 import type { RunStore } from '../host/run-store.ts';
 import { createExecutor, type Executor, type IntentStore } from '../intent/index.ts';
+import { sourceReads } from '../knowledge/attempts.ts';
 import { createDistiller, pendingCases, type Distiller } from '../knowledge/distil.ts';
 import { recordContext, type Evidence } from '../knowledge/evidence.ts';
 import { instructionsHash, reviewFlags } from '../knowledge/freshness.ts';
@@ -147,10 +148,13 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
   const logger: HostLogger = options.logger ?? console;
   // What the AI layer, the engineer's tools and the backlog run log goes
   // through the sanitiser before it is printed: the AI layer logs a provider's
-  // raw error, and that text can name a credential. Not the launcher's own
-  // routes: they print the launch address a person has to open, whose token
-  // the sanitiser would take.
-  const printed: HostLogger = sanitisedLogger(logger);
+  // raw error, and that text can name a credential. The event log sanitises
+  // what it prints itself, so it is used as it is; any other logger — the
+  // console, when nothing is written down — is wrapped. The launcher's own
+  // routes get the logger unwrapped either way: the one launch address they
+  // print goes through the event log's `announce`.
+  const printed: HostLogger =
+    options.knowledge !== undefined && logger === options.knowledge.log ? logger : sanitisedLogger(logger);
   // Over the layout, so the candidate a person left is the one they come back to.
   const states = createCandidateStates(options.layout, logger);
   const knowledge = options.knowledge;
@@ -187,6 +191,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           ...(serving?.documents === undefined ? {} : { documents: serving.documents }),
           ...(serving?.seed === undefined ? {} : { seed: serving.seed }),
           ...(options.intents === undefined ? {} : { intents: options.intents }),
+          reads: (runId: string) => sourceReads(options.store, runId),
         });
 
   if (knowledge !== undefined) {

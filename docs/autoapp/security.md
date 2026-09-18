@@ -288,6 +288,13 @@ It cannot catch a secret that looks like an ordinary word, or one split across
 two fields. A launch URL is never recorded: no tool returns one, and a URL that
 reaches a message loses its query. The control secret is never recorded.
 
+What the log prints to the launcher's terminal is sanitised the same way as
+what it writes, for every caller: its own warnings and errors, a supervised
+child's stderr, and the line saying a write failed. The one exception is
+`announce`, for a launch address a person has to open: printed whole, stored
+without its query. A test holds its callers to the one line that opens a tab
+when no browser can.
+
 `contexts` is the exception, on purpose. It keeps the instructions, the system
 prompt and each delivered document **verbatim**, because it is the record of
 exactly what a model was sent, and a record that differs from it by one

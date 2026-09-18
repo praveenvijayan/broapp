@@ -59,6 +59,16 @@ export interface EventLog extends HostLogger {
   ): void;
   /** A logger for one child's stderr: source `child:<appId>`, kind `stderr`. */
   child(appId: string, pid?: number): HostLogger;
+  /**
+   * Print an address a person has to open, whole, and write it down sanitised.
+   *
+   * Every other line this log prints is sanitised first, and `sanitise` takes
+   * a URL's query — which is exactly where a launch token lives. So a launch
+   * address a person must open, and nothing else, comes through here: printed
+   * to the terminal as given, stored as a `warn` of kind `log` without its
+   * token. A test holds the callers, so a new one is a decision somebody made.
+   */
+  announce(message: string): void;
   stats(): { written: number; dropped: number };
   /**
    * The newest events, newest first, for a person looking at what happened.
@@ -208,12 +218,12 @@ export function sanitise(text: string): string {
 /**
  * A logger that passes every line through {@link sanitise} before it goes on.
  *
- * The launcher's log prints warnings and errors to its terminal as well as
- * writing them down, and the copy it writes down is sanitised: without this,
- * the printed copy was not. 13d's run printed a provider's error with the
- * settings address that names the key that ran out of credit, and the
- * knowledge log's copy of the same line had it redacted. What a person
- * debugging needs is still there; what names a credential is not.
+ * The event log sanitises what it prints itself, so this is for a logger that
+ * is not the event log: the console a launcher with no knowledge store falls
+ * back to. 13d's run printed a provider's error with the settings address
+ * that names the key that ran out of credit, while the knowledge log's copy of
+ * the same line had it redacted. What a person debugging needs is still there;
+ * what names a credential is not.
  */
 export function sanitisedLogger(logger: HostLogger): HostLogger {
   return {
@@ -360,7 +370,7 @@ export function createEventLog(knowledge: Knowledge, options: EventLogOptions): 
       if (!reported) {
         reported = true;
         tee?.error(
-          `[autoapp] the knowledge log could not write an event: ${String(cause instanceof Error ? cause.message : cause)}`,
+          sanitise(`[autoapp] the knowledge log could not write an event: ${String(cause instanceof Error ? cause.message : cause)}`),
         );
       }
       return;
@@ -377,14 +387,22 @@ export function createEventLog(knowledge: Knowledge, options: EventLogOptions): 
     }
   }
 
+  // What is printed is sanitised the way what is written is, at the one place
+  // every caller passes: the terminal is read by people and pasted into bug
+  // reports, and 14a found the supervisor and every child's stderr printing
+  // raw what the table beside it had redacted. `announce` is the exception.
   const log: EventLog = {
     warn(message) {
-      tee?.warn(message);
+      tee?.warn(sanitise(message));
       write('warn', 'log', message, undefined, {}, options.source);
     },
     error(message) {
-      tee?.error(message);
+      tee?.error(sanitise(message));
       write('error', 'log', message, undefined, {}, options.source);
+    },
+    announce(message) {
+      tee?.warn(message);
+      write('warn', 'log', message, undefined, {}, options.source);
     },
     event(kind, message, data, origin = {}, source = options.source) {
       write('info', kind, message, data, origin, source);
@@ -394,11 +412,11 @@ export function createEventLog(knowledge: Knowledge, options: EventLogOptions): 
       const data = pid === undefined ? undefined : { pid };
       return {
         warn(line) {
-          tee?.warn(`[child] ${line}`);
+          tee?.warn(sanitise(`[child] ${line}`));
           write('warn', 'stderr', line, data, { appId }, source);
         },
         error(line) {
-          tee?.error(`[child] ${line}`);
+          tee?.error(sanitise(`[child] ${line}`));
           write('error', 'stderr', line, data, { appId }, source);
         },
       };

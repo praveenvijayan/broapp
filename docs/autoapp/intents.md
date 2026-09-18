@@ -283,7 +283,12 @@ turn is also given the attempts document (see
 [learning.md](learning.md#what-a-tasks-turn-is-given)): what each earlier attempt
 changed, how it ended, what was still wrong, what came back, and the planning
 model's diagnosis, read from the knowledge log's events for each run id in
-`task_runs`.
+`task_runs`. An earlier attempt that edited nothing also says what it read (at
+most six paths, from the launcher's run store, which already records every
+`source.read`), and when the newest earlier attempt changed nothing the
+document ends with the one line in it that tells the builder what to do: "The
+last attempt read these and changed nothing. Do not read them again: make the
+first edit the plan calls for, then use candidate.cycle."
 
 **A turn the provider killed is not an attempt.** When the AI provider fails
 during a builder's turn, the turn cannot start, or it ends `failed` before the

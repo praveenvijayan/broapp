@@ -148,6 +148,11 @@ export interface CreateServeInput {
    * intent is given its state, after the orientation.
    */
   readonly intents?: IntentStore;
+  /**
+   * The files one earlier run read, from the launcher's run store. Present, an
+   * attempt that changed nothing says what it read.
+   */
+  readonly reads?: (runId: string) => readonly string[];
 }
 
 /** The most a backlog document may be. */
@@ -595,7 +600,7 @@ export function createServe(input: CreateServeInput): Serve {
         const attempts =
           appId === null || task === null || input.intents === undefined || documents.attempts === false
             ? null
-            : attemptsDocument(attemptsInput(knowledge, input.intents, task, query.runId ?? null));
+            : attemptsDocument(attemptsInput(knowledge, input.intents, task, query.runId ?? null, input.reads));
         const why = new Map<string, WhyReason>();
         const refs: ContextRef[] =
           appId === null

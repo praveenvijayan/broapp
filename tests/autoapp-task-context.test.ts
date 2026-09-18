@@ -21,6 +21,7 @@ import { ENGINEER_INSTRUCTIONS, createCandidateStates } from 'broapp-autoapp/eng
 import { builderMessage, NOT_AN_ATTEMPT, openIntents, type IntentStore, type TaskInput } from 'broapp-autoapp/intent';
 import {
   ATTEMPTS_DOCUMENT_CHARS,
+  START_FROM_AN_EDIT,
   attemptsDocument,
   createEventLog,
   createEvidence,
@@ -29,6 +30,7 @@ import {
   openKnowledge,
   rebuildLinks,
   recordContext,
+  sourceReads,
   type AttemptRecord,
   type CreateServeInput,
   type EventLog,
@@ -448,6 +450,103 @@ describe('attemptsDocument', () => {
     expect(text).not.toContain(home);
     expect(text).toContain('~/works/app/src/host/db.ts');
     expect(text).not.toContain('abcdef123456');
+  });
+});
+
+describe('14b: an attempt that changed nothing', () => {
+  const quietEnd = { to: 'failed' as const, note: 'attempt 1: The workspace did not change. The turn made no tool call for 8 minutes.' };
+  const readOnly = (attempt: number, read: readonly string[]): AttemptRecord => ({
+    attempt,
+    ended: quietEnd,
+    edited: [],
+    lastBuild: [],
+    lastCheck: [],
+    read,
+  });
+  const edited = (attempt: number): AttemptRecord => ({
+    attempt,
+    ended: { to: 'failed', note: `attempt ${String(attempt)}: Nothing was built.` },
+    edited: ['src/host/db.ts'],
+    lastBuild: [],
+    lastCheck: [],
+    read: ['src/host/db.ts', 'autoapp.json'],
+  });
+  const count = (text: string, part: string): number => text.split(part).length - 1;
+
+  test('says what it read, at most six paths, and ends with the sentence once', () => {
+    const paths = Array.from({ length: 8 }, (_, index) => `src/read-${String(index)}.ts`);
+    const text = attemptsDocument({ attempts: [readOnly(1, paths)], diagnosis: null }) ?? '';
+    expect(text).toContain('Changed: nothing\nRead: src/read-0.ts, src/read-1.ts, src/read-2.ts, src/read-3.ts, src/read-4.ts, src/read-5.ts and 2 more');
+    expect(text).not.toContain('src/read-6.ts');
+    expect(text.endsWith(START_FROM_AN_EDIT)).toBe(true);
+    expect(count(text, START_FROM_AN_EDIT)).toBe(1);
+  });
+
+  test('the sentence only when the newest earlier attempt changed nothing; no Read: beside an edit', () => {
+    const older = attemptsDocument({ attempts: [readOnly(1, ['a.ts']), edited(2)], diagnosis: null }) ?? '';
+    expect(older).toContain('Read: a.ts');
+    expect(older).not.toContain(START_FROM_AN_EDIT);
+    const both = attemptsDocument({ attempts: [edited(1), readOnly(2, ['a.ts'])], diagnosis: null }) ?? '';
+    expect(count(both, START_FROM_AN_EDIT)).toBe(1);
+    const withEdits = attemptsDocument({ attempts: [edited(1)], diagnosis: null }) ?? '';
+    expect(withEdits).not.toContain('Read:');
+    expect(withEdits).not.toContain(START_FROM_AN_EDIT);
+    // Nothing read is recorded: still told to start from an edit, with no list.
+    const unread = attemptsDocument({ attempts: [readOnly(1, [])], diagnosis: null }) ?? '';
+    expect(unread).not.toContain('Read:');
+    expect(unread.endsWith(START_FROM_AN_EDIT)).toBe(true);
+  });
+
+  test('the sentence survives the 1,500-character cut', () => {
+    const long = (n: number): AttemptRecord => ({
+      ...edited(n),
+      edited: Array.from({ length: 8 }, (_, index) => `src/a-rather-long-directory-name/number-${String(n)}-${String(index)}.ts`),
+      lastBuild: [1, 2, 3].map((k) => ({ stage: 'views', message: `problem ${String(n)}.${String(k)} ${'x'.repeat(140)}` })),
+    });
+    const newest = readOnly(6, Array.from({ length: 6 }, (_, index) => `src/a-rather-long-directory-name/read-${String(index)}.ts`));
+    const text = attemptsDocument({ attempts: [...[1, 2, 3, 4, 5].map(long), newest], diagnosis: 'A diagnosis. '.repeat(30) }) ?? '';
+    expect(text.length).toBeLessThanOrEqual(ATTEMPTS_DOCUMENT_CHARS);
+    expect(text).toContain('…');
+    expect(text).toContain('Attempt 6');
+    expect(text).toContain('Read: src/a-rather-long-directory-name/read-0.ts');
+    expect(text.endsWith(START_FROM_AN_EDIT)).toBe(true);
+    expect(count(text, START_FROM_AN_EDIT)).toBe(1);
+  });
+
+  test('the reads come from the run store: succeeded source.read calls of that run, each path once', () => {
+    mkdirSync(runRoot, { recursive: true });
+    const directory = mkdtempSync(join(runRoot, 'task-context-'));
+    scratch.push(directory);
+    const store = createRunStore(directory, quiet);
+    const recorder = store.recorder();
+    const step = (requestId: string, route: string, path: string, outcome: 'succeeded' | 'failed'): void => {
+      recorder.record({
+        requestId,
+        appId: 'launcher',
+        releaseId: 'launcher',
+        channel: 'ai',
+        caller: 'ai:test',
+        mode: 'live',
+        route,
+        effect: 'read',
+        input: { appId: 'items', path },
+        argumentsHash: requestId,
+        askedAt: Date.now(),
+        expiresAt: Date.now() + 60_000,
+        decision: 'allowed',
+        outcome,
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      });
+    };
+    step('run-a:1', 'source.read', 'src/host/db.ts', 'succeeded');
+    step('run-a:2', 'source.read', 'autoapp.json', 'succeeded');
+    step('run-a:3', 'source.read', 'src/host/db.ts', 'succeeded');
+    step('run-a:4', 'source.read', 'src/missing.ts', 'failed');
+    step('run-a:5', 'source.list', 'src', 'succeeded');
+    step('run-b:1', 'source.read', 'src/other.ts', 'succeeded');
+    expect(sourceReads(store, 'run-a')).toEqual(['src/host/db.ts', 'autoapp.json']);
+    expect(sourceReads(store, 'run-none')).toEqual([]);
   });
 });
 

@@ -12,6 +12,7 @@
  * reads that feed it are {@link attemptsInput}, beside it, so a test can hand
  * the function exactly the case it means.
  */
+import type { RunStore } from '../host/run-store.ts';
 import { NOT_AN_ATTEMPT, reasonsFromNote, type IntentStore, type TaskRecord } from '../intent/index.ts';
 
 import { sanitise } from './log.ts';
@@ -22,6 +23,18 @@ import type { Knowledge } from './store.ts';
 export const ATTEMPTS_DOCUMENT_CHARS = 1_500;
 /** The most paths an attempt's `Changed:` line names. */
 const MAX_PATHS = 8;
+/** The most paths an attempt's `Read:` line names. */
+const MAX_READ_PATHS = 6;
+/**
+ * The one line in the document that tells a builder what to do.
+ *
+ * 14a's only retry followed an attempt that read four files, edited nothing
+ * and was ended by the idle limit; told "Changed: nothing", the retry read the
+ * same two files and went silent the same way. So when the newest earlier
+ * attempt changed nothing, the document ends with this, once.
+ */
+export const START_FROM_AN_EDIT =
+  'The last attempt read these and changed nothing. Do not read them again: make the first edit the plan calls for, then use candidate.cycle.';
 /** The most lines under `Ended with:`, and under `Still wrong at the end:`. */
 const MAX_LINES = 3;
 /** The longest one problem, detail or reason may be. */
@@ -51,6 +64,12 @@ export interface AttemptRecord {
   readonly lastBuild: readonly AttemptProblem[];
   /** The results of its last check, when that check came after its last build. */
   readonly lastCheck: readonly AttemptCheck[];
+  /**
+   * The distinct paths its `source.read` calls named, in the order first read,
+   * from the launcher's run store. Shown only for an attempt that edited
+   * nothing: for one that did, what it changed says more than what it looked at.
+   */
+  readonly read?: readonly string[];
 }
 
 /** What {@link attemptsDocument} is built from. */
@@ -86,6 +105,11 @@ function block(record: AttemptRecord): string[] {
   const named = paths.slice(0, MAX_PATHS).join(', ');
   const more = paths.length > MAX_PATHS ? ` and ${String(paths.length - MAX_PATHS)} more` : '';
   lines.push(`Changed: ${paths.length === 0 ? 'nothing' : `${named}${more}`}`);
+  const read = paths.length === 0 ? (record.read ?? []).map((path) => sanitise(path)) : [];
+  if (read.length > 0) {
+    const extra = read.length > MAX_READ_PATHS ? ` and ${String(read.length - MAX_READ_PATHS)} more` : '';
+    lines.push(`Read: ${read.slice(0, MAX_READ_PATHS).join(', ')}${extra}`);
+  }
   // An interrupted attempt lists only what it changed: how it would have
   // ended is not known, and what the build said halfway is not a result.
   if (stopped) return lines;
@@ -144,7 +168,8 @@ function size(lines: readonly string[]): number {
  * Oldest first. The newest attempt is never cut; when the whole does not fit
  * in {@link ATTEMPTS_DOCUMENT_CHARS}, the older attempts are cut at a line
  * from the end, then the diagnosis goes, then what came back — each bounded so
- * that the newest attempt alone always fits.
+ * that the newest attempt alone always fits. When the newest attempt changed
+ * nothing, {@link START_FROM_AN_EDIT} closes the document and is never cut.
  */
 export function attemptsDocument(input: AttemptsInput): string | null {
   const attempts = input.attempts.filter(isAttempt).sort((a, b) => a.attempt - b.attempt);
@@ -152,13 +177,14 @@ export function attemptsDocument(input: AttemptsInput): string | null {
   if (newest === undefined) return null;
   const older = attempts.slice(0, -1).flatMap(block);
   const last = block(newest);
+  const closing = newest.edited.length === 0 ? [START_FROM_AN_EDIT] : [];
   const back = cameBack(attempts);
   const diagnosis =
     input.diagnosis === null || input.diagnosis.trim() === ''
       ? []
       : [`How the planning model read it: ${sanitise(input.diagnosis).replace(/\s+/g, ' ').trim().slice(0, 400)}`];
 
-  const budget = ATTEMPTS_DOCUMENT_CHARS;
+  const budget = ATTEMPTS_DOCUMENT_CHARS - size(closing);
   let tail = [...back, ...diagnosis];
   if (size(last) + size(tail) > budget) tail = back;
   if (size(last) + size(tail) > budget) tail = [];
@@ -173,7 +199,7 @@ export function attemptsDocument(input: AttemptsInput): string | null {
     }
     kept.push('…');
   }
-  return [...kept, ...last, ...tail].join('\n');
+  return [...kept, ...last, ...tail, ...closing].join('\n');
 }
 
 interface EventRow {
@@ -239,15 +265,32 @@ export function runRecord(knowledge: Knowledge, runId: string): Pick<AttemptReco
 }
 
 /**
+ * The distinct paths one run's `source.read` calls named, in order, from the
+ * launcher's run store — which records every gated call's input, so a read is
+ * already written down there and is not recorded a second time anywhere else.
+ */
+export function sourceReads(store: Pick<RunStore, 'getRun'>, runId: string): string[] {
+  const paths: string[] = [];
+  for (const step of store.getRun(runId)?.steps ?? []) {
+    if (step.route !== 'source.read' || step.outcome !== 'succeeded') continue;
+    const path = (step.input as { path?: unknown } | null)?.path;
+    if (typeof path === 'string' && !paths.includes(path)) paths.push(path);
+  }
+  return paths;
+}
+
+/**
  * The input for a task's attempts document: every run of the task before
  * `currentRunId`, joined to how each ended by its attempt number, and the
- * planning model's diagnosis. Both stores are read through their own handles.
+ * planning model's diagnosis. Each store is read through its own handle;
+ * `reads` is the run store's, absent where there is none.
  */
 export function attemptsInput(
   knowledge: Knowledge,
   intents: IntentStore,
   task: TaskRecord,
   currentRunId: string | null,
+  reads?: (runId: string) => readonly string[],
 ): AttemptsInput {
   const runs = intents.runsOf(task.id);
   const current = runs.find((run) => run.runId === currentRunId)?.attempt ?? Number.POSITIVE_INFINITY;
@@ -260,6 +303,7 @@ export function attemptsInput(
         attempt: run.attempt,
         ended: note === undefined ? null : { to: note.to, note: note.note },
         ...runRecord(knowledge, run.runId),
+        ...(reads === undefined ? {} : { read: reads(run.runId) }),
       };
     });
   const advice = task.advice as { diagnosis?: unknown } | null;

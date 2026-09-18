@@ -150,7 +150,13 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
     const url = presented.has(child) ? `${new URL(child.url).origin}/` : child.url;
     presented.add(child);
     const opened = await openBrowser(url);
-    if (!opened) logger.warn(`could not open a browser; open this address yourself: ${url}`);
+    if (!opened) {
+      // The one line that must reach the terminal whole: the event log
+      // sanitises what it prints, and the token is the query it would take.
+      const line = `could not open a browser; open this address yourself: ${url}`;
+      if (options.log === undefined) logger.warn(line);
+      else options.log.announce(line);
+    }
     return { opened };
   }
 

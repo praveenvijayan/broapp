@@ -3189,3 +3189,75 @@ describe('12k: the Knowledge panel', () => {
     expect(markup).toContain('role="alert"');
   }, 60_000);
 });
+
+describe('14b: what the log prints', () => {
+  const id = 'c3'.repeat(32);
+  const address = 'http://127.0.0.1:1/?bt=abc';
+  const noisy = `key ${id} at ${address}`;
+  const clean = 'key <redacted> at http://127.0.0.1:1/';
+
+  /** A log over a fresh store whose tee records what it would have printed. */
+  function recording(): { knowledge: Knowledge; log: ReturnType<typeof createEventLog>; printed: string[] } {
+    const knowledge = openKnowledge(tempDir());
+    const printed: string[] = [];
+    const log = createEventLog(knowledge, {
+      source: 'test',
+      tee: { warn: (line) => printed.push(line), error: (line) => printed.push(line) },
+    });
+    return { knowledge, log, printed };
+  }
+
+  test('every line the log prints is sanitised as the stored copy is', () => {
+    const { knowledge, log, printed } = recording();
+    log.warn(noisy);
+    log.error(noisy);
+    const child = log.child('items', 7);
+    child.warn(noisy);
+    child.error(noisy);
+    expect(printed).toEqual([clean, clean, `[child] ${clean}`, `[child] ${clean}`]);
+    for (const line of printed) {
+      expect(line).not.toContain(id);
+      expect(line).not.toContain('?bt=');
+    }
+    const stored = knowledge.db
+      .query<{ message: string }, []>("SELECT message FROM events WHERE kind IN ('log', 'stderr') ORDER BY id")
+      .all()
+      .map((row) => row.message);
+    expect(stored).toEqual([clean, clean, clean, clean]);
+
+    // The line that says a write failed prints what SQLite said, which here
+    // carries both shapes; it is sanitised too.
+    knowledge.db.exec(`CREATE TRIGGER refuse BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT, '${noisy}'); END`);
+    log.event('log', 'lost');
+    expect(printed).toHaveLength(5);
+    const failure = printed[4] ?? '';
+    expect(failure).toContain('could not write an event');
+    expect(failure).toContain(clean);
+    expect(failure).not.toContain(id);
+    expect(failure).not.toContain('?bt=');
+    knowledge.db.exec('DROP TRIGGER refuse');
+    knowledge.close();
+  });
+
+  test('announce prints a launch address whole and stores it without its query', () => {
+    const { knowledge, log, printed } = recording();
+    log.announce(`open this address yourself: ${address}`);
+    expect(printed).toEqual([`open this address yourself: ${address}`]);
+    const [row] = events(knowledge, 'log');
+    expect(row?.message).toBe('open this address yourself: http://127.0.0.1:1/');
+    expect(row?.level).toBe('warn');
+    knowledge.close();
+  });
+
+  test('announce( is called only where a launch address is printed', () => {
+    // A later caller is a decision somebody made, and this list is where it is made.
+    const allowed = ['knowledge/log.ts', 'launcher/app.ts'];
+    const source = join(import.meta.dir, '..', 'packages', 'broapp-autoapp', 'src');
+    const found: string[] = [];
+    for (const name of readdirSync(source, { recursive: true, encoding: 'utf8' })) {
+      if (!/\.tsx?$/.test(name)) continue;
+      if (/\bannounce\(/.test(readFileSync(join(source, name), 'utf8'))) found.push(name.split('\\').join('/'));
+    }
+    expect(found.sort()).toEqual(allowed);
+  });
+});
