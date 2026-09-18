@@ -390,16 +390,13 @@ export function TaskRow({
     <li className="launcher__log-row launcher__intent-task">
       <div className="launcher__intent-line">
         <button aria-expanded={open} className="launcher__intent-open" onClick={onToggle} type="button">
-          <span className="launcher__log-time">{task.slug}</span>
-          <span className="launcher__k-text">{task.title}</span>
+          <span className="launcher__intent-title">{task.title}</span>
+          <span className="launcher__intent-slug">{task.slug}</span>
         </button>
-        <span className="launcher__k-chips">
+        <span className="launcher__k-chips launcher__intent-chips">
+          <Chip word={task.status} />
           <Chip title="priority" word={task.priority} />
           <Chip title={task.tierReasons.join(' ')} word={task.tier} />
-          <Chip word={task.status} />
-          {task.status === 'blocked' ? (
-            <span className="launcher__intent-blocked">{`blocked by ${task.waitingOn.join(', ')}`}</span>
-          ) : null}
         </span>
         <ModelSelect
           disabled={!MODEL_EDITABLE.has(task.stored)}
@@ -411,6 +408,9 @@ export function TaskRow({
           value={task.modelOverride}
         />
       </div>
+      {task.status === 'blocked' ? (
+        <p className="launcher__intent-note launcher__intent-state launcher__intent-blocked">{`blocked by ${task.waitingOn.join(', ')}`}</p>
+      ) : null}
       <TaskState onAnswer={onAnswer} run={run} task={task} />
       {open ? children : null}
     </li>
@@ -626,142 +626,148 @@ export function IntentDetailView({
   const waiting = intent.status === 'draft' && intent.questions.length > 0;
 
   return (
-    <div className="launcher__k-detail">
-      {waiting ? (
-        <section aria-label={NEEDS_ANSWERS} className="launcher__intent-questions">
-          <h3 className="launcher__k-heading">{NEEDS_ANSWERS}</h3>
-          <ul className="launcher__list">
-            {intent.questions.map((question, index) => (
-              <li key={`${String(index)}-${question.slice(0, 20)}`}>{question}</li>
-            ))}
-          </ul>
-          <p className="launcher__lede">{ANSWER_IN_CHAT}</p>
-        </section>
-      ) : null}
-      {run?.question === null || run?.question === undefined ? null : (
-        <RunQuestionView onAnswer={(approve) => onConfirm?.(run.question as Question, approve)} question={run.question} />
-      )}
-      {intent.status === 'stopped' && intent.stopReason !== null ? (
-        <p className="launcher__message launcher__message--error" role="status">{`Stopped: ${intent.stopReason}`}</p>
-      ) : null}
-      {intent.status === 'done' ? (
-        <section aria-label="Finished" className="launcher__intent-done">
-          <p className="launcher__lede">{RUN_DONE}</p>
-          {byHand.length === 0 ? null : (
-            <>
-              <h3 className="launcher__k-heading">{BY_HAND}</h3>
-              <ul className="launcher__list">
-                {byHand.flatMap((task) =>
-                  task.runbook.map((line, index) => <li key={`${task.slug}-${String(index)}`}>{`${task.slug}: ${line}`}</li>),
-                )}
-              </ul>
-            </>
-          )}
-        </section>
-      ) : null}
-      {runnable && onRun !== undefined ? (
-        <div className="launcher__row-actions">
-          <Confirming
-            label="Run"
-            onConfirm={onRun}
-            question={`Start building this backlog for ${intent.appId}? ${RUN_CONFIRMATION}`}
-          />
+    <div className="launcher__k-detail launcher__intent-detail">
+      <div className="launcher__intent-main">
+        {waiting ? (
+          <section aria-label={NEEDS_ANSWERS} className="launcher__intent-questions">
+            <h3 className="launcher__k-heading">{NEEDS_ANSWERS}</h3>
+            <ul className="launcher__list">
+              {intent.questions.map((question, index) => (
+                <li key={`${String(index)}-${question.slice(0, 20)}`}>{question}</li>
+              ))}
+            </ul>
+            <p className="launcher__lede">{ANSWER_IN_CHAT}</p>
+          </section>
+        ) : null}
+        {run?.question === null || run?.question === undefined ? null : (
+          <RunQuestionView onAnswer={(approve) => onConfirm?.(run.question as Question, approve)} question={run.question} />
+        )}
+        {intent.status === 'stopped' && intent.stopReason !== null ? (
+          <p className="launcher__message launcher__message--error" role="status">{`Stopped: ${intent.stopReason}`}</p>
+        ) : null}
+        {intent.status === 'done' ? (
+          <section aria-label="Finished" className="launcher__intent-done">
+            <p className="launcher__lede">{RUN_DONE}</p>
+            {byHand.length === 0 ? null : (
+              <>
+                <h3 className="launcher__k-heading">{BY_HAND}</h3>
+                <ul className="launcher__list">
+                  {byHand.flatMap((task) =>
+                    task.runbook.map((line, index) => <li key={`${task.slug}-${String(index)}`}>{`${task.slug}: ${line}`}</li>),
+                  )}
+                </ul>
+              </>
+            )}
+          </section>
+        ) : null}
+        <div className="launcher__intent-actions">
+          {runnable && onRun !== undefined ? (
+            <div className="launcher__row-actions">
+              <Confirming
+                label="Run"
+                onConfirm={onRun}
+                question={`Start building this backlog for ${intent.appId}? ${RUN_CONFIRMATION}`}
+              />
+            </div>
+          ) : null}
+          {intent.status === 'running' && onStop !== undefined ? (
+            <div className="launcher__row-actions">
+              <Confirming
+                label="Stop"
+                onConfirm={onStop}
+                question="Stop this run? The task in hand is interrupted and the workspace is left as it is."
+              />
+            </div>
+          ) : null}
+          {withdrawable ? (
+            asking ? (
+              <div className="launcher__row-actions">
+                <span>Withdraw this request? Every task it has not completed is removed.</span>
+                <button
+                  className="launcher__button launcher__button--small"
+                  onClick={() => {
+                    setAsking(false);
+                    onWithdraw();
+                  }}
+                  type="button"
+                >
+                  Withdraw
+                </button>
+                <button className="launcher__button launcher__button--small" onClick={() => setAsking(false)} type="button">
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="launcher__row-actions">
+                <button className="launcher__button launcher__button--small" onClick={() => setAsking(true)} type="button">
+                  Withdraw
+                </button>
+              </div>
+            )
+          ) : null}
         </div>
-      ) : null}
-      {intent.status === 'running' && onStop !== undefined ? (
-        <div className="launcher__row-actions">
-          <Confirming
-            label="Stop"
-            onConfirm={onStop}
-            question="Stop this run? The task in hand is interrupted and the workspace is left as it is."
-          />
-        </div>
-      ) : null}
-      {runError === null ? null : (
-        <p className="launcher__message launcher__message--error" role="alert">
-          {runError}
-        </p>
-      )}
-      <p className="launcher__k-quote">{intent.request}</p>
-      {analysed ? (
-        <dl className="launcher__k-fields">
-          {intent.restated === null ? null : (
-            <>
-              <dt>Restated</dt>
-              <dd>{intent.restated}</dd>
-            </>
-          )}
-          {intent.fits === null ? null : (
-            <>
-              <dt>Builds on</dt>
-              <dd>{intent.fits}</dd>
-            </>
-          )}
-          <Block items={intent.conflicts} title="Conflicts" />
-          <Block items={intent.outOfReach} title="Out of reach" />
-          <Block items={intent.assumptions} title="Assumptions" />
-          {waiting ? null : <Block items={intent.questions} title="Open questions" />}
-        </dl>
-      ) : null}
+        {runError === null ? null : (
+          <p className="launcher__message launcher__message--error" role="alert">
+            {runError}
+          </p>
+        )}
+        {withdrawError === null ? null : (
+          <p className="launcher__message launcher__message--error" role="alert">
+            {withdrawError}
+          </p>
+        )}
+        {modelError === null ? null : (
+          <p className="launcher__message launcher__message--error" role="alert">
+            {modelError}
+          </p>
+        )}
 
-      {withdrawable ? (
-        asking ? (
-          <div className="launcher__row-actions">
-            <span>Withdraw this request? Every task it has not completed is removed.</span>
-            <button
-              className="launcher__button launcher__button--small"
-              onClick={() => {
-                setAsking(false);
-                onWithdraw();
-              }}
-              type="button"
+        <h3 className="launcher__k-heading">Tasks, in the order they run</h3>
+        {tasks.length === 0 ? <p className="launcher__empty">This request has no tasks yet.</p> : null}
+        <ol className="launcher__log-list launcher__k-list">
+          {tasks.map((task) => (
+            <TaskRow
+              key={task.id}
+              run={run}
+              {...(onAnswer === undefined ? {} : { onAnswer: (answer: string) => onAnswer(task.id, answer) })}
+              models={models}
+              onModel={(modelId) => onModel(task.id, modelId)}
+              onToggle={() => setOpenTask(openTask === task.id ? null : task.id)}
+              open={renderTask !== undefined && openTask === task.id}
+              settingsModel={settingsModel}
+              task={task}
+              tierModel={tierModels === null ? null : tierModels[task.tier]}
+              unreadable={unreadable}
             >
-              Withdraw
-            </button>
-            <button className="launcher__button launcher__button--small" onClick={() => setAsking(false)} type="button">
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <div className="launcher__row-actions">
-            <button className="launcher__button launcher__button--small" onClick={() => setAsking(true)} type="button">
-              Withdraw
-            </button>
-          </div>
-        )
-      ) : null}
-      {withdrawError === null ? null : (
-        <p className="launcher__message launcher__message--error" role="alert">
-          {withdrawError}
-        </p>
-      )}
-      {modelError === null ? null : (
-        <p className="launcher__message launcher__message--error" role="alert">
-          {modelError}
-        </p>
-      )}
-
-      <h3 className="launcher__k-heading">Tasks, in the order they run</h3>
-      {tasks.length === 0 ? <p className="launcher__empty">This request has no tasks yet.</p> : null}
-      <ol className="launcher__log-list launcher__k-list">
-        {tasks.map((task) => (
-          <TaskRow
-            key={task.id}
-            run={run}
-            {...(onAnswer === undefined ? {} : { onAnswer: (answer: string) => onAnswer(task.id, answer) })}
-            models={models}
-            onModel={(modelId) => onModel(task.id, modelId)}
-            onToggle={() => setOpenTask(openTask === task.id ? null : task.id)}
-            open={renderTask !== undefined && openTask === task.id}
-            settingsModel={settingsModel}
-            task={task}
-            tierModel={tierModels === null ? null : tierModels[task.tier]}
-            unreadable={unreadable}
-          >
-            {renderTask?.(task)}
-          </TaskRow>
-        ))}
-      </ol>
+              {renderTask?.(task)}
+            </TaskRow>
+          ))}
+        </ol>
+      </div>
+      <aside aria-label="The request" className="launcher__intent-about">
+        <h3 className="launcher__intent-label">Asked for</h3>
+        <p className="launcher__intent-request">{intent.request}</p>
+        {analysed ? (
+          <dl className="launcher__intent-analysis">
+            {intent.restated === null ? null : (
+              <>
+                <dt>Restated</dt>
+                <dd>{intent.restated}</dd>
+              </>
+            )}
+            {intent.fits === null ? null : (
+              <>
+                <dt>Builds on</dt>
+                <dd>{intent.fits}</dd>
+              </>
+            )}
+            <Block items={intent.conflicts} title="Conflicts" />
+            <Block items={intent.outOfReach} title="Out of reach" />
+            <Block items={intent.assumptions} title="Assumptions" />
+            {waiting ? null : <Block items={intent.questions} title="Open questions" />}
+          </dl>
+        ) : null}
+      </aside>
     </div>
   );
 }
