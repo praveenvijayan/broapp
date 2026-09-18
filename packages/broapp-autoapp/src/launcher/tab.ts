@@ -17,6 +17,7 @@ import type { Bridge } from 'brobridge';
 
 import { ENGINEER_INSTRUCTIONS } from '../engineer/instructions.ts';
 import { createCandidateStates, type CandidateStates } from '../engineer/state.ts';
+import { intentTools, type IntentTools } from '../engineer/intent-tools.ts';
 import { engineerTools, type TurnRecord } from '../engineer/tools.ts';
 import type { RunStore } from '../host/run-store.ts';
 import type { IntentStore } from '../intent/index.ts';
@@ -162,6 +163,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           ...(serving?.corpus === undefined ? {} : { corpus: serving.corpus }),
           ...(serving?.documents === undefined ? {} : { documents: serving.documents }),
           ...(serving?.seed === undefined ? {} : { seed: serving.seed }),
+          ...(options.intents === undefined ? {} : { intents: options.intents }),
         });
 
   if (knowledge !== undefined) {
@@ -191,6 +193,22 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           model: () => ai.model(),
           instructions: ENGINEER_INSTRUCTIONS,
           autoappVersion: AUTOAPP_VERSION,
+        });
+
+  /**
+   * The backlog's tools, and the record of which turns planned: kept here so
+   * the turn's end can clear it, and the next message can build what the
+   * person approved.
+   */
+  const planning: IntentTools | null =
+    options.intents === undefined
+      ? null
+      : intentTools({
+          layout: options.layout,
+          gate: options.gate,
+          intents: options.intents,
+          logger,
+          ...(knowledge === undefined ? {} : { knowledge: { log: knowledge.log, turn: (runId: string) => turns.get(runId) } }),
         });
 
   const app = createLauncherApp({
@@ -243,6 +261,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
       ...(options.install === undefined ? {} : { install: options.install }),
       ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
       session,
+      ...(planning === null ? {} : { intents: planning }),
       ...(knowledge === undefined
         ? {}
         : {
@@ -292,6 +311,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
         }),
     onRunEnd: (runId, status, summary, detail) => {
       turns.delete(runId);
+      planning?.ended(runId);
       if (knowledge !== undefined) {
         knowledge.log.event(
           'run',

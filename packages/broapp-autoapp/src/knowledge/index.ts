@@ -29,7 +29,7 @@ export type { ContextInput, EpisodeRow, Evidence, OpenEpisode } from './evidence
 export { EVIDENCE_MAX_CHARS, ORIENTATION_MAX_CHARS, indexWorkspace, orientation, taskEvidence } from './path.ts';
 export type { EvidenceEntry, IndexedSymbol, Orientation, SymbolIndex, TaskEvidence } from './path.ts';
 
-export { createServe } from './serve.ts';
+export { BACKLOG_DOCUMENT_CHARS, backlogDocument, createServe } from './serve.ts';
 export type { Corpus, CreateServeInput, Hint, Serve, ServedDocuments, ServedTurn } from './serve.ts';
 
 export { problemSignature, scoreBuild, scoreCheck, scoreRunEnd, unrelatedHintCredit } from './scoring.ts';

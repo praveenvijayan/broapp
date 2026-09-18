@@ -83,6 +83,17 @@ function checkSection(field: string, lines: readonly string[] | undefined, probl
   });
 }
 
+/** How {@link validateTask} treats a slug it does not know. */
+export interface ValidateTaskOptions {
+  /**
+   * Leave `blocked_by` and `repaid_by` naming a task that does not exist yet
+   * for later. A plan is written one task at a time, and the task a stub is
+   * repaid by is often the next one; {@link referenceProblems} checks them
+   * once every task is in. Naming the task itself is still refused.
+   */
+  readonly deferReferences?: boolean;
+}
+
 /**
  * Everything wrong with one task, or nothing.
  *
@@ -90,7 +101,12 @@ function checkSection(field: string, lines: readonly string[] | undefined, probl
  * intents, because a task may wait on one planned earlier. `slug` is the
  * task's own when it already has one, so it cannot name itself.
  */
-export function validateTask(input: TaskInput, siblings: readonly SiblingTask[], slug?: string): PlanProblem[] {
+export function validateTask(
+  input: TaskInput,
+  siblings: readonly SiblingTask[],
+  slug?: string,
+  options: ValidateTaskOptions = {},
+): PlanProblem[] {
   const problems: PlanProblem[] = [];
   const add = (field: string, message: string): void => {
     problems.push({ field, message });
@@ -134,7 +150,9 @@ export function validateTask(input: TaskInput, siblings: readonly SiblingTask[],
   const live = new Set(siblings.filter((task) => task.stored !== 'removed').map((task) => task.slug));
   const known = (field: string, named: string): void => {
     if (slug !== undefined && named === slug) add(field, `${field} names this task itself (${named}).`);
-    else if (!live.has(named)) add(field, `${field} names ${named}, which is not a task of this application.`);
+    else if (!live.has(named) && options.deferReferences !== true) {
+      add(field, `${field} names ${named}, which is not a task of this application.`);
+    }
   };
   for (const named of input.blockedBy) known('blocked_by', named);
   if (new Set(input.blockedBy).size !== input.blockedBy.length) add('blocked_by', 'blocked_by names the same task twice.');
@@ -172,6 +190,37 @@ export function validateTask(input: TaskInput, siblings: readonly SiblingTask[],
   checkSection('test_notes', input.testNotes, problems);
   checkSection('runbook', input.runbook, problems);
 
+  return problems;
+}
+
+/** A task as the reference check needs to see it. */
+export interface ReferencingTask {
+  readonly slug: string;
+  readonly blockedBy: readonly string[];
+  readonly repaidBy: string | null;
+  readonly stored: StoredTaskStatus;
+}
+
+/**
+ * Every `blocked_by` and `repaid_by` among `tasks` that names no live task of
+ * the application, one problem each, naming the task that holds it.
+ *
+ * `known` is every task of the application, `tasks` those being checked.
+ */
+export function referenceProblems(tasks: readonly ReferencingTask[], known: readonly SiblingTask[]): PlanProblem[] {
+  const live = new Set(known.filter((task) => task.stored !== 'removed').map((task) => task.slug));
+  const problems: PlanProblem[] = [];
+  for (const task of tasks) {
+    if (task.stored === 'removed') continue;
+    for (const named of task.blockedBy) {
+      if (!live.has(named)) {
+        problems.push({ field: 'blocked_by', message: `${task.slug} is blocked by ${named}, which is not a task of this application.` });
+      }
+    }
+    if (task.repaidBy !== null && !live.has(task.repaidBy)) {
+      problems.push({ field: 'repaid_by', message: `${task.slug} is repaid by ${task.repaidBy}, which is not a task of this application.` });
+    }
+  }
   return problems;
 }
 

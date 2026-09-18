@@ -39,9 +39,11 @@ export type { ProblemLocation } from './tools.ts';
 export { startPreview } from './preview.ts';
 export type { PreviewDeps } from './preview.ts';
 
-export { engineerTools } from './tools.ts';
+export { engineerTools, PLANNING_LOCKED, PLANNING_REFUSAL } from './tools.ts';
+export { groundedIn, intentTools, isBlank, QUESTIONS_REFUSAL, UNGROUNDED } from './intent-tools.ts';
+export type { IntentTools, IntentToolsOptions } from './intent-tools.ts';
 export type { EngineerKnowledge, EngineerToolsOptions, TurnRecord } from './tools.ts';
-export { REFERENCE_TOPICS, specReference } from './reference.ts';
+export { REFERENCE_TOPICS, specReference, SPLIT_RULES } from './reference.ts';
 export type { ReferenceTopic } from './reference.ts';
 export { DESIGN_CHECK, DESIGN_RULES, designTopic } from './design.ts';
 export type { DesignRule, DesignSection, DesignSubject } from './design.ts';

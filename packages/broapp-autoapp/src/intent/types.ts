@@ -61,7 +61,9 @@ export const TASK_MOVES: readonly (readonly [StoredTaskStatus, StoredTaskStatus]
   ['needs-answer', 'in-queue'],
   ['needs-answer', 'removed'],
   ['failed', 'in-queue'],
+  ['failed', 'removed'],
   ['interrupted', 'in-queue'],
+  ['interrupted', 'removed'],
 ];
 
 /** Whether a move is in {@link TASK_MOVES}. */
@@ -74,7 +76,7 @@ export const LABELS = ['contract', 'host', 'migration', 'views', 'theme', 'accep
 export type Label = (typeof LABELS)[number];
 
 /** How soon a task should run, among tasks nothing orders otherwise. */
-export const PRIORITIES = ['high', 'normal', 'low'] as const;
+export const PRIORITIES = ['high', 'medium', 'low'] as const;
 export type Priority = (typeof PRIORITIES)[number];
 
 export const RISKS = ['high', 'normal'] as const;

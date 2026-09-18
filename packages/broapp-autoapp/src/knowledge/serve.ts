@@ -22,6 +22,7 @@
 import type { AiContextProviders, ContextDocument, ContextRef, DeliveredContext } from 'broapp/ai/host';
 
 import type { CandidateStates } from '../engineer/state.ts';
+import type { IntentStore, TaskRecord } from '../intent/index.ts';
 import type { AppRow } from '../launcher/apps.ts';
 import type { BuildProblem } from '../launcher/candidate.ts';
 import type { Layout } from '../spec/index.ts';
@@ -120,6 +121,67 @@ export interface CreateServeInput {
    * a replay's store holds only the lesson under test.
    */
   readonly seed?: boolean;
+  /**
+   * The backlog. Present, a turn about an application with an unfinished
+   * intent is given its state, after the orientation.
+   */
+  readonly intents?: IntentStore;
+}
+
+/** The most a backlog document may be. */
+export const BACKLOG_DOCUMENT_CHARS = 1_500;
+
+/** The first line of whatever a failed task recorded about its failure. */
+function failureLine(failure: unknown): string | null {
+  if (failure === null || failure === undefined) return null;
+  const text =
+    typeof failure === 'string'
+      ? failure
+      : typeof failure === 'object' && 'message' in failure && typeof failure.message === 'string'
+        ? failure.message
+        : JSON.stringify(failure);
+  const first = text.split(/\r?\n/).find((line) => line.trim() !== '');
+  return first === undefined ? null : first.trim().slice(0, 160);
+}
+
+/**
+ * The backlog of one application as the engineer is given it, or `null` when
+ * it has nothing unfinished.
+ *
+ * Every live intent — a draft, one running, one stopped — newest first: its
+ * status, its open questions, then one line per task with its slug, status,
+ * tier and title, and a failed task's reason. This is how the model keeps
+ * track of a backlog across turns without being asked to remember one, so it
+ * is short, and cut at a line rather than mid-word.
+ */
+export function backlogDocument(intents: IntentStore, appId: string): string | null {
+  const live = intents.live(appId);
+  if (live.length === 0) return null;
+  const lines: string[] = [];
+  for (const intent of live) {
+    const writing = intent.status === 'draft' && intent.submittedAt === null ? ', being written' : '';
+    lines.push(`Intent ${String(intent.id)} (${intent.status}${writing}): ${intent.restated ?? intent.request.slice(0, 120)}`);
+    if (intent.questions.length > 0) {
+      lines.push('Open questions:', ...intent.questions.map((question) => `- ${question}`));
+    }
+    const tasks = intents.runOrder(intent.id).filter((task: TaskRecord) => task.stored !== 'removed');
+    if (tasks.length === 0) lines.push('No tasks yet.');
+    for (const task of tasks) {
+      const reason = task.status === 'failed' ? failureLine(task.failure) : null;
+      lines.push(`- ${task.slug} · ${task.status} · ${task.tier} · ${task.title}${reason === null ? '' : ` — failed: ${reason}`}`);
+    }
+  }
+  const out: string[] = [];
+  let length = 0;
+  for (const line of lines) {
+    if (length + line.length + 1 > BACKLOG_DOCUMENT_CHARS - 2) {
+      out.push('…');
+      break;
+    }
+    out.push(line);
+    length += line.length + 1;
+  }
+  return out.join('\n');
 }
 
 /** How many lessons one turn may be given, and one build problem. */
@@ -353,6 +415,10 @@ export function createServe(input: CreateServeInput): Serve {
     if (kind === 'digest') {
       return { ref, title: `Where ${appId} stands`, content: orientation({ layout, appId, states, apps: rows }).text };
     }
+    if (kind === 'intent') {
+      const text = input.intents === undefined ? null : backlogDocument(input.intents, appId);
+      return text === null ? null : { ref, title: `The backlog for ${appId}`, content: text };
+    }
     if (kind === 'evidence') {
       const evidence =
         turn?.evidence ?? taskEvidence({ layout, appId, tokens: turn?.tokens ?? [], index: indexOf(appId) });
@@ -387,6 +453,9 @@ export function createServe(input: CreateServeInput): Serve {
             ? []
             : [
                 ...(documents.digest ? [{ ref: `digest:${appId}`, title: `Where ${appId} stands` }] : []),
+                ...(input.intents !== undefined && input.intents.live(appId).length > 0
+                  ? [{ ref: `intent:${appId}`, title: `The backlog for ${appId}` }]
+                  : []),
                 ...(documents.evidence
                   ? [{ ref: `evidence:${appId}`, title: `What this request touches in ${appId}` }]
                   : []),

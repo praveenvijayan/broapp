@@ -34,6 +34,12 @@ type Model = AiModelsHook['models'][number];
 export const BACKLOG_NO_APP = 'Choose an application to see its backlog.';
 /** What it says when an application has no intents. */
 export const BACKLOG_EMPTY = 'Nothing has been planned yet. Ask the engineer for a change with more than one part.';
+/** Beside a draft's status while the engineer is still writing its plan. */
+export const BEING_WRITTEN = 'Being written';
+/** The heading over a draft's open questions, which come before everything else. */
+export const NEEDS_ANSWERS = 'The engineer needs answers';
+/** Where those answers go. */
+export const ANSWER_IN_CHAT = 'Answer in the chat. The engineer folds your answers into the plan and carries on from there.';
 /** What it says under a model select when the provider's list could not be read. */
 export const MODELS_UNREADABLE = 'The model list could not be read, so only the current choice is shown.';
 
@@ -352,9 +358,23 @@ export function IntentDetailView({
     intent.fits !== null ||
     intent.conflicts.length + intent.outOfReach.length + intent.assumptions.length + intent.questions.length > 0;
   const withdrawable = intent.status === 'draft' || intent.status === 'stopped';
+  // A draft waiting on the person puts its questions first: nothing else in it
+  // moves until they are answered, and the answer goes in the chat.
+  const waiting = intent.status === 'draft' && intent.questions.length > 0;
 
   return (
     <div className="launcher__k-detail">
+      {waiting ? (
+        <section aria-label={NEEDS_ANSWERS} className="launcher__intent-questions">
+          <h3 className="launcher__k-heading">{NEEDS_ANSWERS}</h3>
+          <ul className="launcher__list">
+            {intent.questions.map((question, index) => (
+              <li key={`${String(index)}-${question.slice(0, 20)}`}>{question}</li>
+            ))}
+          </ul>
+          <p className="launcher__lede">{ANSWER_IN_CHAT}</p>
+        </section>
+      ) : null}
       <p className="launcher__k-quote">{intent.request}</p>
       {analysed ? (
         <dl className="launcher__k-fields">
@@ -373,7 +393,7 @@ export function IntentDetailView({
           <Block items={intent.conflicts} title="Conflicts" />
           <Block items={intent.outOfReach} title="Out of reach" />
           <Block items={intent.assumptions} title="Assumptions" />
-          <Block items={intent.questions} title="Open questions" />
+          {waiting ? null : <Block items={intent.questions} title="Open questions" />}
         </dl>
       ) : null}
 
@@ -444,6 +464,9 @@ function IntentLine({ intent, open, onToggle }: { intent: IntentSummary; open: b
       <span className="launcher__log-time">{when(intent.createdAt)}</span>
       <span className="launcher__k-chips">
         <Chip word={intent.status} />
+        {intent.status === 'draft' && intent.submittedAt === null ? (
+          <span className="launcher__intent-note">{BEING_WRITTEN}</span>
+        ) : null}
       </span>
       <span className="launcher__k-text">{intent.restated}</span>
       <span className="launcher__k-counts">

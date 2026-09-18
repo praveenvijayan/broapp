@@ -197,6 +197,24 @@ the new release has accepted a write.
 No `data-prev-*` directory and no snapshot is ever removed by recovery. Deleting
 them is a separate, explicit action that does not exist yet — see the backlog.
 
+## Drafting a backlog is `read`
+
+The engineer's three planning tools, `intent.open`, `intent.task` and
+`intent.submit`, are `read`, so the gate asks nobody about them. A draft is the
+engineer's proposal written down, as a transcript is: it changes no application
+and no release, and nothing acts on it. It leaves `draft` only when a person on
+channel `user` moves it, or when a tool that asks the person does (13c). The
+three tools refuse with `conflict` once the intent is anything else.
+
+What the classification rests on is that no draft row can cause an effect
+without a person. The host adds one rule of its own on top: in a turn that
+opened or changed an intent, `source.edit`, `source.change`, `candidate.build`
+and `candidate.cycle` are refused before the gate is asked, so the person reads
+the plan before any of it is built. The request stored is the message the tab
+saw the person type, never the model's paraphrase, and whether the analysis
+names anything the application has is checked by the host against the release
+that is serving.
+
 ## What is recorded
 
 Every gate decision — allowed, confirmed, denied, refused — is written to

@@ -16,11 +16,13 @@
  * so the engineer reads the part it needs rather than all of it every turn.
  */
 
+import { MAX_TASKS_PER_INTENT } from '../intent/plan.ts';
+import { LABELS } from '../intent/types.ts';
 import { APPLICATION_VARIABLES, AUTOAPP_TOKENS, TOKEN_PREFIX, type ThemeToken, type TokenGroup } from '../react/theme.ts';
 
 import { designTopic } from './design.ts';
 
-export const REFERENCE_TOPICS = ['contract', 'views', 'acceptance', 'workspace', 'theme', 'design'] as const;
+export const REFERENCE_TOPICS = ['contract', 'views', 'acceptance', 'workspace', 'theme', 'design', 'intents'] as const;
 export type ReferenceTopic = (typeof REFERENCE_TOPICS)[number];
 
 const CONTRACT = `# contract — src/shared/contract.ts
@@ -231,6 +233,61 @@ Each line: the token — what it sets — its default (light / dark where they d
 ${groups.join('\n\n')}`;
 }
 
+/**
+ * What a good split is, written once.
+ *
+ * The `intent.task` description and the `intents` topic both carry this text,
+ * so the rule the model reads while planning is the rule it can look up.
+ */
+export const SPLIT_RULES = `- One task is one change a person could accept or reject on its own.
+- It leaves the application building and every earlier check passing.
+- It is at most 400 changed lines; a task over 200 is a sign it is two.
+- A migration is its own task, and blocks every task that reads the new column.
+- When they depend on each other: the contract first, then the host, then the views.
+- Every criterion is something an acceptance example can assert: what a route returns, or
+  what a page declares. Never "looks good". What only a person can judge goes in \`runbook\`.
+- A task that ships less than a working path is \`stub: true\` and names in \`repaidBy\`
+  the task that finishes it.`;
+
+const INTENTS = `# intents — planning a request as a backlog
+
+A request with more than one part that can be checked on its own, or one you
+estimate at over 200 changed lines, is planned rather than started. The person
+reads the plan in the Backlog panel, not in the chat, and nothing in it runs
+until they say so.
+
+## The calls, in order
+1. \`spec.read\`, so the analysis is about the application as it is.
+2. \`intent.open\`: \`restated\` (what you understood), \`fits\` (which routes, pages
+   or components it builds on, by name; the host refuses a \`fits\` that names none),
+   \`conflicts\`, \`outOfReach\` (what the rules put out of reach), \`assumptions\`,
+   \`questions\`. One intent per application; a request about two is two intents.
+   With questions, stop and ask them. The answer comes in a new turn: call
+   \`intent.open\` again with it folded in and \`questions\` empty. That replaces the
+   analysis and keeps the tasks.
+3. \`intent.task\` once per part. The host gives the slug's number, the tier and
+   the model; you give the slug's \`words\` (one to six lowercase words).
+   \`blockedBy\` and \`repaidBy\` take whole slugs, \`0001-add-tags\`, never the words
+   alone. A task not added yet may be named, since each new task takes the next
+   number; that is checked at submit. A result with \`ok: false\` names each field to fix: fix those
+   and call again. \`replaces\` rewrites a task you already added, keeping its slug.
+4. \`intent.submit\`, then tell the person the plan is in the Backlog panel.
+   Do not start any task, and do not edit anything in the same turn.
+
+## What a good split is
+${SPLIT_RULES}
+
+## The fields
+- \`labels\`: one to four of ${LABELS.map((label) => `\`${label}\``).join(', ')}.
+- \`priority\`: \`high\`, \`medium\` or \`low\`. \`risk\`: \`high\` or \`normal\`.
+- \`reasoning\`: \`low\`, \`medium\` or \`high\`; one input to the tier, which the host decides.
+- \`estimatedLines\`: 1 to 400. \`criteria\`: two to eight \`{ text, failure }\`; at
+  least one with \`failure: true\` says what the person sees when it goes wrong, or
+  \`noFailurePath\` says why there is none. Criterion \`c2\` of task \`0007-add-tags\`
+  is proven by the acceptance example \`0007-add-tags-c2\`.
+- \`nonFunctional\`, \`testNotes\`, \`runbook\`: up to six lines each.
+- At most ${String(MAX_TASKS_PER_INTENT)} tasks in one intent; more is several requests.`;
+
 const SECTIONS: Readonly<Record<ReferenceTopic, string>> = {
   contract: CONTRACT,
   views: VIEWS,
@@ -238,6 +295,7 @@ const SECTIONS: Readonly<Record<ReferenceTopic, string>> = {
   workspace: WORKSPACE,
   theme: themeReference(AUTOAPP_TOKENS),
   design: designTopic(),
+  intents: INTENTS,
 };
 
 /** One topic's text, or every topic in order. */

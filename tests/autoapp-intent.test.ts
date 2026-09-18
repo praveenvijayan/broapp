@@ -89,7 +89,7 @@ function openStore(): IntentStore {
 function taskInput(overrides: Partial<TaskInput> = {}): TaskInput {
   return {
     title: 'Add a tags column to the items table',
-    priority: 'normal',
+    priority: 'medium',
     labels: ['views'],
     blockedBy: [],
     estimatedLines: 40,
@@ -413,14 +413,14 @@ describe('the intent store', () => {
     const store = openStore();
     const intent = store.createIntent({ appId: 'items', request: 'five parts' });
     const low = store.addTask(intent.id, taskInput({ words: 'low', priority: 'low' }));
-    const normal = store.addTask(intent.id, taskInput({ words: 'normal' }));
-    const waits = store.addTask(intent.id, taskInput({ words: 'waits', priority: 'high', blockedBy: [normal.slug] }));
+    const medium = store.addTask(intent.id, taskInput({ words: 'medium' }));
+    const waits = store.addTask(intent.id, taskInput({ words: 'waits', priority: 'high', blockedBy: [medium.slug] }));
     const high = store.addTask(intent.id, taskInput({ words: 'high', priority: 'high' }));
     const later = store.addTask(intent.id, taskInput({ words: 'also-high', priority: 'high' }));
     expect(store.runOrder(intent.id).map((task) => task.slug)).toEqual([
       high.slug,
       later.slug,
-      normal.slug,
+      medium.slug,
       waits.slug,
       low.slug,
     ]);
@@ -439,6 +439,12 @@ describe('the intent store', () => {
     expect(store.task(done.id)?.stored).toBe('completed');
     expect(store.task(failed.id)?.stored).toBe('removed');
     expect(store.task(proposed.id)?.stored).toBe('removed');
+    // The failed task went straight to `removed`: one event for the
+    // withdrawal, and none for a queue it never waited in.
+    const history = store.get(intent.id)?.tasks.find((task) => task.id === failed.id)?.events ?? [];
+    expect(history.filter((event) => event.note === 'the intent was withdrawn').map((event) => [event.from, event.to])).toEqual([
+      ['failed', 'removed'],
+    ]);
     expect(() => store.withdraw(intent.id)).toThrow(/only a draft or a stopped intent/);
   });
 

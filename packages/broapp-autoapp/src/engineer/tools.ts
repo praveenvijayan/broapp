@@ -46,6 +46,7 @@ import {
   type Layout,
 } from '../spec/index.ts';
 
+import type { IntentTools } from './intent-tools.ts';
 import { CHECK_STEP_TIMEOUT_MS, coverage, runAcceptance, stepFailure, UNVERIFIED_BY_CHECKS, viewStepFailure } from './check.ts';
 import { REFERENCE_TOPICS, specReference } from './reference.ts';
 import { startPreview } from './preview.ts';
@@ -84,6 +85,42 @@ export interface EngineerToolsOptions {
    * least this long was not declined: nobody answered, and the result says so.
    */
   readonly confirmTimeoutMs?: number;
+  /**
+   * The backlog's three tools and the turns that used them. Present, the tools
+   * are merged in, and a turn that planned cannot edit or build.
+   */
+  readonly intents?: IntentTools;
+  /** Whether a turn planned a backlog, for a caller that keeps its own record. */
+  readonly planning?: (runId: string) => boolean;
+}
+
+/** What a tool that edits or builds says in a turn that planned. */
+export const PLANNING_REFUSAL = 'This turn planned a backlog. The person reviews it first.';
+
+/** The tools a planning turn may not call: everything that edits the workspace or builds from it. */
+export const PLANNING_LOCKED: readonly string[] = ['source.edit', 'source.change', 'candidate.build', 'candidate.cycle'];
+
+/**
+ * Refuse the tools that edit or build in a turn that planned.
+ *
+ * Before the gate, so the person is not asked to allow an edit that is then
+ * refused: nothing runs, so nothing is being decided. A cycle's own build
+ * step carries the same run id and is refused the same way.
+ */
+function lockWhilePlanning(tools: Record<string, GuardedTool>, planning: (runId: string) => boolean): void {
+  for (const name of PLANNING_LOCKED) {
+    const tool = tools[name];
+    if (tool === undefined) continue;
+    const inner = tool.execute;
+    tools[name] = {
+      ...tool,
+      execute: (input, envelope, signal) => {
+        const runId = runIdOf(envelope);
+        if (runId !== null && planning(runId)) return Promise.reject(publicError.conflict(PLANNING_REFUSAL));
+        return inner(input, envelope, signal);
+      },
+    };
+  }
 }
 
 /** What the tab knows about one live turn, for the case a failure in it opens. */
@@ -239,7 +276,7 @@ function tellingExpiry(tools: Record<string, GuardedTool>, confirmTimeoutMs: num
  * The turn a call belongs to: `<runId>` of a `<runId>:<callId>` request id, or
  * `null` for a single-step call such as a person's click.
  */
-function runIdOf(envelope: Envelope | undefined): string | null {
+export function runIdOf(envelope: Envelope | undefined): string | null {
   const id = envelope?.requestId ?? '';
   const cut = id.indexOf(':');
   return cut <= 0 ? null : id.slice(0, cut);
@@ -286,7 +323,7 @@ function currentRelease(root: Layout, appId: string): { releaseId: string; spec:
  * each answered with a sentence that named no field. The validator's message
  * already carries the path; this hands it on as `invalid_input`.
  */
-function parsed<T>(schema: Schema<T>, input: unknown): T {
+export function parsed<T>(schema: Schema<T>, input: unknown): T {
   try {
     return schema.parse(input);
   } catch (cause) {
@@ -1428,6 +1465,13 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       return { ok: true };
     },
   });
+
+  const intents = options.intents;
+  const planning = options.planning;
+  if (intents !== undefined || planning !== undefined) {
+    lockWhilePlanning(tools, (runId) => intents?.planning(runId) === true || planning?.(runId) === true);
+  }
+  if (intents !== undefined) Object.assign(tools, intents.tools);
 
   if (options.confirmTimeoutMs !== undefined) tellingExpiry(tools, options.confirmTimeoutMs);
   return tools;

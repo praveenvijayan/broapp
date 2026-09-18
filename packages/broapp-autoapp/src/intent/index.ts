@@ -39,13 +39,14 @@ export {
   LAST_CRITERION,
   makeSlug,
   MAX_TASKS_PER_INTENT,
+  referenceProblems,
   renderPlan,
   SLUG_PATTERN,
   slugWords,
   validateGraph,
   validateTask,
 } from './plan.ts';
-export type { GraphTask, RenderableTask, SiblingTask } from './plan.ts';
+export type { GraphTask, ReferencingTask, RenderableTask, SiblingTask, ValidateTaskOptions } from './plan.ts';
 
 export { tierOf } from './tier.ts';
 export type { TierInput } from './tier.ts';

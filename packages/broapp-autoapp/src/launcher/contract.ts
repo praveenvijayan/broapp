@@ -192,6 +192,8 @@ const intentSummary = s.object({
   status: s.enum(INTENT_STATUS_NAMES),
   restated: s.string({ max: 4_000 }),
   createdAt: count,
+  /** `null` while the engineer is still writing the plan. */
+  submittedAt: s.nullable(count),
   counts: s.object({
     proposed: count,
     'in-queue': count,

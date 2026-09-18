@@ -1062,6 +1062,21 @@ code {
   font-size: 0.72rem;
 }
 
+/* A draft's open questions, first and in the warning pair: nothing in the
+   plan moves until the person answers them. */
+.launcher__intent-questions {
+  background: var(--launcher-warn-surface);
+  color: var(--launcher-warn-text);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.launcher__intent-questions .launcher__lede {
+  color: inherit;
+  margin: 0.4rem 0 0;
+}
+
 .launcher__intent-tiers {
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--launcher-border);

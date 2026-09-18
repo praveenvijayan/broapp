@@ -17,7 +17,7 @@ import { join } from 'node:path';
 
 import { publicError } from 'broapp/host';
 
-import { makeSlug, slugWords, validateGraph, validateTask, type GraphTask } from './plan.ts';
+import { makeSlug, referenceProblems, slugWords, validateGraph, validateTask, type GraphTask } from './plan.ts';
 import { tierOf } from './tier.ts';
 import {
   isAllowedMove,
@@ -92,6 +92,8 @@ export interface IntentSummary {
   /** The restatement, or the first 120 characters of the request. */
   readonly restated: string;
   readonly createdAt: number;
+  /** When the engineer said the plan was finished; `null` while it is being written. */
+  readonly submittedAt: number | null;
   /** How many tasks are in each status a reader sees, `blocked` included. */
   readonly counts: Readonly<Record<TaskStatus, number>>;
 }
@@ -124,10 +126,24 @@ export interface IntentStore {
   createIntent(intent: NewIntent): IntentRecord;
   /** Replace what the intent was understood to be. Only while it is a draft. */
   replaceAnalysis(intentId: number, analysis: IntentAnalysis): IntentRecord;
+  /**
+   * Everything wrong with adding `input` to an intent, or with replacing task
+   * `replaces` by it, without writing anything. References to tasks not yet
+   * planned are left for {@link submit}.
+   */
+  planProblems(intentId: number, input: TaskInput, replaces?: number): PlanProblem[];
   /** Validate a task, give it a slug and a tier, and add it as `proposed`. */
-  addTask(intentId: number, input: TaskInput): TaskRecord;
+  addTask(intentId: number, input: TaskInput, options?: PlanOptions): TaskRecord;
   /** Replace a `proposed` task's plan. The slug stays. */
-  replaceTask(taskId: number, input: TaskInput): TaskRecord;
+  replaceTask(taskId: number, input: TaskInput, options?: PlanOptions): TaskRecord;
+  /**
+   * Say a draft's plan is finished: every reference resolves, the graph has no
+   * cycle, and there is at least one task. Returns what is wrong, and stamps
+   * `submitted_at` only when nothing is.
+   */
+  submit(intentId: number): PlanProblem[];
+  /** An application's intents that are not finished — `draft`, `running`, `stopped` — newest first. */
+  live(appId: string): IntentRecord[];
   /** The one way a task's status changes. */
   moveTask(taskId: number, to: StoredTaskStatus, note: string): TaskRecord;
   /** A task's own model, or `null` for its tier's. */
@@ -142,6 +158,12 @@ export interface IntentStore {
   /** An intent's tasks: blockers first, then priority, then slug. */
   runOrder(intentId: number): TaskRecord[];
   close(): void;
+}
+
+/** How a plan written one task at a time is checked as it is written. */
+export interface PlanOptions {
+  /** Leave references to tasks not yet planned for {@link IntentStore.submit}. */
+  readonly deferReferences?: boolean;
 }
 
 /** Options for {@link openIntents}. */
@@ -234,7 +256,7 @@ function strings(text: string): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-const PRIORITY_RANK: Readonly<Record<Priority, number>> = { high: 0, normal: 1, low: 2 };
+const PRIORITY_RANK: Readonly<Record<Priority, number>> = { high: 0, medium: 1, low: 2 };
 
 /** The statuses whose model may still be chosen: before it runs, or after it stopped. */
 const MODEL_EDITABLE: readonly StoredTaskStatus[] = ['proposed', 'in-queue', 'failed', 'interrupted'];
@@ -406,20 +428,48 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
     'summary', 'criteria', 'no_failure_path', 'non_functional', 'test_notes', 'runbook', 'reasoning', 'tier', 'tier_reasons',
   ] as const;
 
-  /** Refuse a task whose plan or whose place in the graph is wrong. */
-  function check(input: TaskInput, row: { slug: string; intentId: number; id: number | null }, appId: string): void {
+  /** What is wrong with a task's plan, or with its place in the graph. */
+  function problemsOf(
+    input: TaskInput,
+    row: { slug: string; intentId: number; id: number | null },
+    appId: string,
+    options: PlanOptions,
+  ): PlanProblem[] {
     const others = appTasks(appId).filter((task) => task.id !== row.id);
     const problems = validateTask(
       input,
       others.map((task) => ({ slug: task.slug, stored: task.status })),
       row.id === null ? undefined : row.slug,
+      options,
     );
-    if (problems.length > 0) invalid(problems);
-    const graph = validateGraph([
+    if (problems.length > 0) return problems;
+    return validateGraph([
       ...graphOf(others),
       { slug: row.slug, intentId: row.intentId, blockedBy: input.blockedBy, stored: 'proposed' },
     ]);
-    if (graph.length > 0) invalid(graph);
+  }
+
+  /** Refuse a task whose plan or whose place in the graph is wrong. */
+  function check(input: TaskInput, row: { slug: string; intentId: number; id: number | null }, appId: string, options: PlanOptions): void {
+    const problems = problemsOf(input, row, appId, options);
+    if (problems.length > 0) invalid(problems);
+  }
+
+  /** The slug the next task of an application would get. */
+  function nextSlug(appId: string, input: TaskInput): string {
+    const highest =
+      db
+        .query<{ n: number | null }, [string]>('SELECT MAX(CAST(substr(slug, 1, 4) AS INTEGER)) AS n FROM tasks WHERE app_id = ?')
+        .get(appId)?.n ?? 0;
+    return makeSlug(highest + 1, input.words ?? slugWords(input.title));
+  }
+
+  /**
+   * A draft that changes is being written again. The panel says "Being
+   * written" until the engineer submits it once more.
+   */
+  function unsubmit(intentId: number): void {
+    db.query<null, [number]>("UPDATE intents SET submitted_at = NULL WHERE id = ? AND status = 'draft'").run(intentId);
   }
 
   function appendEvent(taskId: number, from: StoredTaskStatus | null, to: StoredTaskStatus, note: string): void {
@@ -506,7 +556,8 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
           throw publicError.conflict(`Intent ${String(intentId)} is ${intent.status}; its analysis is changed only while it is a draft.`);
         }
         db.query<null, [string | null, string | null, string, string, string, string, number]>(
-          `UPDATE intents SET restated = ?, fits = ?, conflicts = ?, out_of_reach = ?, assumptions = ?, questions = ?
+          `UPDATE intents SET restated = ?, fits = ?, conflicts = ?, out_of_reach = ?, assumptions = ?, questions = ?,
+             submitted_at = NULL
            WHERE id = ?`,
         ).run(
           analysis.restated,
@@ -521,20 +572,25 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
       })();
     },
 
-    addTask(intentId, input) {
+    planProblems(intentId, input, replaces) {
+      const intent = readIntent(intentId);
+      if (replaces === undefined) {
+        return problemsOf(input, { slug: nextSlug(intent.appId, input), intentId, id: null }, intent.appId, { deferReferences: true });
+      }
+      const row = taskRow(replaces);
+      if (row === null) throw publicError.notFound(`There is no task ${String(replaces)}.`);
+      return problemsOf(input, { slug: row.slug, intentId: row.intent_id, id: row.id }, row.app_id, { deferReferences: true });
+    },
+
+    addTask(intentId, input, options = {}) {
       return db.transaction(() => {
         const intent = readIntent(intentId);
         if (intent.status !== 'draft' && intent.status !== 'stopped') {
           throw publicError.conflict(`Intent ${String(intentId)} is ${intent.status}; tasks are added only to a draft or a stopped one.`);
         }
-        const words = input.words ?? slugWords(input.title);
         // The next free number for the application, across all its intents.
-        const highest =
-          db
-            .query<{ n: number | null }, [string]>('SELECT MAX(CAST(substr(slug, 1, 4) AS INTEGER)) AS n FROM tasks WHERE app_id = ?')
-            .get(intent.appId)?.n ?? 0;
-        const slug = makeSlug(highest + 1, words);
-        check(input, { slug, intentId, id: null }, intent.appId);
+        const slug = nextSlug(intent.appId, input);
+        check(input, { slug, intentId, id: null }, intent.appId, options);
         const seq =
           (db.query<{ n: number | null }, [number]>('SELECT MAX(seq) AS n FROM tasks WHERE intent_id = ?').get(intentId)?.n ?? 0) + 1;
         const columns = ['intent_id', 'app_id', 'seq', 'slug', ...PLAN_COLUMNS, 'status'];
@@ -545,23 +601,58 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
           .get(intentId, intent.appId, seq, slug, ...planColumns(input), 'proposed')?.id;
         if (id === undefined) throw new Error('the task was not written');
         appendEvent(id, null, 'proposed', 'planned');
+        unsubmit(intentId);
         return readTask(id);
       })();
     },
 
-    replaceTask(taskId, input) {
+    replaceTask(taskId, input, options = {}) {
       return db.transaction(() => {
         const row = taskRow(taskId);
         if (row === null) throw publicError.notFound(`There is no task ${String(taskId)}.`);
         if (row.status !== 'proposed') {
           throw publicError.conflict(`${row.slug} is ${row.status}; a plan is replaced only while it is proposed.`);
         }
-        check(input, { slug: row.slug, intentId: row.intent_id, id: row.id }, row.app_id);
+        check(input, { slug: row.slug, intentId: row.intent_id, id: row.id }, row.app_id, options);
         db.query<null, (string | number | null)[]>(
           `UPDATE tasks SET ${PLAN_COLUMNS.map((column) => `${column} = ?`).join(', ')} WHERE id = ?`,
         ).run(...planColumns(input), taskId);
+        unsubmit(row.intent_id);
         return readTask(taskId);
       })();
+    },
+
+    submit(intentId) {
+      return db.transaction(() => {
+        const intent = readIntent(intentId);
+        if (intent.status !== 'draft') {
+          throw publicError.conflict(`Intent ${String(intentId)} is ${intent.status}; only a draft is submitted.`);
+        }
+        const all = appTasks(intent.appId);
+        const own = all.filter((row) => row.intent_id === intentId && row.status !== 'removed');
+        if (own.length === 0) {
+          return [{ field: 'tasks', message: `Intent ${String(intentId)} has no tasks. Add each part with intent.task first.` }];
+        }
+        const problems = [
+          ...referenceProblems(
+            own.map((row) => ({ slug: row.slug, blockedBy: strings(row.blocked_by), repaidBy: row.repaid_by, stored: row.status })),
+            all.map((row) => ({ slug: row.slug, stored: row.status })),
+          ),
+          ...validateGraph(graphOf(all)),
+        ];
+        if (problems.length > 0) return problems;
+        db.query<null, [number, number]>('UPDATE intents SET submitted_at = ? WHERE id = ?').run(now(), intentId);
+        return [];
+      })();
+    },
+
+    live(appId) {
+      return db
+        .query<IntentRow, [string]>(
+          "SELECT * FROM intents WHERE app_id = ? AND status IN ('draft', 'running', 'stopped') ORDER BY created_at DESC, id DESC",
+        )
+        .all(appId)
+        .map(toIntent);
     },
 
     moveTask(taskId, to, note) {
@@ -619,12 +710,9 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
             `Intent ${String(intentId)} cannot be withdrawn: ${waiting.join(', ')} in another intent depend${waiting.length === 1 ? 's' : ''} on its tasks.`,
           );
         }
-        for (const row of going) {
-          // A failed or interrupted task has no move straight to `removed`;
-          // it goes back to the queue first, and its history says why.
-          if (row.status === 'failed' || row.status === 'interrupted') move(row.id, 'in-queue', 'the intent was withdrawn');
-          move(row.id, 'removed', 'the intent was withdrawn');
-        }
+        // Straight to `removed`, whatever the task was doing: a detour through
+        // the queue would write a history row for a state it was never in.
+        for (const row of going) move(row.id, 'removed', 'the intent was withdrawn');
         db.query<null, [number, number]>("UPDATE intents SET status = 'withdrawn', ended_at = ? WHERE id = ?").run(now(), intentId);
         return readIntent(intentId);
       })();
@@ -671,6 +759,7 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
           status: row.status,
           restated: row.restated ?? row.request.slice(0, 120),
           createdAt: row.created_at,
+          submittedAt: row.submitted_at,
           counts,
         };
       });
