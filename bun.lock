@@ -176,7 +176,7 @@
     },
     "packages/broapp-autoapp": {
       "name": "broapp-autoapp",
-      "version": "0.3.11",
+      "version": "0.3.12",
       "bin": {
         "broapp-autoapp": "src/launcher/main.ts",
       },

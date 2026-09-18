@@ -202,16 +202,21 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.12: a backlog. The engineer restates a request, checks it against
+Version 0.4.13: a failed task says why, and the launcher can be stopped. A
+task whose builds were refused names the tool, the count and the error, to
+the person, the advice and the next attempt; a turn that ends with unbuilt
+edits is built once by the host; `broapp-autoapp stop` and `status`, a
+**Quit** in the panel, and children that exit when their launcher is gone.
+One package: `broapp-autoapp` 0.3.12; `broapp` stays at 0.4.3,
+`broapp-ai-elements` at 0.4.6, the providers and `create-broapp` at 0.4.1.
+Earlier: 0.4.12, a backlog. The engineer restates a request, checks it against
 the application's real routes and pages, and splits it into tasks a person
 reviews in a Backlog panel; **Run** builds each task as its own turn on the
 model chosen for it, the host marking a task completed only when a verified
 build passes an example for every criterion, and nothing is activated. A
 retry, or a task resumed after a stop, is told what earlier attempts changed
 and how they ended; a turn the provider killed costs no attempt. Every
-launcher-served application has a way back to the panel. Three packages:
-`broapp` 0.4.3, `broapp-ai-elements` 0.4.6 and `broapp-autoapp` 0.3.11; the
-providers and `create-broapp` stay at 0.4.1. Earlier: 0.4.11 (the Knowledge
+launcher-served application has a way back to the panel. Before it: 0.4.11 (the Knowledge
 panel), 0.4.10 (the log in the
 tab), 0.4.9 (approving a change cycle
 works), 0.4.8 (the host keeps each turn's tool
