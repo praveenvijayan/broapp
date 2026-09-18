@@ -63,11 +63,53 @@ does with long open-ended turns.
 | While a run is active | For that application, engineer tools that write (`source.edit`, `source.change`, `candidate.build`, `candidate.preview`, `candidate.cycle`, `preview.stop`, `release.activate`) called from a run id that does not start with `intent-<thatIntentId>-` refuse with `conflict`: "A backlog run is working on <appId>. Stop it from the Backlog panel first." `launcher.activate` for that application refuses the same way. One `busy(appId, runId): string \| null` function from the executor, passed through `EngineerToolsOptions` and `LauncherAppOptions`. Reads, and other applications, are untouched, so the person can keep talking to the engineer. |
 | Restart | A run does not survive the launcher. On `openIntents`, any `in-progress` task becomes `interrupted` and any `running` intent becomes `stopped` with reason "The launcher stopped." Nothing resumes by itself: an interrupted turn may have left half a change, and the rule for unknown outcomes is that a person decides. `CycleProgress` is already durable, so the resumed task's orientation says where the last cycle got to. |
 | Finishing | When every live task is `completed` the intent is `done`. Nothing is activated. The panel says: "All tasks are built and checked in the candidate. Open the preview, look, then activate from the Candidate panel." Tasks with a `runbook` list it there under "For you to check by hand". |
-| Progress | `launcher.intentGet` gains `run: { taskId, attempt, startedAt, lastTool, lastToolAt, approvals } \| null`, kept in memory by the executor from `onEvent`. The panel polls `launcher.intentGet` every two seconds **only while the open intent is `running`**, and stops when it is not or the panel closes. The launcher contract has no stream today and this prompt does not add the first one. Rendered `- [x]` for a criterion whose example passed in the verdict. A task row shows estimated against actual lines once completed. |
+| Progress | `launcher.intentGet` gains `run: { taskId, attempt, startedAt, lastTool, lastToolAt, approvals } \| null`, kept in memory by the executor from `onEvent`. The panel polls `launcher.intentGet` every two seconds while the open intent is `running` (and for the two reasons in Step 0.2), and stops when none holds or the panel closes. The launcher contract has no stream today and this prompt does not add the first one. Rendered `- [x]` for a criterion whose example passed in the verdict. A task row shows estimated against actual lines once completed. |
 | Panel | **Run** (draft and submitted, or stopped), **Stop** (running), both with inline confirmation; per failed task the reasons, the advice, and the sentence "Run again to retry, or ask the engineer to revise this task." |
 | Records | Every spoke turn is an ordinary turn: events, contexts, servings, cases, lessons, the run store — all as today, under its `intent-…` run id. Add one knowledge event per task move and per run start, stop and finish, kind `log`. The gate's record of each stand-in answer must show it was the run's standing answer and which intent: read how `approvals.ts` records an answer and use the field it already has for who answered; if there is none, put it in the knowledge event and say so in the report rather than changing the gate. |
 | Instructions | Add to the paragraph 13b wrote, two lines: when the person says to go ahead with a reviewed backlog, call `intent.start`; after a stop, read the backlog document, and either explain the advice or revise the failed task with `intent.task` and `replaces`. |
 | Not in scope | Desktop notification of a waiting question (the rail mark is the signal); parallel tasks; models from a second provider; automatic activation; reverting a failed task; a model-driven supervisor loop; a stream route; an evaluation condition. |
+
+## Step 0 — four corrections from the review of 13b, before anything else
+
+Small, each with its test, listed in your report under their own heading.
+
+1. **`blockedBy` and `repaidBy` accept a task's words as well as its whole slug.**
+   The host assigns slug numbers, so a model adding tasks in one pass cannot know
+   them; in 13b's by-hand run a hosted model named `author-column`, was refused
+   three times at submit and spent three `replaces` calls repairing it. A
+   reference is resolved among the intent's live tasks: a whole slug matches
+   itself; anything else matches the task whose slug without its number equals
+   it. Resolution happens when the referenced task exists — at add time if it
+   already does, otherwise at submit — and the stored value is always the whole
+   slug. No match, or two matches, is a problem naming the reference and, for
+   two, both slugs. The tool description says either form is accepted.
+2. **The panel notices a backlog being written.** The list loads once, so a
+   person who opens the Backlog panel while the engineer is planning sees
+   nothing until Refresh (13b's report put this down to queueing; the code says
+   the draft simply did not exist yet when the list was read). `IntentPanel`
+   takes `turnActive: boolean` from `App.tsx` (the chat already knows when a
+   turn is streaming) and re-reads the list, and the open intent, every two
+   seconds while it is true or while the open intent is an unsubmitted draft;
+   once more when it turns false. This is the same timer the running state uses
+   below: one polling hook, three reasons.
+3. **A read route answers while a turn is running.** Add a test that holds a
+   fake-adapter turn open on a tool call and asserts `launcher.intentGet`
+   answers meanwhile. Progress polling depends on it; if it does not hold, stop
+   and report, because the progress design is then wrong.
+4. **The split rules say what a criterion may be.** 13b's sample plan carried
+   "the filter is the SQL WHERE clause, never a slice taken after the fact",
+   which no acceptance example can assert. Add one sentence to `SPLIT_RULES`
+   (and so to the `intents` topic and the `intent.task` description): a
+   criterion says what a route returns or what a page declares, never how the
+   code is written; how it is written goes in `testNotes`. No host check: it is
+   not checkable. Put a row in `docs/autoapp/backlog.md` linking this to the
+   existing "Fail-before, pass-after" row: a run's verdict is only as strong as
+   the examples the builder wrote, and that row is what would strengthen it.
+
+The instructions test caps `ENGINEER_INSTRUCTIONS` at 70 lines and 13b met it by
+deleting blank lines around headings. Do not squeeze further: fold this prompt's
+two sentences into 13b's paragraph, and if that still does not fit, raise the
+cap by exactly the lines you add and say so in the report.
 
 ## Step 1 — `intent/executor.ts`
 
