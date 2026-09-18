@@ -305,6 +305,35 @@ A change costs bytes as well as behaviour. `candidate.explain` reports the
 candidate's `page.html` size beside the serving release's, and the launcher's
 candidate panel shows the size when it moved by more than 2%.
 
+## How the launcher is composed
+
+The launcher is one binary, assembled by hand. `createLauncherTab()` in
+`src/launcher/tab.ts` takes every service it needs as a named argument and
+wires the engineer, the knowledge store, the tools and the routes in one
+visible order; the evaluation harness calls the same function. There is no
+module registry, no kernel, no dependency resolver and no runtime loading.
+A feature that cuts across layers, as knowledge does, is wired in that
+function under its own name, and a new one is added by editing it and
+rebuilding. Bun's plugin, preload and macro mechanisms are load-time tools
+and are not used as an architecture.
+
+This was reviewed in September 2026 and kept on purpose. The two costs a
+framework would have paid for, a second cross-cutting feature and a second
+person adding features, do not exist yet, and a contract written from one
+instance is a guess. The decision is revisited when a second feature needs
+routes, tools, an engineer hook, a panel and migrations together; until then
+the shape of that feature is unknown and the abstraction would be wrong.
+
+Two things follow from one binary. Every feature ships in the same release,
+so `knowledge.sqlite` keeps one append-only migration sequence under
+`user_version`; a per-feature ledger is a separate requirement that arrives
+with separately shipped features, if they ever do. And durability is decided
+per store, not per framework: the activation journal writes with
+`synchronous = FULL` because recovery reads it, and the knowledge store stays
+at WAL's NORMAL because nothing in it is read by recovery and every write
+runs on the launcher's event loop. The reasons are beside the pragmas in
+`src/launcher/journal.ts` and `src/knowledge/store.ts`.
+
 ## Where the rest of it is written down
 
 - [components.md](components.md) — the three layers that draw a page, the one

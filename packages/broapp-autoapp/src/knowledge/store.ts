@@ -168,6 +168,17 @@ export function openKnowledge(dataDir: string, options: OpenKnowledgeOptions = {
   // The same three as the run store: WAL so reading never blocks the launcher
   // writing, and a busy timeout because a `serve` and a launcher tab may both
   // have it open.
+  //
+  // `synchronous` is left alone on purpose. Bun's SQLite is built with
+  // `DEFAULT_WAL_SYNCHRONOUS=1`, so the line below also drops it from FULL to
+  // NORMAL (measured: Bun 1.4.0, SQLite 3.51.0). Under WAL NORMAL a process
+  // crash loses nothing; a power loss or OS crash can lose the last committed
+  // transactions, which here means a few log events and, at worst, one freshly
+  // distilled lesson. That is accepted: every write on this file runs
+  // synchronously on the launcher's event loop, and FULL would charge each
+  // log event an fsync to protect the rare lesson. The activation journal
+  // sets FULL itself because a lost activation row breaks recovery; nothing
+  // in this file is read by recovery. Change this only with that trade in view.
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
   db.exec('PRAGMA busy_timeout = 5000');
