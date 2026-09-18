@@ -11,6 +11,7 @@
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { createFakeAdapter, type ContextDocument, type FakeStep, type ProviderAdapter } from 'broapp/ai/host';
@@ -441,7 +442,8 @@ describe('attemptsDocument', () => {
   });
 
   test('a machine path in a build message is sanitised', () => {
-    const home = process.env['HOME'] ?? '/Users/somebody';
+    // `sanitise` replaces `homedir()`, which on Windows is not `HOME`.
+    const home = homedir();
     const text =
       attemptsDocument({
         attempts: [failed(1, { lastBuild: [{ stage: 'host', message: `Could not resolve ${home}/works/app/src/host/db.ts token=abcdef123456` }] })],
@@ -518,6 +520,8 @@ describe('14b: an attempt that changed nothing', () => {
     const directory = mkdtempSync(join(runRoot, 'task-context-'));
     scratch.push(directory);
     const store = createRunStore(directory, quiet);
+    // Windows cannot remove the directory while the database is open.
+    closers.push(() => store.close());
     const recorder = store.recorder();
     const step = (requestId: string, route: string, path: string, outcome: 'succeeded' | 'failed'): void => {
       recorder.record({

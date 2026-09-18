@@ -1148,8 +1148,10 @@ describe('13d: holding a run to its earlier examples, and letting progress earn 
     // Attempt 1 edits and is then ended by the idle limit, so its edits are
     // left unbuilt: since 14c a turn that ends on its own is built by the host,
     // and only an aborted one leaves this case for the next attempt.
-    const silent: FakeStep = { kind: 'text', chunks: Array.from({ length: 12 }, () => 'thinking ') };
-    const w = await world([editOnly('0001-only-part', ['c1', 'c2'], [silent]), verify()], { idleTimeoutMs: 400, chunkDelayMs: 150 });
+    // The idle limit is wide enough for attempt 2 to reach its first tool call
+    // on a slow runner (400 ms was not, on CI), and the silence outlasts it.
+    const silent: FakeStep = { kind: 'text', chunks: Array.from({ length: 30 }, () => 'thinking ') };
+    const w = await world([editOnly('0001-only-part', ['c1', 'c2'], [silent]), verify()], { idleTimeoutMs: 2_500, chunkDelayMs: 150 });
     const { id } = submitted(w.intents, [plan('only-part')]);
     const executor = executorOf(w);
     await executor.start(id, 'the test');
