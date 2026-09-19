@@ -60,6 +60,8 @@ import {
   INPUT_SCHEMAS,
   INTENT_TASK_INPUT,
 } from 'broapp-autoapp/engineer';
+import { validateTask, type TaskInput } from 'broapp-autoapp/intent';
+import { sourceRevision } from 'broapp-autoapp/knowledge';
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
 import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
 import { harness, type Harness } from './harness.ts';
@@ -97,6 +99,12 @@ let openedUrls: string[] = [];
 
 /** Inside the repository, so the workspace can resolve `broapp`. */
 const runRoot = join(import.meta.dir, '.autoapp-run');
+
+/** Directories a test made outside a world, removed after it. */
+const scratch: string[] = [];
+afterEach(() => {
+  for (const directory of scratch.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
 
 afterEach(async () => {
   await live?.stop();
@@ -1497,5 +1505,114 @@ describe('the valid inputs a repeated refusal shows', () => {
     const cycle = INPUT_EXAMPLES['candidate.cycle'] as { hunks: unknown; create: unknown };
     expect(Array.isArray(cycle.hunks)).toBe(true);
     expect(Array.isArray(cycle.create)).toBe(true);
+  });
+
+  // 15c. The schema is not the only thing a call has to get past: the
+  // workspace refuses a path outside `src/` and `autoapp.json`, and a hunk
+  // whose `find` is not in its file. Each example is held to `examples/notes`
+  // as it ships, applied through the functions the tools call.
+  const notes = join(import.meta.dir, '..', 'examples', 'notes');
+  const WRITABLE_PATH = /^(src\/|autoapp\.json$)/;
+  /** Every path an example names, with the example it came from. */
+  const pathsOf = (tool: string, example: unknown): string[] => {
+    const input = example as { hunks?: { path: string }[]; changes?: { path: string }[]; create?: { path: string }[] };
+    return [...(input.hunks ?? []), ...(input.changes ?? []), ...(input.create ?? [])].map((entry) => `${tool}: ${entry.path}`);
+  };
+
+  /** A fresh copy of `examples/notes` (its `src/` and `autoapp.json`), a repository of its own. */
+  function notesCopy(): string {
+    const directory = mkdtempSync(join(tmpdir(), 'autoapp-'));
+    scratch.push(directory);
+    cpSync(join(notes, 'src'), join(directory, 'src'), { recursive: true });
+    cpSync(join(notes, 'autoapp.json'), join(directory, 'autoapp.json'));
+    const git = (...args: string[]): void => {
+      const result = Bun.spawnSync({
+        cmd: ['git', ...args],
+        cwd: directory,
+        stdout: 'ignore',
+        stderr: 'pipe',
+        env: { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@localhost', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@localhost' },
+      });
+      if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${new TextDecoder().decode(result.stderr)}`);
+    };
+    git('init', '--quiet');
+    git('add', '-A');
+    git('commit', '--quiet', '--no-gpg-sign', '-m', 'examples/notes as it ships');
+    return directory;
+  }
+
+  /** Apply one example the way its tool does, naming the example and its files when it is refused. */
+  function applyExample(tool: 'source.edit' | 'source.change' | 'candidate.cycle', workspace: string): void {
+    const example = INPUT_EXAMPLES[tool] as {
+      message: string;
+      hunks?: { path: string; find: string; replace: string }[];
+      changes?: { path: string; content: string }[];
+      create?: { path: string; content: string }[];
+    };
+    try {
+      if (tool === 'source.edit') applyEdits(workspace, example.hunks ?? [], example.message);
+      else if (tool === 'source.change') applyChange(workspace, example.changes ?? [], example.message);
+      else {
+        // The cycle's order: hunks, all or nothing, then new files, each refused if it exists.
+        if ((example.hunks ?? []).length > 0) applyEdits(workspace, example.hunks ?? [], example.message);
+        const existing = snapshot(workspace);
+        for (const file of example.create ?? []) {
+          if (existing.has(file.path)) throw new Error(`${file.path} already exists; change it with hunks.`);
+        }
+        if ((example.create ?? []).length > 0) applyChange(workspace, example.create ?? [], example.message);
+      }
+    } catch (cause) {
+      const files = pathsOf(tool, example).join(', ');
+      throw new Error(`INPUT_EXAMPLES['${tool}'] does not apply to examples/notes (${files}): ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
+
+  // 1.
+  test('every path in every example is one the workspace writes', () => {
+    const paths = Object.entries(INPUT_EXAMPLES).flatMap(([tool, example]) => pathsOf(tool, example));
+    expect(paths.length).toBeGreaterThan(0);
+    for (const path of paths) expect(path.slice(path.indexOf(': ') + 2)).toMatch(WRITABLE_PATH);
+  });
+
+  // 2.
+  for (const tool of ['source.edit', 'source.change', 'candidate.cycle'] as const) {
+    test(`the ${tool} example applies to a fresh copy of examples/notes, and the revision moves`, () => {
+      const workspace = notesCopy();
+      const before = sourceRevision(workspace);
+      applyExample(tool, workspace);
+      expect(sourceRevision(workspace)).not.toBe(before);
+    });
+  }
+
+  // 3.
+  test('no example contains a placeholder ellipsis', () => {
+    for (const [tool, example] of Object.entries(INPUT_EXAMPLES)) expect(`${tool}: ${JSON.stringify(example)}`).not.toContain('…');
+  });
+
+  // 4.
+  test('the cycle example is under 600 characters, since a refusal message carries it whole', () => {
+    expect(JSON.stringify(INPUT_EXAMPLES['candidate.cycle']).length).toBeLessThan(600);
+  });
+
+  // 5.
+  test('the intent.task example passes validateTask, read as the tool reads it', () => {
+    const sent = INTENT_TASK_INPUT.parse(INPUT_EXAMPLES['intent.task']);
+    const plan: TaskInput = {
+      words: sent.words,
+      title: sent.title,
+      priority: sent.priority as TaskInput['priority'],
+      labels: sent.labels as TaskInput['labels'],
+      blockedBy: sent.blockedBy,
+      estimatedLines: sent.estimatedLines,
+      locks: sent.locks ?? [],
+      risk: (sent.risk ?? 'normal') as TaskInput['risk'],
+      stub: sent.stub ?? false,
+      ...(sent.repaidBy === undefined ? {} : { repaidBy: sent.repaidBy }),
+      summary: sent.summary,
+      criteria: sent.criteria,
+      ...(sent.noFailurePath === undefined ? {} : { noFailurePath: sent.noFailurePath }),
+      reasoning: sent.reasoning as TaskInput['reasoning'],
+    };
+    expect(validateTask(plan, [])).toEqual([]);
   });
 });

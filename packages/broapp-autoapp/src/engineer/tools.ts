@@ -464,25 +464,45 @@ export const INPUT_SCHEMAS = {
  * A hosted model sent `create` as a string three times running on 2026-09-18,
  * each time told `create: expected an array`, and never once shown what an
  * array of files looks like. Minimal and real: the fields the tool reads,
- * every required one present, arrays as arrays. A test parses each with its
- * tool's own schema, so an example cannot drift from the tool it describes.
+ * every required one present, arrays as arrays, and nothing a model could take
+ * for a convention rather than a placeholder. A builder copies a path as
+ * readily as a shape, so each is written against `examples/notes` as it ships:
+ * a migration is SQL appended to `MIGRATIONS` in `src/host/db.ts`, a new file
+ * goes under `src/`, and a `find` occurs exactly once in the file it names. A
+ * test parses each with its tool's own schema and applies each to a copy of
+ * `examples/notes` through the workspace functions the tools call, so an
+ * example can drift neither from its tool nor from the application it names.
  */
 export const INPUT_EXAMPLES: Readonly<Record<string, unknown>> = {
   'source.edit': {
     appId: 'notes',
-    message: 'Add a done column',
-    hunks: [{ path: 'src/host/db.ts', find: 'title TEXT NOT NULL', replace: 'title TEXT NOT NULL,\n  done INTEGER NOT NULL DEFAULT 0' }],
+    message: 'Add an archived column',
+    hunks: [
+      {
+        path: 'src/host/db.ts',
+        find: 'CREATE INDEX notes_pinned ON notes (pinned DESC, updated_at DESC);`,',
+        replace:
+          'CREATE INDEX notes_pinned ON notes (pinned DESC, updated_at DESC);`,\n\n  `ALTER TABLE notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;`,',
+      },
+    ],
   },
   'source.change': {
     appId: 'notes',
-    message: 'Add the second migration',
-    changes: [{ path: 'migrations/002.sql', content: 'ALTER TABLE notes ADD COLUMN done INTEGER NOT NULL DEFAULT 0;' }],
+    message: 'Add a shared limit for titles',
+    changes: [{ path: 'src/shared/limits.ts', content: '/** The longest title a note may have. */\nexport const TITLE_MAX = 200;\n' }],
   },
   'candidate.cycle': {
     appId: 'notes',
-    message: 'Add a done column',
-    hunks: [{ path: 'src/host/db.ts', find: '…', replace: '…' }],
-    create: [{ path: 'migrations/002.sql', content: '…' }],
+    message: 'Add an archived column',
+    hunks: [
+      {
+        path: 'src/host/db.ts',
+        find: 'CREATE INDEX notes_pinned ON notes (pinned DESC, updated_at DESC);`,',
+        replace:
+          'CREATE INDEX notes_pinned ON notes (pinned DESC, updated_at DESC);`,\n\n  `ALTER TABLE notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;`,',
+      },
+    ],
+    create: [{ path: 'src/shared/limits.ts', content: 'export const TITLE_MAX = 200;\n' }],
   },
   'intent.task': {
     intentId: 1,
@@ -493,7 +513,10 @@ export const INPUT_EXAMPLES: Readonly<Record<string, unknown>> = {
     blockedBy: [],
     estimatedLines: 40,
     summary: 'A done flag on every note, stored in a new column.',
-    criteria: [{ text: 'notes.list returns done for every note', failure: false }],
+    criteria: [
+      { text: 'notes.list returns done for every note', failure: false },
+      { text: 'Marking a note that does not exist as done is refused with not_found', failure: true },
+    ],
     reasoning: 'low',
   },
 };
