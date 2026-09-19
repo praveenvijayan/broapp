@@ -76,11 +76,8 @@ export function App(): React.ReactElement {
         {/* The document scrolls; the assistant below it does not scroll away
             with it, so its prompt bar is always where it was last time. */}
         <div className="app__scroll">
-          {showSettings && (
-            <section className="card">
-              <AiSettings />
-            </section>
-          )}
+          {/* `AiSettings` is already a `card`; a second one around it would nest. */}
+          {showSettings && <AiSettings />}
 
           <AutoappView reloadToken={changed} />
         </div>

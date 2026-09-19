@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOperation } from 'broapp/react';
 
 import type { LauncherContract } from '../contract.ts';
+import { PanelHeader } from './PanelHeader.tsx';
 
 type Tab = 'turns' | 'lessons' | 'cases';
 
@@ -101,12 +102,7 @@ export interface KnowledgePanelProps {
 function Frame({ onClose, children }: { onClose(): void; children: React.ReactNode }): React.ReactElement {
   return (
     <aside aria-label="Knowledge" className="launcher__logs launcher__k">
-      <div className="launcher__settings-header">
-        <h2 className="launcher__card-title">Knowledge</h2>
-        <button className="launcher__button launcher__button--small" onClick={onClose} type="button">
-          Close
-        </button>
-      </div>
+      <PanelHeader onClose={onClose} title="Knowledge" />
       {children}
     </aside>
   );

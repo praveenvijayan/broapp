@@ -72,7 +72,11 @@ import 'broapp-ai-elements/styles.css';
 <BroappChat refs={…} onToolResult={…} />
 ```
 
-`AiSettings` always needs `ai.css`, whichever panel you chose. Add
+`AiSettings` always needs `ai.css`, whichever panel you chose. It draws its own
+`card` section with its own title, so place it bare: never inside another card.
+Settings of your own that sit beside it copy its shape (a title, one muted
+sentence, label above control, hint below, one primary action) so the two read
+as one panel. Add
 `broapp-ai-elements` to the project's dependencies if you use `BroappChat`.
 
 Add `broapp-ai-anthropic` and `broapp-ai-compatible` to the project's

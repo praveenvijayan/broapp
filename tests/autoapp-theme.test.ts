@@ -13,7 +13,7 @@
  * existed, which is also the table's default.
  */
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { specReference } from 'broapp-autoapp/engineer';
@@ -318,6 +318,37 @@ describe('what an application writes', () => {
       expect(selectors).toEqual([':root', '@media (prefers-color-scheme: dark)', ':root']);
     });
   }
+});
+
+describe('one set of controls', () => {
+  const aiCss = withoutComments(read(repo, 'packages', 'broapp', 'src', 'ai', 'react', 'ai.css'));
+  const uiDir = join(packageDir, 'src', 'launcher', 'ui');
+
+  test('every length the settings panel borrows falls back to the table’s default', () => {
+    const borrowed = [...aiCss.matchAll(/(--ai-[a-z-]+):\s*var\(--autoapp-([a-z0-9-]+),\s*([^;]+)\);/g)];
+    expect(borrowed.length).toBeGreaterThan(5);
+    for (const [, property, name, fallback] of borrowed) {
+      const token = byName.get(name ?? '');
+      expect(token, `${String(property)} follows --autoapp-${String(name)}, which is not a token`).toBeDefined();
+      if (token === undefined || token.group === 'colour') continue;
+      expect(fallback, `${String(property)} falls back to something other than ${token.name}'s default`).toBe(token.light);
+    }
+  });
+
+  test('every panel over the launcher’s page opens with the shared header', () => {
+    for (const file of readdirSync(uiDir).filter((name) => name.endsWith('.tsx') && name !== 'PanelHeader.tsx')) {
+      const source = read(uiDir, file);
+      expect(source, `${file} draws its own panel header`).not.toContain('launcher__settings-header');
+      const asides = source.match(/<aside\b[^>]*className="launcher__(?:logs|settings)\b/g)?.length ?? 0;
+      const headers = source.match(/<PanelHeader\b/g)?.length ?? 0;
+      expect(headers, `${file} has a panel without PanelHeader`).toBeGreaterThanOrEqual(asides);
+    }
+  });
+
+  test('Notes does not put the settings card inside a card of its own', () => {
+    const app = read(repo, 'examples', 'notes', 'src', 'ui', 'App.tsx');
+    expect(app).not.toMatch(/className="card">\s*<AiSettings/);
+  });
 });
 
 describe('the authoring gate', () => {

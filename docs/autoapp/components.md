@@ -81,6 +81,41 @@ told different things in different places, and neither file repeats the other.
   states it has to draw, tokens only, and the four places it has to appear
   before it is done — the reference topic, the gallery, the harness, the tests.
 
+## One set of controls
+
+A control means the same thing wherever it is drawn: in a form the renderer
+draws, in `AiSettings`, in a launcher panel, in a component nobody has written
+yet. The vocabulary is small, and a new component uses it before inventing.
+
+- **A field** is a label above a control. The label takes `font-size-small` and
+  `weight-strong`. "Required", "Optional" or "Saved" sits at the right end of
+  the label's line in `font-size-caption`, never in brackets inside the label.
+  A hint goes under the control, in `font-size-caption` and the muted colour.
+- **One height, one corner, one border** for a field, a select, a read-only
+  value row and a button beside them: `radius-sm`, `border-width`, and a height
+  they share, so a row of them sits on one line.
+- **Three weights of action.** One primary per section: the accent, and full
+  width when it ends a form. Secondary: bordered, the button ground. Quiet: text
+  only, inside a row or a label line (Replace, Remove, Refresh). Destructive is
+  the error colour on a secondary shape, says so under it, and asks once more.
+- **A true-or-false setting is a switch** (`role="switch"`) at the right of its
+  label, with the consequence as a hint. A checkbox is for choosing from a list.
+- **A section** is a title (`font-size-heading`), one muted sentence that adds
+  something, then fields. Sections in one panel are divided by a rule, not
+  boxed: a card inside a card is always wrong, and `AiSettings` is already one.
+- **A panel over the page** opens with a title, a rule under it and a close
+  button in the top right corner, by way of one shared header component. The
+  launcher's is `PanelHeader`; Log, Knowledge, Backlog and Settings all use it.
+- **Focus** is the focus-ring tokens on every control, icons included.
+
+`ai.css` holds the reference implementation. Its lengths are `--ai-*`
+properties that follow the `--autoapp-*` control tokens and fall back to their
+defaults, so the settings panel and a rendered form on one page are one set, and
+a preset that changes the tokens changes both. This is the one place a layer
+outside the renderer reads `--autoapp-*`, and it reads lengths only: colour
+still comes from the seven. `tests/autoapp-theme.test.ts` holds each fallback to
+the table, and holds every launcher panel to the shared header.
+
 ## How it grows
 
 - **A renderer kind** is added in `packages/broapp-autoapp`: the view schema,

@@ -26,6 +26,7 @@ import { countdown, isUrgent } from 'broapp/shared';
 import type { OperationOutput } from 'broapp/shared';
 
 import type { LauncherContract } from '../contract.ts';
+import { PanelHeader } from './PanelHeader.tsx';
 
 type IntentSummary = OperationOutput<LauncherContract, 'launcher.intentsList'>['intents'][number];
 type IntentDetail = OperationOutput<LauncherContract, 'launcher.intentGet'>;
@@ -116,19 +117,13 @@ function Frame({
 }): React.ReactElement {
   return (
     <aside aria-label="Backlog" className="launcher__logs launcher__k launcher__intent">
-      <div className="launcher__settings-header">
-        <h2 className="launcher__card-title">Backlog</h2>
-        <div className="launcher__row-actions">
-          {onRefresh === undefined ? null : (
-            <button className="launcher__button launcher__button--small" onClick={onRefresh} type="button">
-              Refresh
-            </button>
-          )}
-          <button className="launcher__button launcher__button--small" onClick={onClose} type="button">
-            Close
+      <PanelHeader onClose={onClose} title="Backlog">
+        {onRefresh === undefined ? null : (
+          <button className="launcher__button launcher__button--small" onClick={onRefresh} type="button">
+            Refresh
           </button>
-        </div>
-      </div>
+        )}
+      </PanelHeader>
       {children}
     </aside>
   );

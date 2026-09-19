@@ -122,6 +122,13 @@ this is the checklist.
   row in `AUTOAPP_TOKENS` with a purpose and both schemes, never a value in a
   stylesheet. Portalled content carries `.broapp-tokens`, or it reads no tokens
   at all.
+- **The shared controls, before a new one.** A field, a hint, a switch, the
+  three weights of action, a section and a panel's header are already decided
+  in ["One set of controls"](../../docs/autoapp/components.md#one-set-of-controls).
+  A component uses them as they are: the same height, corner and border as the
+  control beside it, "Required" on the label's line and not in it, no card
+  inside a card, and the shared header on anything that opens over the page. A
+  control that vocabulary lacks is added to that section first, then drawn.
 - **The reference topic.** If an engineer can ask for it, the engineer is told
   about it: a kind goes in the `views` topic, a token in `theme`, generated from
   the table rather than written beside it.

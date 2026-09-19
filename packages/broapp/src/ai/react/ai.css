@@ -9,23 +9,332 @@
  * components are still legible in an application that defines none.
  */
 
+/*
+ * The settings panel.
+ *
+ * One height, one radius and one border for every control, so a select, a
+ * field, the saved-key row and a button beside them sit on one line and read
+ * as one set. The frame — a card, or none — is the application's to draw.
+ *
+ * The lengths follow Autoapp's control tokens where an application has them,
+ * so this panel and a form the renderer draws on the same page are one set of
+ * controls; each falls back to that token's default, so an application with no
+ * renderer gets the same panel. An `--ai-*` property set on `.ai-settings` or
+ * above it beats both.
+ */
+.ai-settings {
+  --ai-control-height: 2.5rem;
+  --ai-control-radius: var(--autoapp-radius-sm, 7px);
+  --ai-border-width: var(--autoapp-border-width, 1px);
+  --ai-label-size: var(--autoapp-font-size-small, 0.85rem);
+  --ai-label-weight: var(--autoapp-weight-strong, 600);
+  --ai-control-size: var(--autoapp-font-size-note, 0.9rem);
+  --ai-hint-size: var(--autoapp-font-size-caption, 0.8rem);
+  --ai-focus-ring: var(--autoapp-focus-ring, var(--accent, #1f5f4f));
+  --ai-focus-ring-width: var(--autoapp-focus-ring-width, 2px);
+  --ai-focus-ring-offset: var(--autoapp-focus-ring-offset, 1px);
+
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.ai-settings__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.ai-settings__title {
+  margin: 0;
+}
+
+.ai-settings__lede {
+  margin: 0;
+  color: var(--text-muted, #6b6862);
+}
+
+.ai-settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.ai-settings__label-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ai-settings__label {
+  margin: 0;
+  font-size: var(--ai-label-size);
+  font-weight: var(--ai-label-weight);
+  color: var(--text, #1b1a18);
+}
+
+.ai-settings__meta {
+  font-size: var(--ai-hint-size);
+  color: var(--text-muted, #6b6862);
+}
+
+.ai-settings__meta--ok {
+  color: var(--ok, #1f5f4f);
+}
+
+.ai-settings__hint {
+  margin: 0;
+  font-size: var(--ai-hint-size);
+  line-height: 1.45;
+  color: var(--text-muted, #6b6862);
+}
+
+.ai-settings__icon {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+}
+
+.ai-settings__input,
+.ai-settings__saved-key {
+  width: 100%;
+  min-width: 0;
+  height: var(--ai-control-height);
+  padding: 0 0.75rem;
+  border: var(--ai-border-width) solid var(--border, #e3e2df);
+  border-radius: var(--ai-control-radius);
+  background: var(--surface, #ffffff);
+  font: inherit;
+  font-size: var(--ai-control-size);
+  color: var(--text, #1b1a18);
+}
+
+.ai-settings__input::placeholder {
+  color: var(--text-muted, #6b6862);
+  opacity: 0.8;
+}
+
+.ai-settings__input:hover:not(:disabled) {
+  border-color: var(--text-muted, #6b6862);
+}
+
+.ai-settings__input:focus-visible,
+.ai-settings__button:focus-visible,
+.ai-settings__inline-action:focus-visible,
+.ai-settings__switch:focus-visible {
+  outline: var(--ai-focus-ring-width) solid var(--ai-focus-ring);
+  outline-offset: var(--ai-focus-ring-offset);
+}
+
+.ai-settings__input:disabled {
+  opacity: 0.6;
+}
+
+.ai-settings__select {
+  position: relative;
+  display: block;
+}
+
+.ai-settings__select select {
+  appearance: none;
+  padding-right: 2.25rem;
+  text-overflow: ellipsis;
+}
+
+.ai-settings__select .ai-settings__icon {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  translate: 0 -50%;
+  color: var(--text-muted, #6b6862);
+  pointer-events: none;
+}
+
 .ai-settings__key {
   display: flex;
   gap: 0.5rem;
   align-items: center;
 }
 
-.ai-settings__key .input {
-  flex: 1 1 auto;
-  min-width: 0;
+/* The saved key: what a field looks like when there is nothing to type. */
+.ai-settings__saved-key {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  padding-right: 0.25rem;
 }
 
-.ai-settings__remember {
-  display: flex;
-  gap: 0.5rem;
+.ai-settings__saved-key .ai-settings__icon {
+  color: var(--text-muted, #6b6862);
+}
+
+.ai-settings__key-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.ai-settings__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* A quiet action inside a row: Replace, Remove, Refresh. */
+.ai-settings__inline-action {
+  display: inline-flex;
+  flex: none;
+  gap: 0.35rem;
   align-items: center;
-  margin-top: 0.75rem;
-  font-weight: 400;
+  padding: 0.3rem 0.55rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted, #6b6862);
+  cursor: pointer;
+}
+
+.ai-settings__inline-action:hover:not(:disabled) {
+  background: var(--bg, #fbfbfa);
+  color: var(--text, #1b1a18);
+}
+
+.ai-settings__inline-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-settings__saved-key .ai-settings__inline-action + .ai-settings__inline-action {
+  position: relative;
+  margin-left: 0.3rem;
+}
+
+.ai-settings__saved-key .ai-settings__inline-action + .ai-settings__inline-action::before {
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: -0.2rem;
+  width: 1px;
+  background: var(--border, #e3e2df);
+  content: '';
+}
+
+/* Pulled up so the label row is no taller than one without a button. */
+.ai-settings__inline-action--icon {
+  margin: -0.3rem -0.55rem -0.3rem 0;
+}
+
+.ai-settings__button {
+  flex: none;
+  height: var(--ai-control-height);
+  padding: 0 1rem;
+  border: var(--ai-border-width) solid var(--border, #e3e2df);
+  border-radius: var(--ai-control-radius);
+  background: var(--surface, #ffffff);
+  font: inherit;
+  font-size: var(--ai-control-size);
+  font-weight: var(--ai-label-weight);
+  color: var(--text, #1b1a18);
+  cursor: pointer;
+  transition: filter 150ms ease-out;
+}
+
+.ai-settings__button--primary {
+  border-color: transparent;
+  background: var(--accent, #1f5f4f);
+  color: var(--accent-contrast, #ffffff);
+}
+
+.ai-settings__button--block {
+  width: 100%;
+}
+
+.ai-settings__button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.ai-settings__button:active:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.ai-settings__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-settings__switch-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+
+/* A checkbox, drawn as the switch it is announced as. */
+.ai-settings__switch {
+  position: relative;
+  flex: none;
+  width: 2.25rem;
+  height: 1.3rem;
+  margin: 0;
+  border: var(--ai-border-width) solid var(--border, #e3e2df);
+  border-radius: 999px;
+  background: var(--bg, #fbfbfa);
+  appearance: none;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out;
+}
+
+.ai-settings__switch::after {
+  position: absolute;
+  top: 50%;
+  left: 0.15rem;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  background: var(--text-muted, #6b6862);
+  content: '';
+  translate: 0 -50%;
+  transition:
+    translate 150ms cubic-bezier(0.25, 1, 0.5, 1),
+    background-color 150ms ease-out;
+}
+
+.ai-settings__switch:checked {
+  border-color: transparent;
+  background: var(--accent, #1f5f4f);
+}
+
+.ai-settings__switch:checked::after {
+  background: var(--accent-contrast, #ffffff);
+  translate: 0.95rem -50%;
+}
+
+.ai-settings__switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-settings__switch,
+  .ai-settings__switch::after,
+  .ai-settings__button {
+    transition: none;
+  }
 }
 
 /*
@@ -33,12 +342,31 @@
  * question a user should have to open a menu to answer.
  */
 .ai-settings__notice {
-  margin: 0.75rem 0;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--border, #e3e2df);
-  border-radius: var(--radius, 10px);
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  margin: 0;
   color: var(--text-muted, #6b6862);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.ai-settings__notice .ai-settings__icon {
+  margin-top: 0.15rem;
+}
+
+.ai-settings__message {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.ai-settings__message--error {
+  color: var(--bad, #96311f);
+}
+
+.ai-settings__message--ok {
+  color: var(--ok, #1f5f4f);
 }
 
 .ai-chat__messages {

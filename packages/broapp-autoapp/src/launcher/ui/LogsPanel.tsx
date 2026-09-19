@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOperation } from 'broapp/react';
 
 import type { LauncherContract } from '../contract.ts';
+import { PanelHeader } from './PanelHeader.tsx';
 
 type Level = 'all' | 'warn' | 'error';
 
@@ -87,12 +88,7 @@ export function LogsPanel({ apps, onClose }: LogsPanelProps): React.ReactElement
 
   return (
     <aside aria-label="Log" className="launcher__logs">
-      <div className="launcher__settings-header">
-        <h2 className="launcher__card-title">Log</h2>
-        <button className="launcher__button launcher__button--small" onClick={onClose} type="button">
-          Close
-        </button>
-      </div>
+      <PanelHeader onClose={onClose} title="Log" />
 
       <div className="launcher__log-controls">
         <label className="launcher__log-control">

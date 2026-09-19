@@ -42,6 +42,7 @@ import {
   Plus,
   ScrollText,
   SlidersHorizontal,
+  Trash2,
 } from 'lucide-react';
 
 import type { LauncherContract } from '../contract.ts';
@@ -53,6 +54,7 @@ import { KnowledgePanel } from './KnowledgePanel.tsx';
 import { LogsPanel } from './LogsPanel.tsx';
 import { startOverviewPoller, type LauncherView } from './overview-poll.ts';
 import { OverviewScreen, type NeedsYouTarget } from './OverviewScreen.tsx';
+import { PanelHeader } from './PanelHeader.tsx';
 import { LauncherStopped, QuitControl } from './QuitControl.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
 import { readScheme, applyScheme, SCHEME_KEY } from './scheme.ts';
@@ -861,28 +863,20 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
             type="button"
           />
           <aside aria-label="Settings" className="launcher__settings" ref={settingsRef}>
-            <div className="launcher__settings-header">
-              <h2 className="launcher__card-title">Settings</h2>
-              <button
-                className="launcher__button launcher__button--small"
-                onClick={() => setShowSettings(false)}
-                type="button"
-              >
-                Close
-              </button>
-            </div>
+            <PanelHeader onClose={() => setShowSettings(false)} title="Settings" />
             <AiSettings />
-            <section className="launcher__card">
-              <h2 className="launcher__card-title">Conversations</h2>
-              <p className="launcher__lede">
-                Every conversation is kept on this computer, in the launcher&apos;s own data
-                directory.
-              </p>
+            <section aria-labelledby="launcher-conversations-title" className="launcher__section">
+              <header className="launcher__section-header">
+                <h2 className="launcher__section-title" id="launcher-conversations-title">
+                  Conversations
+                </h2>
+                <p className="launcher__section-lede">Conversations are stored on this computer.</p>
+              </header>
               {confirmClear ? (
-                <div className="launcher__row-actions">
-                  <span>Delete every conversation?</span>
+                <div className="launcher__confirm" role="group" aria-label="Delete every conversation?">
+                  <span className="launcher__confirm-question">Delete every conversation?</span>
                   <button
-                    className="launcher__button launcher__button--small"
+                    className="launcher__button launcher__button--control launcher__button--danger"
                     onClick={() => {
                       setConfirmClear(false);
                       setActiveId(null);
@@ -893,7 +887,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
                     Delete all
                   </button>
                   <button
-                    className="launcher__button launcher__button--small"
+                    className="launcher__button launcher__button--control"
                     onClick={() => setConfirmClear(false)}
                     type="button"
                   >
@@ -901,13 +895,17 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
                   </button>
                 </div>
               ) : (
-                <button
-                  className="launcher__button launcher__button--small"
-                  onClick={() => setConfirmClear(true)}
-                  type="button"
-                >
-                  Clear all conversations
-                </button>
+                <>
+                  <button
+                    className="launcher__button launcher__button--control launcher__button--block launcher__button--danger"
+                    onClick={() => setConfirmClear(true)}
+                    type="button"
+                  >
+                    <Trash2 aria-hidden="true" size={16} />
+                    Clear all conversations
+                  </button>
+                  <p className="launcher__section-hint">You&rsquo;ll be asked to confirm before anything is deleted.</p>
+                </>
               )}
             </section>
           </aside>
