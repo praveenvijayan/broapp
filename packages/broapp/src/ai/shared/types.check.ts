@@ -55,6 +55,12 @@ const unavailableMatch: Equal<
 > = true;
 void unavailableMatch;
 
+const refreshMatchesList: Equal<
+  OperationOutput<AiContract, 'ai.modelsRefresh'>,
+  OperationOutput<AiContract, 'ai.modelsList'>
+> = true;
+void refreshMatchesList;
+
 const providerMatch: Equal<
   OperationOutput<AiContract, 'ai.providersList'>['providers'][number],
   ProviderInfo

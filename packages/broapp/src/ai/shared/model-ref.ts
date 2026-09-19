@@ -137,3 +137,43 @@ export function describeModel<M extends { provider: string; modelId: string; lab
   }
   return { name, where, problem: found.model === null ? 'not offered' : null };
 }
+
+/** Why a provider is under the model list, as a host older than 0.4.8 left it: failed. */
+export function unavailableReason(entry: {
+  readonly reason?: 'failed' | 'stale' | 'truncated' | undefined;
+}): 'failed' | 'stale' | 'truncated' {
+  return entry.reason ?? 'failed';
+}
+
+/** Said after where a provider runs, in a picker's heading, when its list is one it gave earlier. */
+export const LISTED_EARLIER = 'listed earlier';
+
+/**
+ * The line a person reads for a provider under the model list. A `stale`
+ * entry gains when its list was read — `…listed earlier, at 14:05.` today,
+ * `…listed earlier, on 12 Sept 2026.` another day — in the browser's own
+ * words for time; every other entry is the host's sentence as it came. The
+ * picker, Settings and the tier block all draw it from here, so the three
+ * cannot disagree.
+ */
+export function unavailableLine(
+  entry: {
+    readonly message: string;
+    readonly reason?: 'failed' | 'stale' | 'truncated' | undefined;
+    readonly listedAt?: number | undefined;
+  },
+  options: { readonly now?: number; readonly locale?: string; readonly timeZone?: string } = {},
+): string {
+  if (unavailableReason(entry) !== 'stale' || entry.listedAt === undefined) return entry.message;
+  const zone = options.timeZone === undefined ? {} : { timeZone: options.timeZone };
+  const day = new Intl.DateTimeFormat(options.locale, { ...zone, dateStyle: 'medium' });
+  const at = new Date(entry.listedAt);
+  const today = day.format(at) === day.format(new Date(options.now ?? Date.now()));
+  const when = today
+    ? `at ${new Intl.DateTimeFormat(options.locale, { ...zone, hour: '2-digit', minute: '2-digit', hour12: false }).format(at)}`
+    : `on ${day.format(at)}`;
+  const ending = `${LISTED_EARLIER}.`;
+  return entry.message.endsWith(ending)
+    ? `${entry.message.slice(0, -1)}, ${when}.`
+    : `${entry.message} Listed ${when}.`;
+}

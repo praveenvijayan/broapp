@@ -6,7 +6,16 @@
  */
 export { aiContract } from './contract.ts';
 export type { AiContract } from './contract.ts';
-export { describeModel, findModel, formatModelRef, parseModelRef, whereItRuns } from './model-ref.ts';
+export {
+  describeModel,
+  findModel,
+  formatModelRef,
+  LISTED_EARLIER,
+  parseModelRef,
+  unavailableLine,
+  unavailableReason,
+  whereItRuns,
+} from './model-ref.ts';
 export type { FoundModel, ModelDescription, ModelRef, ProviderPlace } from './model-ref.ts';
 export type {
   AiSettings,
@@ -20,4 +29,5 @@ export type {
   Thread,
   ToolPermission,
   UnavailableProvider,
+  UnavailableReason,
 } from './types.ts';

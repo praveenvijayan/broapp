@@ -336,7 +336,8 @@ is that a tool which changes anything has to be approved by the user.
 | `ai.settingsGet` | Current settings. Never contains the key. |
 | `ai.settingsUpdate` | Change one or more settings; returns the result. |
 | `ai.providersList` | The providers compiled into this build. |
-| `ai.modelsList` | Every enabled provider's models, asked at once, in the build's order, plus `unavailable`: the providers that could not be read, each with its sentence. It fails only when none could be read. |
+| `ai.modelsList` | Every enabled provider's models, asked at once, in the build's order, plus `unavailable`: each provider under the list with its sentence and a `reason` — `failed`, `stale` (the list it gave earlier, at `listedAt`) or `truncated`. A provider that answered in the last thirty seconds under the same address and key presence is not asked again. One that does not answer within five seconds, or fails, gives the list it gave last, if it has one. Lists are kept in memory only, and dropped when the provider's address or key changes or it is turned off. It fails only when there is nothing to show at all. |
+| `ai.modelsRefresh` | The same answer, with every enabled provider asked, however recently it answered: the Refresh button. |
 | `ai.connectionTest` | One cheap call to the provider in use, and what happened. |
 | `ai.providerTest` | The same for one named provider, with its own address and key, whether or not it is turned on. |
 | `ai.chat` (stream) | One turn. |

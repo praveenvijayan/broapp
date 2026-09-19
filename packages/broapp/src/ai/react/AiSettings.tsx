@@ -21,6 +21,7 @@
  */
 import * as React from 'react';
 
+import { unavailableLine, unavailableReason } from '../shared/model-ref.ts';
 import type { ProviderInfo, ProviderSettings } from '../shared/types.ts';
 
 import { useAiModels } from './use-ai-models.ts';
@@ -412,11 +413,13 @@ export function AiSettings(): React.ReactElement {
               </div>
               <Select
                 id="ai-model"
-                disabled={pending || models.pending}
+                // A list already shown stays choosable while a new one is read:
+                // "Loading" is for a select that has nothing in it yet.
+                disabled={pending || (models.pending && own.length === 0)}
                 value={settings?.modelId ?? ''}
                 onChange={(event) => void update({ modelId: event.target.value, target: provider.id })}
               >
-                <option value="">{models.pending ? 'Loading…' : 'Choose a model'}</option>
+                <option value="">{models.pending && own.length === 0 ? 'Loading…' : 'Choose a model'}</option>
                 {own.map((model) => (
                   <option key={model.modelId} value={model.modelId}>
                     {model.label}
@@ -428,11 +431,18 @@ export function AiSettings(): React.ReactElement {
                   {models.error.message}
                 </p>
               )}
-              {ownUnavailable.map((entry) => (
-                <p className="message message--error ai-settings__message ai-settings__message--error" key={entry.message} role="alert">
-                  {entry.message}
-                </p>
-              ))}
+              {ownUnavailable.map((entry) =>
+                // A list given earlier is still a list: said, quietly, not raised as an error.
+                unavailableReason(entry) === 'stale' ? (
+                  <p className="form__hint ai-settings__hint" key={entry.message} role="status">
+                    {unavailableLine(entry)}
+                  </p>
+                ) : (
+                  <p className="message message--error ai-settings__message ai-settings__message--error" key={entry.message} role="alert">
+                    {unavailableLine(entry)}
+                  </p>
+                ),
+              )}
             </div>
 
             <p className="ai-settings__notice" role="status">

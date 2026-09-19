@@ -14,7 +14,15 @@ import * as React from 'react';
 import { Check, ChevronDown, Eye } from 'lucide-react';
 import { Popover } from 'radix-ui';
 
-import { describeModel, findModel, formatModelRef, whereItRuns } from 'broapp/ai';
+import {
+  describeModel,
+  findModel,
+  formatModelRef,
+  LISTED_EARLIER,
+  unavailableLine,
+  unavailableReason,
+  whereItRuns,
+} from 'broapp/ai';
 import type { BroappModel, ProviderPlace, UnavailableProvider } from 'broapp/ai';
 import { useAiContext, useAiModels, useAiSettings } from 'broapp/ai/react';
 
@@ -78,10 +86,14 @@ function Mark({ provider }: { provider: string }): React.ReactElement {
   );
 }
 
-/** A group's heading: the provider's label, and where its models run. */
-function groupHeading(provider: string, providers: readonly ProviderPlace[]): string {
+/**
+ * A group's heading: the provider's label, where its models run, and
+ * `listed earlier` when the models are the list it gave last rather than now.
+ */
+export function groupHeading(provider: string, providers: readonly ProviderPlace[], stale = false): string {
   const place = providers.find((entry) => entry.id === provider);
-  return place === undefined ? provider : `${place.label} — ${whereItRuns(place)}`;
+  const heading = place === undefined ? provider : `${place.label} — ${whereItRuns(place)}`;
+  return stale ? `${heading} — ${LISTED_EARLIER}` : heading;
 }
 
 /**
@@ -136,7 +148,10 @@ export function BroappModelList({
           </CommandItem>
         </CommandGroup>
         {groups.map((group) => {
-          const heading = groupHeading(group.provider, providers);
+          const stale = unavailable.some(
+            (entry) => entry.provider === group.provider && unavailableReason(entry) === 'stale',
+          );
+          const heading = groupHeading(group.provider, providers, stale);
           return (
             <CommandGroup heading={heading} key={group.provider}>
               {group.models.map((model) => (
@@ -162,7 +177,7 @@ export function BroappModelList({
         })}
         {unavailable.map((entry) => (
           <p className="broapp-chat-picker__unavailable broapp-chat-option__muted" key={`${entry.provider} ${entry.message}`}>
-            {entry.message}
+            {unavailableLine(entry)}
           </p>
         ))}
       </CommandList>

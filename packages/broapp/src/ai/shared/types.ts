@@ -32,7 +32,19 @@ export interface BroappModel {
 export interface UnavailableProvider {
   provider: string;
   message: string;
+  /**
+   * Why the provider is under the list: `failed` (no models from it),
+   * `stale` (its models are the list it gave earlier, at `listedAt`) or
+   * `truncated` (its list was cut at its share). Every host from 0.4.8 on
+   * writes it; an entry without it, from an older host, reads as `failed`.
+   */
+  reason?: UnavailableReason;
+  /** When a `stale` list was read, in epoch milliseconds. */
+  listedAt?: number;
 }
+
+/** Why a provider appears under the model list. */
+export type UnavailableReason = 'failed' | 'stale' | 'truncated';
 
 /** A provider compiled into this application, as the browser sees it. */
 export interface ProviderInfo {

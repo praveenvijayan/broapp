@@ -19,6 +19,7 @@ import {
   BroappChatView,
   BroappModelList,
   BroappModelPicker,
+  groupHeading,
   moveLine,
   BroappSchemeToggle,
   BroappThreadList,
@@ -28,6 +29,9 @@ import {
   transcriptOf,
 } from 'broapp-ai-elements/ui';
 import type { BroappModel, Thread } from 'broapp/ai';
+import { unavailableLine } from 'broapp/ai';
+import { BroappError } from 'broapp/shared';
+import { modelsReducer, NO_MODELS } from '../packages/broapp/src/ai/react/use-ai-models.ts';
 import type { BroappUIMessage } from 'broapp-ai-elements';
 
 const NOW = 1_700_000_000_000;
@@ -629,5 +633,69 @@ describe('the top bar', () => {
 
     expect(html).toContain('Loading conversation…');
     expect(html).not.toContain('Ask me');
+  });
+});
+
+describe('18c: a list given earlier', () => {
+  const stale = {
+    provider: 'ollama',
+    message: 'Ollama (local) did not answer. These are the models it listed earlier.',
+    reason: 'stale' as const,
+    listedAt: new Date(2026, 8, 19, 14, 5).getTime(),
+  };
+
+  test('9: its line says when, from one function: a time today, a date another day', () => {
+    const sameDay = new Date(2026, 8, 19, 18, 0).getTime();
+    expect(unavailableLine(stale, { now: sameDay, locale: 'en-GB' })).toBe(
+      'Ollama (local) did not answer. These are the models it listed earlier, at 14:05.',
+    );
+    const nextWeek = new Date(2026, 8, 26, 9, 0).getTime();
+    // The month's abbreviation is the runtime's ICU data's to choose ("Sep" or "Sept").
+    expect(unavailableLine(stale, { now: nextWeek, locale: 'en-GB' })).toMatch(
+      /^Ollama \(local\) did not answer\. These are the models it listed earlier, on 19 Sept? 2026\.$/,
+    );
+    // Every other line is the host's own sentence.
+    expect(unavailableLine({ message: 'Could not reach Ollama (local).', reason: 'failed' })).toBe('Could not reach Ollama (local).');
+    expect(unavailableLine({ message: 'Could not reach Ollama (local).' })).toBe('Could not reach Ollama (local).');
+  });
+
+  test('9: the picker names the stale group listed earlier, and draws its line', () => {
+    const providers = [
+      { id: 'ollama', label: 'Ollama (local)', local: true },
+      { id: 'openrouter', label: 'OpenRouter', local: false },
+    ];
+    expect(groupHeading('ollama', providers, true)).toBe('Ollama (local) — on this computer — listed earlier');
+    expect(groupHeading('openrouter', providers)).toBe('OpenRouter — sent to OpenRouter');
+    const models: BroappModel[] = [
+      { provider: 'ollama', modelId: 'qwen3:27b', label: 'qwen3:27b', capabilities: { tools: true, vision: false, structuredOutput: true } },
+    ];
+    const html = renderToString(
+      <BroappModelList
+        models={models}
+        value={null}
+        defaultLabel="qwen3:27b"
+        onChange={() => undefined}
+        providers={providers}
+        activeProvider="ollama"
+        unavailable={[stale]}
+      />,
+    );
+    expect(html).toContain('listed earlier');
+    expect(html).toContain('These are the models it listed earlier, ');
+    // Still choosable.
+    expect(html).toContain('qwen3:27b');
+  });
+
+  test('10: a read that is pending keeps the models already shown; only a failure empties the list', () => {
+    const models: BroappModel[] = [
+      { provider: 'ollama', modelId: 'm', label: 'm', capabilities: { tools: true, vision: false, structuredOutput: true } },
+    ];
+    const shown = modelsReducer(NO_MODELS, { type: 'read', models, unavailable: [stale] });
+    const reading = modelsReducer(shown, { type: 'reading' });
+    expect(reading.pending).toBe(true);
+    expect(reading.models).toEqual(models);
+    expect(reading.unavailable).toEqual([stale]);
+    const failed = modelsReducer(reading, { type: 'failed', error: new BroappError('unavailable', 'down') });
+    expect(failed).toMatchObject({ models: [], unavailable: [], pending: false });
   });
 });

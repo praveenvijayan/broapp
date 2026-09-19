@@ -40,8 +40,24 @@ const providerInfo = s.object({
   defaultBaseUrl: s.nullable(s.string()),
 });
 
-/** A provider whose models are missing from the list, and the sentence that says why. */
-const unavailableProvider = s.object({ provider: s.string(), message: s.string() });
+/**
+ * A provider whose models are missing from the list, stale or cut short, and
+ * the sentence that says why. `reason` and `listedAt` are optional so a page
+ * reading an older host's answer still parses it.
+ */
+const unavailableProvider = s.object({
+  provider: s.string(),
+  message: s.string(),
+  reason: s.optional(s.enum(['failed', 'stale', 'truncated'])),
+  listedAt: s.optional(s.number()),
+});
+
+const modelsListOutput = s.object({
+  // Every enabled provider's models, in the build's provider order.
+  models: s.array(model, { max: 1000 }),
+  // The providers that could not be read, were read earlier, or were cut short, and why.
+  unavailable: s.array(unavailableProvider, { max: 50 }),
+});
 
 const connectionResult = s.object({ ok: s.boolean(), message: s.string(), latencyMs: s.number() });
 
@@ -185,13 +201,13 @@ export const aiContract = defineContract({
     },
     'ai.modelsList': {
       input: s.void(),
-      output: s.object({
-        // Every enabled provider's models, in the build's provider order.
-        models: s.array(model, { max: 1000 }),
-        // The providers that could not be read, or were cut short, and why.
-        unavailable: s.array(unavailableProvider, { max: 50 }),
-      }),
+      output: modelsListOutput,
       summary: 'The models every provider turned on in Settings offers.',
+    },
+    'ai.modelsRefresh': {
+      input: s.void(),
+      output: modelsListOutput,
+      summary: 'Ask every provider turned on in Settings for its models again, however recently it answered.',
     },
     'ai.connectionTest': {
       input: s.void(),

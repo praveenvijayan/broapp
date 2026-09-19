@@ -23,9 +23,10 @@ import type { HostApp, HostLogger, StreamSink } from '../../host/app.ts';
 import { isPublicError, publicError, type PublicError } from '../../shared/errors.ts';
 import { aiContract, type AiContract } from '../shared/contract.ts';
 import { formatModelRef } from '../shared/model-ref.ts';
-import type { BroappModel, ChatTurn, ProviderInfo } from '../shared/types.ts';
+import type { AiSettings, BroappModel, ChatTurn, ProviderInfo, UnavailableProvider } from '../shared/types.ts';
 
-import { AdapterError, toPublicError, type AdapterConfig, type ProviderAdapter } from './adapter.ts';
+import { AdapterError, type AdapterConfig, type ProviderAdapter } from './adapter.ts';
+import { createModelLists } from './model-lists.ts';
 import { createRegistry, type Registry } from './registry.ts';
 import { runChat, type RunDeps } from './run.ts';
 import type { ChatEvent } from './run-types.ts';
@@ -175,6 +176,19 @@ export interface CreateAiOptions {
    * ignored, like the others.
    */
   readonly onUsageSoFar?: (runId: string, soFar: { inputTokens: number; outputTokens: number }) => void;
+  /**
+   * How long a model listing waits for a provider before it shows the list
+   * that provider gave last. Default 5_000 ms. A connection test keeps its own
+   * twenty seconds: a person who pressed Test is waiting for that one answer.
+   */
+  readonly modelListTimeoutMs?: number;
+  /**
+   * How young a provider's last list must be to answer `ai.modelsList`
+   * without asking it again. Default 30_000 ms. `ai.modelsRefresh` ignores it.
+   */
+  readonly modelListFreshMs?: number;
+  /** The clock kept lists are dated by. Defaults to `Date.now`; tests inject one. */
+  readonly now?: () => number;
 }
 
 /**
@@ -226,7 +240,10 @@ export interface Ai {
 const ANSWER_ATTEMPTS = 200;
 const ANSWER_INTERVAL_MS = 5;
 
-/** How long a provider is given to answer a listing or a connection test. */
+/**
+ * How long a provider is given to answer a connection test, and how long a
+ * request for its list may run after the listing has stopped waiting for it.
+ */
 const PROVIDER_TIMEOUT_MS = 20_000;
 
 /** The contract's bound on `ai.modelsList`, over every provider's list together. */
@@ -241,10 +258,11 @@ const NOT_SET_UP = 'AI is not set up yet. Open Settings to choose a provider.';
  */
 const NO_MODEL = '-';
 
-/** One provider's list, read. */
+/** One provider's list, read now or, when `stale` is set, kept from earlier. */
 interface Listed {
   readonly adapter: ProviderAdapter;
   readonly models: BroappModel[];
+  readonly stale?: { readonly listedAt: number; readonly message: string };
 }
 
 /** One provider that could not be listed, and the error that says why. */
@@ -300,6 +318,34 @@ export function fairShares(lengths: readonly number[], limit: number): number[] 
 const DEFAULT_CONTEXT_BUDGET_CHARS = 40_000;
 const DEFAULT_MAX_STEPS = 8;
 const DEFAULT_CONFIRM_TIMEOUT_MS = 300_000;
+const DEFAULT_MODEL_LIST_TIMEOUT_MS = 5_000;
+const DEFAULT_MODEL_LIST_FRESH_MS = 30_000;
+
+/**
+ * The providers whose kept list `patch` makes wrong: its address changed, its
+ * key was set or cleared, or it was turned off. Changing `remember`, a model,
+ * or which provider is in use drops nothing — none of them changes what a
+ * provider would list.
+ */
+function listsToDrop(
+  before: AiSettings,
+  after: AiSettings,
+  patch: { readonly provider?: string | undefined; readonly target?: string | undefined; readonly apiKey?: string | null | undefined },
+): string[] {
+  const keyFor = patch.apiKey === undefined ? null : (patch.target ?? patch.provider ?? before.provider);
+  return after.providers
+    .filter((now) => {
+      const then = before.providers.find((entry) => entry.id === now.id);
+      if (then === undefined) return true;
+      return (
+        then.baseUrl !== now.baseUrl ||
+        then.hasKey !== now.hasKey ||
+        (then.enabled && !now.enabled) ||
+        now.id === keyFor
+      );
+    })
+    .map((entry) => entry.id);
+}
 
 /** Build the AI layer for one application. */
 export function createAi(options: CreateAiOptions): Ai {
@@ -347,7 +393,21 @@ export function createAi(options: CreateAiOptions): Ai {
   });
 
   host.operation('ai.settingsGet', () => registry.settings());
-  host.operation('ai.settingsUpdate', (input) => registry.update(input));
+  const modelLists = createModelLists({
+    deadlineMs: options.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
+    freshMs: options.modelListFreshMs ?? DEFAULT_MODEL_LIST_FRESH_MS,
+    requestTimeoutMs: PROVIDER_TIMEOUT_MS,
+    now: options.now ?? Date.now,
+  });
+
+  host.operation('ai.settingsUpdate', async (input) => {
+    const before = await registry.settings();
+    const after = await registry.update(input);
+    // What is remembered about a provider goes with the address, the key and
+    // the switch it was read under, as surely as what is sent to it does.
+    for (const id of listsToDrop(before, after, input)) modelLists.drop(id);
+    return after;
+  });
 
   host.operation('ai.providersList', () => ({
     providers: options.providers.map((adapter): ProviderInfo => {
@@ -365,40 +425,63 @@ export function createAi(options: CreateAiOptions): Ai {
     }),
   }));
 
-  host.operation('ai.modelsList', async () => {
+  host.operation('ai.modelsList', () => listModels({ fresh: true }));
+  // The Refresh button: every enabled provider is asked, whatever it answered
+  // a moment ago. Mounting a panel goes through `ai.modelsList` and is cheap.
+  host.operation('ai.modelsRefresh', () => listModels({ fresh: false }));
+
+  async function listModels({ fresh }: { readonly fresh: boolean }): Promise<{
+    models: BroappModel[];
+    unavailable: UnavailableProvider[];
+  }> {
     // Nothing set up is still "not set up", in today's words, whatever else is
     // turned on: a launcher with no provider in use has not been set up.
     await requireConfig();
     const settings = await registry.settings();
+    // A provider that is off is never listed, from memory either.
     const enabled = options.providers.filter((adapter) =>
       settings.providers.some((entry) => entry.id === adapter.id && entry.enabled),
     );
-    // Every enabled provider at once, each under its own deadline, so one that
-    // is slow or down costs its own group and not the whole list.
-    const answers = await Promise.all(enabled.map((adapter) => listOf(adapter)));
+    // Every enabled provider at once, each under the listing's own deadline,
+    // so one that is slow or down costs its own group and not the whole list.
+    const answers = await Promise.all(enabled.map((adapter) => listOf(adapter, fresh)));
     const read = answers.filter((answer): answer is Listed => 'models' in answer);
-    const failed = answers.filter((answer): answer is Unlisted => 'failure' in answer);
     if (read.length === 0) {
-      // An application with one provider sees exactly what it saw: that
-      // provider's own error. With several, the first in the build's order.
-      const first = failed[0];
+      // Nothing to show at all. An application with one provider sees exactly
+      // what it saw: that provider's own error. With several, the first in the
+      // build's order.
+      const first = answers.find((answer): answer is Unlisted => 'failure' in answer);
       throw first === undefined ? publicError.unavailable(NOT_SET_UP) : first.failure;
     }
     const shares = fairShares(read.map((answer) => answer.models.length), MAX_LISTED_MODELS);
-    const unavailable = failed.map((answer) => ({ provider: answer.adapter.id, message: answer.failure.message }));
+    const unavailable: UnavailableProvider[] = [];
     const models: BroappModel[] = [];
-    read.forEach((answer, index) => {
-      const share = shares[index] ?? 0;
+    // In the build's order, so each provider's lines sit where its group does.
+    for (const answer of answers) {
+      if ('failure' in answer) {
+        unavailable.push({ provider: answer.adapter.id, message: answer.failure.message, reason: 'failed' });
+        continue;
+      }
+      if (answer.stale !== undefined) {
+        unavailable.push({
+          provider: answer.adapter.id,
+          message: answer.stale.message,
+          reason: 'stale',
+          listedAt: answer.stale.listedAt,
+        });
+      }
+      const share = shares[read.indexOf(answer)] ?? 0;
       models.push(...answer.models.slice(0, share));
       if (share < answer.models.length) {
         unavailable.push({
           provider: answer.adapter.id,
           message: `${answer.adapter.label}: only the first ${String(share)} models are shown.`,
+          reason: 'truncated',
         });
       }
-    });
+    }
     return { models, unavailable };
-  });
+  }
 
   host.operation('ai.connectionTest', async () => {
     // `resolve()` rather than `currentConfig()`: testing a connection that is
@@ -448,14 +531,22 @@ export function createAi(options: CreateAiOptions): Ai {
    * or address is missing is not asked: `resolve` names what is missing, in
    * the same words a turn would hear, so the rule stays written once.
    */
-  async function listOf(adapter: ProviderAdapter): Promise<Listed | Unlisted> {
+  async function listOf(adapter: ProviderAdapter, fresh: boolean): Promise<Listed | Unlisted> {
+    let config: AdapterConfig;
     try {
-      const { config } = await registry.resolve({ modelId: formatModelRef(adapter.id, NO_MODEL) });
-      return { adapter, models: await adapter.models(config, AbortSignal.timeout(PROVIDER_TIMEOUT_MS)) };
+      ({ config } = await registry.resolve({ modelId: formatModelRef(adapter.id, NO_MODEL) }));
     } catch (cause) {
-      if (cause instanceof AdapterError) return { adapter, failure: toPublicError(cause) };
       if (isPublicError(cause)) return { adapter, failure: cause };
       throw cause;
+    }
+    const outcome = await modelLists.list(adapter, config, { fresh });
+    switch (outcome.kind) {
+      case 'listed':
+        return { adapter, models: outcome.models };
+      case 'stale':
+        return { adapter, models: outcome.models, stale: { listedAt: outcome.listedAt, message: outcome.message } };
+      case 'failed':
+        return { adapter, failure: outcome.failure };
     }
   }
 

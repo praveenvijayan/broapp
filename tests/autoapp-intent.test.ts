@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -51,7 +51,13 @@ import {
 } from 'broapp-autoapp/launcher';
 import { layout, type Layout } from 'broapp-autoapp/spec';
 
-import { BACKLOG_EMPTY, IntentPanel, TierModelsBlock, inheritedModel } from '../packages/broapp-autoapp/src/launcher/ui/IntentPanel.tsx';
+import {
+  BACKLOG_EMPTY,
+  IntentPanel,
+  TierModelsBlock,
+  inheritedModel,
+  tierProblem,
+} from '../packages/broapp-autoapp/src/launcher/ui/IntentPanel.tsx';
 import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
 import { harness, type Harness } from './harness.ts';
 
@@ -726,5 +732,59 @@ describe('the launcher tab', () => {
 
     const down = draw(['ollama', 'openrouter'], [{ provider: 'ollama', message: 'Could not reach Ollama (local).' }]);
     expect(down).toContain('The light tier names Ollama (local), which cannot be reached: Could not reach Ollama (local).');
+  });
+
+  test('18c: a tier warns only for a provider that failed, read from its reason; a stale group is quieter and still choosable', () => {
+    const model = (provider: string, modelId: string, label: string) =>
+      ({ provider, modelId, label, capabilities: { tools: true, vision: false, structuredOutput: false } }) as Parameters<typeof inheritedModel>[2][number];
+    const models = [model('ollama', 'qwen3:27b', 'qwen3:27b'), model('openrouter', 'anthropic/claude-opus-5', 'Claude Opus 5')];
+    const providers = [
+      { id: 'ollama', label: 'Ollama (local)', local: true },
+      { id: 'openrouter', label: 'OpenRouter', local: false },
+    ];
+    const places = (unavailable: { provider: string; message: string; reason?: 'failed' | 'stale' | 'truncated'; listedAt?: number }[]) => ({
+      providers,
+      enabled: ['ollama', 'openrouter'],
+      activeProvider: 'ollama',
+      unavailable,
+    });
+    const ref = 'ollama:qwen3:27b';
+    expect(tierProblem('light', ref, models, places([{ provider: 'ollama', message: 'Could not reach Ollama (local).', reason: 'failed' }]))).toBe(
+      'The light tier names Ollama (local), which cannot be reached: Could not reach Ollama (local).',
+    );
+    // An older host's entry, with no reason, is a failure.
+    expect(tierProblem('light', ref, models, places([{ provider: 'ollama', message: 'Could not reach Ollama (local).' }]))).not.toBeNull();
+    const stale = {
+      provider: 'ollama',
+      message: 'Ollama (local) did not answer. These are the models it listed earlier.',
+      reason: 'stale' as const,
+      listedAt: Date.now(),
+    };
+    expect(tierProblem('light', ref, models, places([stale]))).toBeNull();
+    expect(tierProblem('light', ref, models, places([{ provider: 'ollama', message: 'Ollama (local): only the first 3 models are shown.', reason: 'truncated' }]))).toBeNull();
+
+    const markup = renderToString(
+      createElement(TierModelsBlock, {
+        value: { light: ref, standard: null, deep: null },
+        models,
+        places: places([stale]),
+        settingsModel: 'qwen3:27b',
+        unreadable: false,
+        error: null,
+        onChange: () => undefined,
+      }),
+    ).replaceAll('<!-- -->', '');
+    expect(markup).not.toContain('cannot be reached');
+    expect(markup).not.toContain('role="alert"');
+    expect(markup).toContain('label="Ollama (local) — on this computer — listed earlier"');
+    expect(markup).toContain('These are the models it listed earlier, at ');
+    expect(markup).toContain('value="ollama:qwen3:27b"');
+  });
+
+  test('18c: no source under packages/ tells a reason from a sentence', () => {
+    const offenders = [...new Bun.Glob('packages/*/src/**/*.{ts,tsx}').scanSync({ cwd: join(import.meta.dir, '..') })].filter((file) =>
+      readFileSync(join(import.meta.dir, '..', file), 'utf8').includes("includes('only the first')"),
+    );
+    expect(offenders).toEqual([]);
   });
 });

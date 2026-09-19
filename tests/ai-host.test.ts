@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { AdapterError, createAi, createFakeAdapter, guardedTool } from 'broapp/ai/host';
-import type { ProviderAdapter } from 'broapp/ai/host';
+import type { CreateAiOptions, ProviderAdapter } from 'broapp/ai/host';
 import { aiContract, describeModel, findModel } from 'broapp/ai';
 import { createGate, createHostApp } from 'broapp/host';
 import { defineContract, mergeContracts, s } from 'broapp/shared';
@@ -38,7 +38,11 @@ let live: Harness | null = null;
 let directory = '';
 
 /** Start a bridge with the application and the AI layer mounted side by side. */
-async function start(adapter: ProviderAdapter | readonly ProviderAdapter[], dataDir?: string): Promise<Harness> {
+async function start(
+  adapter: ProviderAdapter | readonly ProviderAdapter[],
+  dataDir?: string,
+  extra: Pick<CreateAiOptions, 'modelListTimeoutMs' | 'modelListFreshMs' | 'now'> = {},
+): Promise<Harness> {
   directory = dataDir ?? (await mkdtemp(join(tmpdir(), 'broapp-ai-host-')));
   const app = createHostApp(appContract);
   app.operation('demo.ping', () => ({ pong: true }));
@@ -49,6 +53,7 @@ async function start(adapter: ProviderAdapter | readonly ProviderAdapter[], data
     // Injected and never called: a test that can reach the network is a test
     // that can fail for reasons that have nothing to do with the code.
     fetch: noNetwork,
+    ...extra,
   });
   live = await harness((bridge) => {
     app.mount(bridge);
@@ -612,7 +617,7 @@ describe('18b: one list of every enabled provider’s models', () => {
     await client.call('ai.settingsUpdate', { target: 'second', enabled: true });
     expect(await client.call('ai.modelsList', undefined)).toEqual({
       models: [expect.objectContaining({ provider: 'second', modelId: 'second-1' })],
-      unavailable: [{ provider: 'first', message: 'Could not reach Provider first.' }],
+      unavailable: [{ provider: 'first', message: 'Could not reach Provider first.', reason: 'failed' }],
     });
   });
 
@@ -631,7 +636,7 @@ describe('18b: one list of every enabled provider’s models', () => {
     await client.call('ai.settingsUpdate', { provider: 'first', modelId: 'first-1' });
     await client.call('ai.settingsUpdate', { target: 'keyed', enabled: true });
     const listed = await client.call('ai.modelsList', undefined);
-    expect(listed.unavailable).toEqual([{ provider: 'keyed', message: 'An API key is required for Provider keyed.' }]);
+    expect(listed.unavailable).toEqual([{ provider: 'keyed', message: 'An API key is required for Provider keyed.', reason: 'failed' }]);
     expect(keyed.asked()).toBe(0);
   });
 
@@ -656,7 +661,247 @@ describe('18b: one list of every enabled provider’s models', () => {
     const listed = await client.call('ai.modelsList', undefined);
     expect(listed.models).toHaveLength(1000);
     expect(listed.models.filter((model) => model.provider === 'second')).toHaveLength(20);
-    expect(listed.unavailable).toEqual([{ provider: 'first', message: 'Provider first: only the first 980 models are shown.' }]);
+    expect(listed.unavailable).toEqual([
+      { provider: 'first', message: 'Provider first: only the first 980 models are shown.', reason: 'truncated' },
+    ]);
+  });
+});
+
+/**
+ * A provider whose list request answers, hangs or fails as the test says,
+ * counting requests and recording the address each was sent to.
+ */
+function controlled(id: string): ProviderAdapter & {
+  mode: 'answer' | 'hang' | 'fail';
+  asked: () => number;
+  addresses: (string | null)[];
+  release: () => void;
+  failHanging: () => void;
+} {
+  const models = [
+    {
+      provider: id,
+      modelId: `${id}-1`,
+      label: `${id} 1`,
+      capabilities: { tools: true, vision: false, structuredOutput: true },
+    },
+  ];
+  const hanging: { resolve: () => void; reject: (cause: unknown) => void }[] = [];
+  let asked = 0;
+  const fake = createFakeAdapter({ id });
+  const adapter = {
+    ...fake,
+    label: `Provider ${id}`,
+    mode: 'answer' as 'answer' | 'hang' | 'fail',
+    addresses: [] as (string | null)[],
+    asked: () => asked,
+    models: (config: { baseUrl: string | null }) => {
+      asked += 1;
+      adapter.addresses.push(config.baseUrl);
+      if (adapter.mode === 'fail') return Promise.reject(new AdapterError('network', `Could not reach Provider ${id}.`));
+      if (adapter.mode === 'answer') return Promise.resolve([...models]);
+      return new Promise<typeof models>((resolve, reject) => {
+        hanging.push({ resolve: () => resolve([...models]), reject });
+      });
+    },
+    release: () => {
+      for (const waiting of hanging.splice(0)) waiting.resolve();
+    },
+    failHanging: () => {
+      for (const waiting of hanging.splice(0)) waiting.reject(new AdapterError('network', `Could not reach Provider ${id}.`));
+    },
+  };
+  return adapter;
+}
+
+/** Let settled promises run their handlers. */
+const settle = (): Promise<void> => Bun.sleep(5);
+
+describe('18c: a model list that does not wait for its slowest provider', () => {
+  const DEADLINE = 120;
+  const FRESH = 30_000;
+
+  const connectMerged = (test: Harness) => test.connect(merged);
+
+  async function two(): Promise<{
+    client: Awaited<ReturnType<typeof connectMerged>>;
+    first: ReturnType<typeof controlled>;
+    second: ReturnType<typeof controlled>;
+    clock: { now: number };
+  }> {
+    const first = controlled('first');
+    const second = controlled('second');
+    const clock = { now: 1_000_000 };
+    const test = await start([first, second], undefined, {
+      modelListTimeoutMs: DEADLINE,
+      modelListFreshMs: FRESH,
+      now: () => clock.now,
+    });
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'first', modelId: 'first-1' });
+    await client.call('ai.settingsUpdate', { target: 'second', enabled: true });
+    return { client, first, second, clock };
+  }
+
+  test('1: a provider that never answers costs the list deadline, then gives what it listed last', async () => {
+    const { client, second, clock } = await two();
+    second.mode = 'hang';
+    const started = performance.now();
+    const cold = await client.call('ai.modelsList', undefined);
+    const took = performance.now() - started;
+    // The list deadline, not the twenty seconds a connection test gets.
+    expect(took).toBeGreaterThanOrEqual(DEADLINE - 10);
+    expect(took).toBeLessThan(2_000);
+    expect(cold.models.map((model) => model.modelId)).toEqual(['first-1']);
+    expect(cold.unavailable).toEqual([{ provider: 'second', message: 'Provider second did not answer.', reason: 'failed' }]);
+
+    second.release();
+    await settle();
+    const answeredAt = clock.now;
+    second.mode = 'hang';
+    clock.now += FRESH + 1;
+    const stale = await client.call('ai.modelsList', undefined);
+    expect(stale.models.map((model) => model.modelId)).toEqual(['first-1', 'second-1']);
+    expect(stale.unavailable).toEqual([
+      {
+        provider: 'second',
+        message: 'Provider second did not answer. These are the models it listed earlier.',
+        reason: 'stale',
+        listedAt: answeredAt,
+      },
+    ]);
+  });
+
+  test('2: inside the fresh window a list is its own answer; after it, the provider is asked; calls together share one request', async () => {
+    const { client, first, second, clock } = await two();
+    await client.call('ai.modelsList', undefined);
+    await client.call('ai.modelsList', undefined);
+    expect([first.asked(), second.asked()]).toEqual([1, 1]);
+    clock.now += FRESH;
+    await client.call('ai.modelsList', undefined);
+    expect([first.asked(), second.asked()]).toEqual([2, 2]);
+
+    clock.now += FRESH;
+    second.mode = 'hang';
+    const three = Promise.all([
+      client.call('ai.modelsList', undefined),
+      client.call('ai.modelsList', undefined),
+      client.call('ai.modelsList', undefined),
+    ]);
+    await settle();
+    second.release();
+    const answers = await three;
+    expect([first.asked(), second.asked()]).toEqual([3, 3]);
+    for (const answer of answers) expect(answer.models).toHaveLength(2);
+  });
+
+  test('3: ai.modelsRefresh asks every provider inside the fresh window', async () => {
+    const { client, first, second } = await two();
+    await client.call('ai.modelsList', undefined);
+    const refreshed = await client.call('ai.modelsRefresh', undefined);
+    expect(refreshed.models).toHaveLength(2);
+    expect([first.asked(), second.asked()]).toEqual([2, 2]);
+  });
+
+  test('4: a late answer is kept for the next call; a late failure raises nothing', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const { client, second } = await two();
+      second.mode = 'hang';
+      const timedOut = await client.call('ai.modelsList', undefined);
+      expect(timedOut.unavailable.map((entry) => entry.reason)).toEqual(['failed']);
+      second.release();
+      await settle();
+      const next = await client.call('ai.modelsList', undefined);
+      expect(second.asked()).toBe(1);
+      expect(next.models.map((model) => model.modelId)).toEqual(['first-1', 'second-1']);
+      expect(next.unavailable).toEqual([]);
+
+      // Late, and failing: nobody is listening any more, and nothing is thrown.
+      second.mode = 'answer';
+      const again = await client.call('ai.modelsRefresh', undefined);
+      expect(again.unavailable).toEqual([]);
+      second.mode = 'hang';
+      const waited = await client.call('ai.modelsRefresh', undefined);
+      expect(waited.unavailable.map((entry) => entry.reason)).toEqual(['stale']);
+      second.failHanging();
+      await settle();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  test('5: an address, a key set or cleared, or a switch off and on drops what was kept; a model change does not', async () => {
+    const { client, second, clock } = await two();
+    const keptThen = async (change: () => Promise<unknown>): Promise<string | undefined> => {
+      second.mode = 'answer';
+      await client.call('ai.modelsRefresh', undefined);
+      await change();
+      second.mode = 'fail';
+      clock.now += FRESH + 1;
+      const listed = await client.call('ai.modelsList', undefined);
+      expect(listed.models.some((model) => model.provider === 'second')).toBe(listed.unavailable[0]?.reason === 'stale');
+      return listed.unavailable.find((entry) => entry.provider === 'second')?.reason;
+    };
+    expect(await keptThen(() => client.call('ai.settingsUpdate', { target: 'second', baseUrl: 'http://127.0.0.1:9/v1' }))).toBe('failed');
+    expect(await keptThen(() => client.call('ai.settingsUpdate', { target: 'second', apiKey: 'sk-second-key-0001' }))).toBe('failed');
+    expect(await keptThen(() => client.call('ai.settingsUpdate', { target: 'second', apiKey: 'sk-second-key-0002' }))).toBe('failed');
+    expect(await keptThen(() => client.call('ai.settingsUpdate', { target: 'second', apiKey: null }))).toBe('failed');
+    expect(
+      await keptThen(async () => {
+        await client.call('ai.settingsUpdate', { target: 'second', enabled: false });
+        await client.call('ai.settingsUpdate', { target: 'second', enabled: true });
+      }),
+    ).toBe('failed');
+    // Nothing a provider would list differently: its list stays.
+    expect(await keptThen(() => client.call('ai.settingsUpdate', { target: 'second', modelId: 'second-1' }))).toBe('stale');
+    expect(await keptThen(() => client.call('ai.settingsUpdate', { remember: false }))).toBe('stale');
+    // The failing calls went to the address in use now, not the old one.
+    expect(second.addresses.at(-1)).toBe('http://127.0.0.1:9/v1');
+  });
+
+  test('6: a provider turned off is absent although a list is kept for it, and is not asked', async () => {
+    const { client, second } = await two();
+    await client.call('ai.modelsList', undefined);
+    const asked = second.asked();
+    await client.call('ai.settingsUpdate', { target: 'second', enabled: false });
+    const listed = await client.call('ai.modelsList', undefined);
+    expect(listed.models.map((model) => model.provider)).toEqual(['first']);
+    expect(listed.unavailable).toEqual([]);
+    const refreshed = await client.call('ai.modelsRefresh', undefined);
+    expect(refreshed.models.map((model) => model.provider)).toEqual(['first']);
+    expect(second.asked()).toBe(asked);
+  });
+
+  test('7: one provider down: its kept list and a stale line; nothing kept: today’s error', async () => {
+    const only = controlled('only');
+    const clock = { now: 5_000_000 };
+    const test = await start([only], undefined, { modelListTimeoutMs: DEADLINE, modelListFreshMs: FRESH, now: () => clock.now });
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'only', modelId: 'only-1' });
+    only.mode = 'fail';
+    await expect(client.call('ai.modelsList', undefined)).rejects.toMatchObject({
+      code: 'unavailable',
+      message: 'Could not reach Provider only.',
+    });
+    only.mode = 'answer';
+    await client.call('ai.modelsList', undefined);
+    only.mode = 'fail';
+    const down = await client.call('ai.modelsRefresh', undefined);
+    expect(down.models.map((model) => model.modelId)).toEqual(['only-1']);
+    expect(down.unavailable).toEqual([
+      {
+        provider: 'only',
+        message: 'Could not reach Provider only. These are the models it listed earlier.',
+        reason: 'stale',
+        listedAt: 5_000_000,
+      },
+    ]);
   });
 });
 

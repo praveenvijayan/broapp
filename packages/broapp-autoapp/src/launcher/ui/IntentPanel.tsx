@@ -19,7 +19,15 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 
-import { describeModel, findModel, formatModelRef, whereItRuns } from 'broapp/ai';
+import {
+  describeModel,
+  findModel,
+  formatModelRef,
+  LISTED_EARLIER,
+  unavailableLine,
+  unavailableReason,
+  whereItRuns,
+} from 'broapp/ai';
 import type { ProviderPlace, UnavailableProvider } from 'broapp/ai';
 import { useAiModels, useAiSettings } from 'broapp/ai/react';
 import type { AiContract, AiModelsHook } from 'broapp/ai/react';
@@ -180,19 +188,39 @@ export function inheritedModel(
   return settingsModel === null ? 'Settings model' : `Settings: ${modelName(settingsModel, models, places)}`;
 }
 
+/** The provider a tier's reference runs on, as `places` knows it. */
+function placeOf(ref: string, models: readonly Model[], places: ModelPlaces): ProviderPlace | undefined {
+  const found = findModel(ref, models, places.activeProvider, places.providers.map((entry) => entry.id));
+  return places.providers.find((entry) => entry.id === found.provider);
+}
+
 /**
  * Why a tier's model cannot run, in one sentence, or `null`: its provider is
  * turned off, or its list could not be read. Said above the tier rows, because
  * a run that will fail at its first task of that tier should say so first.
+ *
+ * Read from each entry's `reason`, never its words. A list cut at its share is
+ * not a problem, and nor is one given earlier: its models are there to choose,
+ * and the run will say what it finds. {@link tierNote} says that one quietly.
  */
 export function tierProblem(tier: string, ref: string, models: readonly Model[], places: ModelPlaces): string | null {
-  const found = findModel(ref, models, places.activeProvider, places.providers.map((entry) => entry.id));
-  const place = places.providers.find((entry) => entry.id === found.provider);
+  const place = placeOf(ref, models, places);
   if (place === undefined) return null;
   if (!places.enabled.includes(place.id)) return `The ${tier} tier names ${place.label}, which is off in Settings.`;
-  const down = places.unavailable.find((entry) => entry.provider === place.id && !entry.message.includes('only the first'));
+  const down = places.unavailable.find((entry) => entry.provider === place.id && unavailableReason(entry) === 'failed');
   if (down !== undefined) return `The ${tier} tier names ${place.label}, which cannot be reached: ${down.message}`;
   return null;
+}
+
+/**
+ * The quieter line for a tier whose provider gave its list earlier and not
+ * now: that line, with when, or `null`.
+ */
+export function tierNote(ref: string, models: readonly Model[], places: ModelPlaces, now?: number): string | null {
+  const place = placeOf(ref, models, places);
+  if (place === undefined || !places.enabled.includes(place.id)) return null;
+  const stale = places.unavailable.find((entry) => entry.provider === place.id && unavailableReason(entry) === 'stale');
+  return stale === undefined ? null : unavailableLine(stale, now === undefined ? {} : { now });
 }
 
 /**
@@ -234,7 +262,9 @@ function ModelSelect({
     .filter((group) => group.models.length > 0);
   const heading = (provider: string): string => {
     const place = places?.providers.find((entry) => entry.id === provider);
-    return place === undefined ? provider : `${place.label} — ${whereItRuns(place)}`;
+    const named = place === undefined ? provider : `${place.label} — ${whereItRuns(place)}`;
+    const stale = places?.unavailable.some((entry) => entry.provider === provider && unavailableReason(entry) === 'stale') === true;
+    return stale ? `${named} — ${LISTED_EARLIER}` : named;
   };
   return (
     <span className="launcher__intent-model">
@@ -294,6 +324,18 @@ export function TierModelsBlock({ value, models, places, settingsModel = null, u
           const problem = ref === null ? null : tierProblem(tier, ref, models, places);
           return problem === null ? [] : [problem];
         });
+  const notes =
+    value === null || places === undefined
+      ? []
+      : [
+          ...new Set(
+            tiers.flatMap((tier) => {
+              const ref = value[tier];
+              const note = ref === null ? null : tierNote(ref, models, places);
+              return note === null ? [] : [note];
+            }),
+          ),
+        ];
   return (
     <details className="launcher__intent-tiers">
       <summary className="launcher__intent-summary">Models by tier</summary>
@@ -304,6 +346,11 @@ export function TierModelsBlock({ value, models, places, settingsModel = null, u
       {problems.map((problem) => (
         <p className="launcher__message launcher__message--error" key={problem} role="alert">
           {problem}
+        </p>
+      ))}
+      {notes.map((note) => (
+        <p className="launcher__lede" key={note} role="status">
+          {note}
         </p>
       ))}
       {value === null ? (

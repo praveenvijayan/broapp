@@ -18,7 +18,7 @@ export type {
 export { BroappChatMenu } from './BroappChatMenu.tsx';
 export type { BroappChatMenuProps } from './BroappChatMenu.tsx';
 
-export { BroappModelList, BroappModelPicker, moveLine } from './BroappModelPicker.tsx';
+export { BroappModelList, BroappModelPicker, groupHeading, moveLine } from './BroappModelPicker.tsx';
 export type { BroappModelListProps, BroappModelPickerProps } from './BroappModelPicker.tsx';
 
 export { BroappSchemeToggle } from './BroappSchemeToggle.tsx';

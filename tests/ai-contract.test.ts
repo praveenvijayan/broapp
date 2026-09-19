@@ -23,6 +23,7 @@ describe('aiContract', () => {
       'ai.settingsUpdate',
       'ai.providersList',
       'ai.modelsList',
+      'ai.modelsRefresh',
       'ai.connectionTest',
       'ai.providerTest',
       'ai.chatConfirm',

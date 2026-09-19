@@ -5,6 +5,14 @@
  * providers are on, any of their addresses, or whether each has a key. Not on
  * every settings write: choosing a model must not send the application back to
  * every provider to ask what the models are.
+ *
+ * Mounting asks `ai.modelsList`, which the host answers from a list read in the
+ * last half minute when it has one, so three panels mounting together cost one
+ * request per provider. `refresh()` asks `ai.modelsRefresh`, which always asks:
+ * the Refresh button means it.
+ *
+ * While a new list is on its way the one already shown stays: `pending` says a
+ * read is running, and an empty list with `pending` is the only "reading".
  */
 import * as React from 'react';
 
@@ -23,12 +31,45 @@ export interface AiModelsHook {
   refresh(): Promise<void>;
 }
 
+/** What {@link useAiModels} holds between renders. */
+export interface ModelsState {
+  readonly models: BroappModel[];
+  readonly unavailable: UnavailableProvider[];
+  readonly pending: boolean;
+  readonly error: BroappError | null;
+}
+
+/** What happens to it. */
+export type ModelsAction =
+  | { readonly type: 'reading' }
+  | { readonly type: 'read'; readonly models: BroappModel[]; readonly unavailable: UnavailableProvider[] }
+  | { readonly type: 'failed'; readonly error: BroappError }
+  | { readonly type: 'cleared' };
+
+export const NO_MODELS: ModelsState = { models: [], unavailable: [], pending: false, error: null };
+
+/**
+ * The hook's state, as a function a test can call without a DOM. Reading
+ * keeps the list already shown: a person choosing from it while a newer one
+ * is on its way should not watch it empty and refill. Only a failure, which
+ * means there is nothing to show, clears it.
+ */
+export function modelsReducer(state: ModelsState, action: ModelsAction): ModelsState {
+  switch (action.type) {
+    case 'reading':
+      return { ...state, pending: true, error: null };
+    case 'read':
+      return { models: action.models, unavailable: action.unavailable, pending: false, error: null };
+    case 'failed':
+      return { models: [], unavailable: [], pending: false, error: action.error };
+    case 'cleared':
+      return NO_MODELS;
+  }
+}
+
 export function useAiModels(): AiModelsHook {
   const shared = useAiContext();
-  const [models, setModels] = React.useState<BroappModel[]>([]);
-  const [unavailable, setUnavailable] = React.useState<UnavailableProvider[]>([]);
-  const [pending, setPending] = React.useState(false);
-  const [error, setError] = React.useState<BroappError | null>(null);
+  const [state, dispatch] = React.useReducer(modelsReducer, NO_MODELS);
   const generation = React.useRef(0);
 
   const provider = shared.settings?.provider ?? null;
@@ -40,42 +81,40 @@ export function useAiModels(): AiModelsHook {
       .map((entry) => [entry.id, entry.baseUrl, entry.hasKey]),
   );
 
-  const refresh = React.useCallback(async (): Promise<void> => {
+  const load = React.useCallback(async (route: 'ai.modelsList' | 'ai.modelsRefresh'): Promise<void> => {
     if (provider === null) {
-      setModels([]);
-      setUnavailable([]);
+      generation.current += 1;
+      dispatch({ type: 'cleared' });
       return;
     }
     const mine = (generation.current += 1);
-    setPending(true);
-    setError(null);
+    dispatch({ type: 'reading' });
     try {
       const connected = await shared.client();
-      const result = await connected.call('ai.modelsList', undefined);
+      const result = await connected.call(route, undefined);
       // A slow answer for providers the user has since changed must not
       // replace the list they are looking at now.
       if (generation.current !== mine) return;
-      setModels(result.models);
-      setUnavailable(result.unavailable);
+      dispatch({ type: 'read', models: result.models, unavailable: result.unavailable });
     } catch (cause) {
       if (generation.current !== mine) return;
-      setModels([]);
-      setUnavailable([]);
-      setError(
-        cause instanceof BroappError
-          ? cause
-          : new BroappError('internal', 'The model list could not be read.', cause),
-      );
-    } finally {
-      if (generation.current === mine) setPending(false);
+      dispatch({
+        type: 'failed',
+        error:
+          cause instanceof BroappError
+            ? cause
+            : new BroappError('internal', 'The model list could not be read.', cause),
+      });
     }
   }, [shared, provider]);
 
-  React.useEffect(() => {
-    void refresh();
-    // `reach` is not used inside `refresh`; it is here because changing it
-    // changes what the providers will answer.
-  }, [refresh, reach]);
+  const refresh = React.useCallback((): Promise<void> => load('ai.modelsRefresh'), [load]);
 
-  return { models, unavailable, pending, error, refresh };
+  React.useEffect(() => {
+    void load('ai.modelsList');
+    // `reach` is not used inside `load`; it is here because changing it
+    // changes what the providers will answer.
+  }, [load, reach]);
+
+  return { ...state, refresh };
 }
