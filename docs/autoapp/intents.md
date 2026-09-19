@@ -85,8 +85,12 @@ The host computes a task's tier. A model never supplies it. The model gives
 
 A task runs on its own model when a person chose one. If not, it runs on its
 tier's model from `intent-models.json`. If that is `null`, it runs on the
-model chosen in Settings. Every model must come from the one configured
-provider.
+model chosen in Settings. A model is a reference: a bare id is a model of the
+provider in use, and `<provider>:<model>` (`ollama:qwen3:27b`) is a model of
+that provider, run with its own key and address. A provider that is not turned
+on in Settings is sent nothing: the task fails with "<provider> is not turned
+on in Settings." before its turn starts. A provider that fails fails the task;
+nothing falls back to another provider.
 
 ## The plan format
 

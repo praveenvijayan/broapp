@@ -20,7 +20,7 @@ import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { anthropic } from 'broapp-ai-anthropic';
-import { customServer, ollama, openai } from 'broapp-ai-compatible';
+import { customServer, ollama, openai, openrouter } from 'broapp-ai-compatible';
 import { ensureDataDir, openBrowser, startApp } from 'broapp/host';
 import type { RunningApp } from 'broapp/host';
 
@@ -423,7 +423,7 @@ async function openLauncher(
     openBrowser: browser,
     // The panel's Quit: the same stop as Ctrl+C.
     quit: () => void exit.stop(),
-    providers: [anthropic(), ollama(), openai(), customServer()],
+    providers: [anthropic(), ollama(), openai(), openrouter(), customServer()],
     // The offline tier tests need a launcher whose AI layer cannot reach the
     // network, and severing an interface in CI is not something a test may do.
     // Honoured only under `NODE_ENV=test`, read through `Bun.env` because
@@ -1030,7 +1030,7 @@ async function main(): Promise<number> {
         // Replay and evaluation run the engineer, so they need the providers
         // and the launcher's AI settings; they write only `replays` rows and
         // blobs to the launcher's store, and are allowed while it serves.
-        const providers = [anthropic(), ollama(), openai(), customServer()];
+        const providers = [anthropic(), ollama(), openai(), openrouter(), customServer()];
         const aiDataDir = join(root.root, 'launcher');
         if (argv[1] === 'replay') return await runReplayCommand({ root, argv: argv.slice(2), providers, aiDataDir });
         if (argv[1] === 'links') {

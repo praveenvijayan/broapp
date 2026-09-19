@@ -38,7 +38,33 @@ export interface ProviderInfo {
   defaultBaseUrl: string | null;
 }
 
-/** What the settings route returns. Never contains the key itself. */
+/**
+ * One provider's own settings, whether or not it is the one in use. Never
+ * contains the key itself.
+ */
+export interface ProviderSettings {
+  id: string;
+  baseUrl: string | null;
+  modelId: string | null;
+  /** Whether it may be sent anything. The provider in use always may. */
+  enabled: boolean;
+  hasKey: boolean;
+  keyHint: string | null;
+  /**
+   * True when its key and address are what it needs: a model reference naming
+   * it would run, given a model, once it is enabled. Neither the model nor
+   * `enabled` is part of this; each has its own field.
+   */
+  configured: boolean;
+}
+
+/**
+ * What the settings route returns. Never contains a key itself.
+ *
+ * The top-level fields are the provider in use — the one a turn runs on when
+ * nothing names another — so an application written against one provider
+ * reads what it always read.
+ */
 export interface AiSettings {
   provider: string | null;
   modelId: string | null;
@@ -46,10 +72,12 @@ export interface AiSettings {
   hasKey: boolean;
   /** Last four characters of the key, for the UI to show which key is set. */
   keyHint: string | null;
-  /** False means the key is held in memory only and forgotten on exit. */
+  /** False means every key is held in memory only and forgotten on exit. */
   remember: boolean;
   /** True when provider and model are both set and the provider's needs are met. */
   configured: boolean;
+  /** Every provider in this build, in the build's order. */
+  providers: ProviderSettings[];
 }
 
 /** How much ceremony a tool call needs before it runs. */
@@ -86,10 +114,13 @@ export interface ChatFile {
 /**
  * A stored conversation, without its messages.
  *
- * `modelId` is null for a conversation that follows Settings, and a model id
- * for one that has been pinned to a model of its own. The provider is never
- * part of a conversation: it is a Settings decision, because changing it
- * changes which key is used and whether anything leaves the computer.
+ * `modelId` is null for a conversation that follows Settings, and a model
+ * reference for one that has been pinned to a model of its own: bare, a model
+ * of the provider in use; `<provider>:<model>`, a model of any provider the
+ * person turned on (see `model-ref.ts`). It once could not name a provider,
+ * because changing provider changes which key is used and whether anything
+ * leaves the computer. That reason stands, and is why wherever a model is
+ * chosen the person must be told whether it runs on this computer.
  */
 export interface Thread {
   id: string;

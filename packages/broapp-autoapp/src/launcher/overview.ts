@@ -270,6 +270,8 @@ export interface OverviewSources {
   readonly executor?: Executor;
   /** The live turns' subtotals. */
   readonly live?: () => readonly LiveUsage[];
+  /** The providers' ids, for pricing a row that names its provider. */
+  readonly providerIds?: readonly string[];
   /** The tier models, to name the model a running task is on. */
   readonly modelOf?: (task: TaskRecord) => string | null;
   readonly now?: () => number;
@@ -292,6 +294,7 @@ export function readOverview(sources: OverviewSources): Overview {
   const nameOf = new Map(rows.map((row) => [row.appId, row.name]));
   const live = sources.live?.() ?? [];
   const prices: Prices = intents === undefined ? NO_PRICES : readPrices(intents.dataDir);
+  const providerIds = sources.providerIds ?? [];
 
   // The run in hand.
   const active = executor?.active() ?? null;
@@ -325,11 +328,11 @@ export function readOverview(sources: OverviewSources): Overview {
   let runSpend: SpendTotal | null = null;
   if (running !== null && intents !== undefined) {
     const startedAt = intents.get(running.intentId)?.intent.startedAt ?? running.startedAt;
-    taskSpend = spendOf(mergeParts([...usageOfTask(intents, running.taskId), ...liveParts(runningLive)]), prices);
-    runSpend = spendOf(mergeParts([...usageOfRun(intents, running.intentId, startedAt), ...liveParts(runningLive)]), prices);
+    taskSpend = spendOf(mergeParts([...usageOfTask(intents, running.taskId), ...liveParts(runningLive)]), prices, providerIds);
+    runSpend = spendOf(mergeParts([...usageOfRun(intents, running.intentId, startedAt), ...liveParts(runningLive)]), prices, providerIds);
   }
   const todayByModel: ModelSpend[] = allToday.map((part) => {
-    const total = spendOf([part], prices);
+    const total = spendOf([part], prices, providerIds);
     return { modelId: part.modelId, inputTokens: part.inputTokens, outputTokens: part.outputTokens, cost: total.cost, atLeast: total.atLeast };
   });
 
@@ -413,7 +416,7 @@ export function readOverview(sources: OverviewSources): Overview {
   return {
     needsYou,
     running,
-    spend: { task: taskSpend, run: runSpend, today: spendOf(allToday, prices), budgetDay: prices.budgetDay, todayByModel },
+    spend: { task: taskSpend, run: runSpend, today: spendOf(allToday, prices, providerIds), budgetDay: prices.budgetDay, todayByModel },
     backlog,
     apps,
     recent: executor?.recent() ?? [],

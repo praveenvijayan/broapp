@@ -6,6 +6,8 @@
  */
 export { aiContract } from './contract.ts';
 export type { AiContract } from './contract.ts';
+export { formatModelRef, parseModelRef } from './model-ref.ts';
+export type { ModelRef } from './model-ref.ts';
 export type {
   AiSettings,
   BroappModel,
@@ -13,6 +15,7 @@ export type {
   ChatFile,
   ChatTurn,
   ProviderInfo,
+  ProviderSettings,
   StoredMessage,
   Thread,
   ToolPermission,

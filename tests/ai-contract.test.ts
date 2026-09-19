@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-import { aiContract } from 'broapp/ai';
+import { aiContract, formatModelRef, parseModelRef } from 'broapp/ai';
 
 const chat = aiContract.streams['ai.chat'];
 
@@ -179,5 +179,41 @@ describe('aiContract', () => {
     const update = aiContract.operations['ai.settingsUpdate'];
     expect(update.input.parse({ remember: false })).toEqual({ remember: false });
     expect(update.input.parse({ apiKey: null })).toEqual({ apiKey: null });
+  });
+});
+
+describe('model references', () => {
+  const ids = ['ollama', 'openrouter', 'openai'];
+
+  test('split on the first colon, and only for a provider this build has', () => {
+    expect(parseModelRef('ollama:qwen3:27b', ids)).toEqual({ provider: 'ollama', modelId: 'qwen3:27b' });
+    expect(parseModelRef('qwen3:27b', ids)).toEqual({ provider: null, modelId: 'qwen3:27b' });
+    expect(parseModelRef('anthropic/claude-opus-5', ids)).toEqual({ provider: null, modelId: 'anthropic/claude-opus-5' });
+    expect(parseModelRef('openrouter:anthropic/claude-opus-5', ids)).toEqual({
+      provider: 'openrouter',
+      modelId: 'anthropic/claude-opus-5',
+    });
+  });
+
+  test('an empty half on either side of the colon is unqualified', () => {
+    expect(parseModelRef(':qwen3', ids)).toEqual({ provider: null, modelId: ':qwen3' });
+    expect(parseModelRef('ollama:', ids)).toEqual({ provider: null, modelId: 'ollama:' });
+    expect(parseModelRef('', ids)).toEqual({ provider: null, modelId: '' });
+  });
+
+  test('format then parse is the identity', () => {
+    for (const [provider, modelId] of [
+      ['ollama', 'qwen3:27b'],
+      ['openrouter', 'anthropic/claude-opus-5'],
+      ['openai', 'ollama:looks-qualified'],
+    ] as const) {
+      expect(parseModelRef(formatModelRef(provider, modelId), ids)).toEqual({ provider, modelId });
+    }
+  });
+
+  test('ai.settingsUpdate takes a target and enabled, bounded like provider', () => {
+    const update = aiContract.operations['ai.settingsUpdate'];
+    expect(update.input.parse({ target: 'ollama', enabled: true })).toEqual({ target: 'ollama', enabled: true });
+    expect(() => update.input.parse({ target: 'x'.repeat(65) })).toThrow();
   });
 });

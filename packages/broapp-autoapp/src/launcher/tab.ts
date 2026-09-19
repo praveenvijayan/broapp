@@ -10,6 +10,7 @@
  * runs, `source.change` and `candidate.build` ask, and `release.activate` —
  * the only `external` tool — always asks and could never run in a preview.
  */
+import { formatModelRef } from 'broapp/ai';
 import { createAi, type Ai } from 'broapp/ai/host';
 import type { DeliveredContext, ProviderAdapter } from 'broapp/ai/host';
 import type { Gate, HostLogger } from 'broapp/host';
@@ -267,6 +268,15 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           },
         });
 
+  /**
+   * What a usage row calls the model a turn ran on: the bare id on the
+   * provider in use, as every row before model references was, and
+   * `<provider>:<model>` on any other.
+   */
+  function ranOn(provider: string, modelId: string): string {
+    return provider === ai.registry.activeProvider() ? modelId : formatModelRef(provider, modelId);
+  }
+
   /** Write one turn's usage row; a store that cannot is logged, never the turn's failure. */
   function keepUsage(intents: IntentStore, input: Parameters<typeof usageRowOf>[0]): void {
     try {
@@ -361,6 +371,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
     ...(options.quit === undefined ? {} : { quit: options.quit }),
     live: () => [...live.values()],
+    providerIds: options.providers.map((provider) => provider.id),
   });
 
   /** What the tools remember of each turn's refusals; a turn is dropped when it ends. */
@@ -416,9 +427,11 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ...(options.contextBudgetChars === undefined ? {} : { contextBudgetChars: options.contextBudgetChars }),
     tools,
     onContext: (runId: string, delivered: DeliveredContext) => {
-      // Which model the turn went to, for a running turn's cost; its end says
-      // it again, from the AI layer itself.
-      liveEntry(runId).modelId = delivered.model.id;
+      // Which model the turn went to, for a running turn's cost and its usage
+      // row. Named with its provider when that is not the one in use, so a
+      // turn sent to Ollama while Settings names a hosted provider is not
+      // counted, or priced, as the hosted provider's model of the same name.
+      liveEntry(runId).modelId = ranOn(delivered.model.provider, delivered.model.id);
       if (knowledge === undefined) return;
       // Servings first, from the same delivered documents the context row
       // is written from, so the two agree about what reached the model.
@@ -472,7 +485,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           runId,
           appId: task?.appId ?? soFar?.appId ?? null,
           taskId: task?.id ?? null,
-          modelId: detail?.modelId ?? soFar?.modelId ?? null,
+          modelId: soFar?.modelId ?? detail?.modelId ?? null,
           usage: detail?.usage,
           steps: detail?.steps ?? 0,
           ms: detail?.ms ?? 0,

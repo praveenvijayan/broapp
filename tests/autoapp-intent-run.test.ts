@@ -59,6 +59,7 @@ import {
   RUN_FINISHED,
   standingAnswer,
   verdictOf,
+  writeTierModels,
   type IntentStore,
   type TaskInput,
   type TaskRecord,
@@ -181,6 +182,12 @@ interface WorldOptions {
   readonly failFrom?: number;
   /** Choose the provider in Settings and no model, so a turn cannot start. */
   readonly noModel?: boolean;
+  /**
+   * A second provider, `second` ("Second provider"), beside the one in use:
+   * its own script, whether it is turned on (default yes), and from which of
+   * its model calls on it fails as {@link PROVIDER_FAILURE} does.
+   */
+  readonly second?: { readonly script?: readonly FakeStep[]; readonly enabled?: boolean; readonly failFrom?: number };
 }
 
 /**
@@ -202,6 +209,9 @@ interface World {
   readonly fake: FakeAdapter;
   /** Every model id a turn or a question was sent to, in order. */
   readonly asked: string[];
+  /** The same, for the second provider when there is one. */
+  readonly askedSecond: string[];
+  readonly secondFake: FakeAdapter | null;
 }
 
 async function world(script: readonly FakeStep[], options: WorldOptions = {}): Promise<World> {
@@ -258,6 +268,40 @@ async function world(script: readonly FakeStep[], options: WorldOptions = {}): P
       });
     },
   };
+  const askedSecond: string[] = [];
+  const secondFake =
+    options.second === undefined
+      ? null
+      : createFakeAdapter({
+          id: 'second',
+          script: options.second.script ?? [],
+          models: [{ provider: 'second', modelId: 'fake-1', label: 'Second 1', capabilities: { tools: true, vision: false, structuredOutput: true } }],
+        });
+  const secondFailFrom = options.second?.failFrom;
+  let secondCalls = 0;
+  const second: ProviderAdapter | null =
+    secondFake === null
+      ? null
+      : {
+          ...secondFake,
+          label: 'Second provider',
+          model: (config, modelId) => {
+            askedSecond.push(modelId);
+            const model = secondFake.model(config, modelId);
+            if (secondFailFrom === undefined || typeof model !== 'object') return model;
+            return new Proxy(model, {
+              get(target, property, receiver) {
+                const value: unknown = Reflect.get(target, property, receiver);
+                if (property !== 'doStream' || typeof value !== 'function') return value;
+                return (...args: unknown[]): unknown => {
+                  secondCalls += 1;
+                  if (secondCalls > secondFailFrom) return Promise.reject(new Error(PROVIDER_FAILURE));
+                  return (value as (...inner: unknown[]) => unknown).apply(target, args);
+                };
+              },
+            });
+          },
+        };
   const tab = createLauncherTab({
     layout: root,
     supervisor,
@@ -269,7 +313,7 @@ async function world(script: readonly FakeStep[], options: WorldOptions = {}): P
     versions: STARTER_VERSIONS,
     install: () => Promise.resolve({ ok: false, detail: 'no network in tests' }),
     initGit: () => false,
-    providers: [adapter],
+    providers: second === null ? [adapter] : [adapter, second],
     fetch: Object.assign(() => Promise.reject(new Error('no network in tests')), { preconnect: () => undefined }) as typeof fetch,
     logger: quiet,
     openBrowser: () => Promise.resolve(true),
@@ -297,7 +341,8 @@ async function world(script: readonly FakeStep[], options: WorldOptions = {}): P
     },
   );
   await tab.ai.registry.update(options.noModel === true ? { provider: 'fake' } : { provider: 'fake', modelId: 'fake-1' });
-  return { root, dataDir, intents, knowledge, runs, gate, tab, fake, asked };
+  if (second !== null && options.second?.enabled !== false) await tab.ai.registry.update({ target: 'second', enabled: true });
+  return { root, dataDir, intents, knowledge, runs, gate, tab, fake, asked, askedSecond, secondFake };
 }
 
 function executorOf(w: World): NonNullable<LauncherTab['executor']> {
@@ -1000,6 +1045,73 @@ describe('a backlog run', () => {
     expect(after?.failure).toEqual({ reasons: ['The model gone-model is no longer offered by Fake provider.'], runIds: [], at: expect.any(Number) });
     expect(w.fake.calls.length).toBe(0);
   }, 60_000);
+
+  // 18a, 9.
+  test('18a: a task whose tier names a second provider runs there, and its usage row names it', async () => {
+    const slug = '0001-only-part';
+    const w = await world([], { second: { script: [cycle(slug)] } });
+    writeTierModels(w.dataDir, { light: 'second:fake-1', standard: 'second:fake-1', deep: 'second:fake-1' });
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(task?.stored).toBe('completed');
+    expect(w.askedSecond).toEqual(expect.arrayContaining(['fake-1']));
+    expect(w.asked).toEqual([]);
+    expect(w.fake.calls.length).toBe(0);
+    const rows = w.intents.db.query<{ run_id: string; model_id: string | null }, []>('SELECT run_id, model_id FROM usage').all();
+    expect(rows).toEqual([{ run_id: `intent-${String(id)}-${slug}-a1`, model_id: 'second:fake-1' }]);
+  }, 120_000);
+
+  test('18a: a reference to a model a second provider does not offer names that provider; one that is off is refused before anything is sent', async () => {
+    const w = await world([], { second: {} });
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    const task = w.intents.runOrder(id)[0];
+    w.intents.setModel(task?.id ?? 0, 'second:gone');
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    expect(w.intents.task(task?.id ?? 0)?.failure).toEqual({
+      reasons: ['The model gone is no longer offered by Second provider.'],
+      runIds: [],
+      at: expect.any(Number),
+    });
+
+    const off = await world([], { second: { enabled: false } });
+    const other = submitted(off.intents, [plan('only-part')]);
+    const offTask = off.intents.runOrder(other.id)[0];
+    off.intents.setModel(offTask?.id ?? 0, 'second:fake-1');
+    const offExecutor = executorOf(off);
+    await offExecutor.start(other.id, 'the test');
+    await offExecutor.idle();
+    expect(off.intents.task(offTask?.id ?? 0)?.stored).toBe('failed');
+    expect(off.intents.task(offTask?.id ?? 0)?.failure).toEqual({
+      reasons: ['Second provider is not turned on in Settings.'],
+      runIds: [],
+      at: expect.any(Number),
+    });
+    expect(off.askedSecond).toEqual([]);
+    expect(off.secondFake?.calls.length).toBe(0);
+    expect(off.fake.calls.length).toBe(0);
+  }, 120_000);
+
+  test('18a: a second provider that fails fails the task; nothing falls back to the provider in use', async () => {
+    const w = await world([], { second: { script: [text('never reached')], failFrom: 0 } });
+    writeTierModels(w.dataDir, { light: 'second:fake-1', standard: 'second:fake-1', deep: 'second:fake-1' });
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const task = w.intents.runOrder(id)[0];
+    // A turn the provider killed is not an attempt (14a): interrupted, and the run stopped.
+    expect(task?.stored).toBe('interrupted');
+    expect(w.intents.get(id)?.intent.status).toBe('stopped');
+    expect(w.askedSecond.length).toBeGreaterThan(0);
+    // The provider in use was never sent the task, nor anything else.
+    expect(w.asked).toEqual([]);
+    expect(w.fake.calls.length).toBe(0);
+  }, 120_000);
 
   // 8.
   test('while a run works on an application, other turns may read it but not write to it, and activation waits', async () => {

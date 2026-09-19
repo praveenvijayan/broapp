@@ -14,6 +14,8 @@
  * tokens it left out; and a total with nothing priced has no cost at all,
  * never zero.
  */
+import { parseModelRef } from 'broapp/ai';
+
 import type { IntentStore } from './store.ts';
 import type { Prices } from './prices.ts';
 
@@ -112,9 +114,22 @@ export interface SpendTotal {
   readonly unpricedTokens: number;
 }
 
-/** What one model's part costs, or `null` when the person has not priced it. */
-export function costOf(part: Pick<UsagePart, 'modelId' | 'inputTokens' | 'outputTokens'>, prices: Prices): number | null {
-  const price = part.modelId === null ? undefined : prices.models[part.modelId];
+/**
+ * What one model's part costs, or `null` when the person has not priced it.
+ *
+ * A row names a model by what ran: the bare id on the provider in use, or
+ * `<provider>:<model>` on another. The row's own string is looked up first,
+ * so a price written for one provider's model wins; then, for a row naming a
+ * provider in `providerIds`, its bare id, so a price written before references
+ * existed still prices the same model reached another way.
+ */
+export function costOf(
+  part: Pick<UsagePart, 'modelId' | 'inputTokens' | 'outputTokens'>,
+  prices: Prices,
+  providerIds: readonly string[] = [],
+): number | null {
+  if (part.modelId === null) return null;
+  const price = prices.models[part.modelId] ?? prices.models[parseModelRef(part.modelId, providerIds).modelId];
   if (price === undefined) return null;
   return (part.inputTokens * price.input + part.outputTokens * price.output) / 1e6;
 }
@@ -126,7 +141,7 @@ export function costOf(part: Pick<UsagePart, 'modelId' | 'inputTokens' | 'output
  * priced has no cost: `null`, never `0`, because `0` is a claim that it was
  * free.
  */
-export function spendOf(parts: readonly UsagePart[], prices: Prices): SpendTotal {
+export function spendOf(parts: readonly UsagePart[], prices: Prices, providerIds: readonly string[] = []): SpendTotal {
   let inputTokens = 0;
   let outputTokens = 0;
   let cost = 0;
@@ -137,7 +152,7 @@ export function spendOf(parts: readonly UsagePart[], prices: Prices): SpendTotal
     inputTokens += part.inputTokens;
     outputTokens += part.outputTokens;
     if (part.partial) atLeast = true;
-    const partCost = costOf(part, prices);
+    const partCost = costOf(part, prices, providerIds);
     if (partCost === null) unpricedTokens += part.inputTokens + part.outputTokens;
     else {
       cost += partCost;

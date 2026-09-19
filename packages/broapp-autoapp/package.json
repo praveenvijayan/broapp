@@ -59,7 +59,7 @@
     "@modelcontextprotocol/sdk": "1.30.0",
     "broapp": "^0.4.6",
     "broapp-ai-anthropic": "^0.3.0",
-    "broapp-ai-compatible": "^0.3.0",
+    "broapp-ai-compatible": "^0.4.1",
     "broapp-ai-elements": ">=0.4.6"
   },
   "peerDependencies": {

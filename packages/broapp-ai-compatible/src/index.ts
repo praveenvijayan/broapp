@@ -269,3 +269,25 @@ export const customServer = (): ProviderAdapter =>
     needs: { apiKey: 'optional', baseUrl: 'required' },
     defaultBaseUrl: null,
   });
+
+/**
+ * OpenRouter, a hosted gateway to many vendors' models, with an id of its own
+ * so it can be turned on beside a custom server rather than instead of one.
+ * Its model ids carry the vendor (`anthropic/claude-opus-5`), which is why a
+ * reference to one reads `openrouter:anthropic/claude-opus-5`.
+ *
+ * The key is required: its list answers without one, and every chat request
+ * without one is rejected, so a missing key is said before anything is sent.
+ *
+ * Vision is assumed, as for `customServer`. OpenRouter's `/models` entries do
+ * describe their input modalities, but reading them would be a fourth way of
+ * learning vision, written against a response nobody here has seen; assuming
+ * lets the provider refuse an image it cannot take, in its own words.
+ */
+export const openrouter = (): ProviderAdapter =>
+  openaiCompatible({
+    id: 'openrouter',
+    label: 'OpenRouter',
+    needs: { apiKey: 'required', baseUrl: 'optional' },
+    defaultBaseUrl: 'https://openrouter.ai/api/v1',
+  });

@@ -64,7 +64,7 @@ export interface DeliveredContext {
 export interface InProcessTurn {
   readonly runId: string;
   readonly message: string;
-  /** The model for this turn, within the configured provider. */
+  /** The model for this turn: a model reference, bare or naming an enabled provider. */
   readonly modelId?: string;
   /**
    * Earlier turns, as a browser would send them. An assistant turn naming a

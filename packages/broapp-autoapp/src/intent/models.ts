@@ -2,13 +2,15 @@
  * Which model runs a task of each tier.
  *
  * One small file in the launcher's data directory, `{ light, standard, deep }`,
- * each a model id or `null`. `null` means the model configured in Settings,
- * which is also what a missing or unreadable file means: a setting nobody made
- * should change nothing.
+ * each a model reference or `null`. `null` means the model configured in
+ * Settings, which is also what a missing or unreadable file means: a setting
+ * nobody made should change nothing.
  *
- * Every model named here is a model of the one configured provider, because
- * the AI layer's `registry.resolve` overrides a model id and nothing else. A
- * model from another provider per task is a backlog row, not a field.
+ * A reference is the AI layer's convention (`broapp/ai`'s `parseModelRef`):
+ * a bare id is a model of the provider in use, and `<provider>:<model>` —
+ * `ollama:qwen3:27b` — a model of that provider, with its own key and address.
+ * A task's `modelOverride` is the same. A reference naming a provider the
+ * person has not turned on in Settings is refused before anything is sent.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,7 +22,7 @@ import type { Tier } from './types.ts';
 /** The file, inside the launcher's own data directory. */
 export const INTENT_MODELS_FILE = 'intent-models.json';
 
-/** A model per tier; `null` is the Settings model. */
+/** A model reference per tier; `null` is the Settings model. */
 export type TierModels = Readonly<Record<Tier, string | null>>;
 
 export const DEFAULT_TIER_MODELS: TierModels = { light: null, standard: null, deep: null };

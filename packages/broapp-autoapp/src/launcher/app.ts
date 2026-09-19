@@ -116,6 +116,11 @@ export interface CreateLauncherAppOptions {
    * running turn's tokens are not in any total.
    */
   readonly live?: () => readonly LiveUsage[];
+  /**
+   * The ids of the providers this launcher has, so a usage row naming one
+   * (`ollama:qwen3:27b`) is also priced by its bare model id.
+   */
+  readonly providerIds?: readonly string[];
 }
 
 /** How long `launcher.quit` waits after answering before the launcher begins to stop. */
@@ -543,6 +548,7 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       ...(options.intents === undefined ? {} : { intents: options.intents }),
       ...(options.executor === undefined ? {} : { executor: options.executor }),
       ...(options.live === undefined ? {} : { live: options.live }),
+      ...(options.providerIds === undefined ? {} : { providerIds: options.providerIds }),
       ...(options.intents === undefined
         ? {}
         : { modelOf: (task: TaskRecord) => modelFor(task, readTierModels((options.intents as IntentStore).dataDir)) }),

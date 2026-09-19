@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { anthropic } from 'broapp-ai-anthropic';
-import { customServer, ollama, openai } from 'broapp-ai-compatible';
+import { customServer, ollama, openai, openrouter } from 'broapp-ai-compatible';
 import { aiContract } from 'broapp/ai';
 import { AdapterError, createAi } from 'broapp/ai/host';
 import type { AdapterConfig } from 'broapp/ai/host';
@@ -385,5 +385,36 @@ describe('both providers in a running application', () => {
       true,
     );
     await client.close();
+  });
+});
+
+describe('the OpenRouter preset', () => {
+  test('has its own id and address, and a missing key is refused before anything is sent', async () => {
+    const adapter = openrouter();
+    expect(adapter.id).toBe('openrouter');
+    expect(adapter.label).toBe('OpenRouter');
+    expect(adapter.defaultBaseUrl).toBe('https://openrouter.ai/api/v1');
+    expect(adapter.needs).toEqual({ apiKey: 'required', baseUrl: 'optional' });
+    let sent = 0;
+    const counting: typeof fetch = Object.assign(
+      () => {
+        sent += 1;
+        return Promise.reject(new Error('no network in tests'));
+      },
+      { preconnect: () => undefined },
+    );
+    expect(adapter.local(configWith(counting))).toBe(false);
+    const dataDir = await mkdtemp(join(tmpdir(), 'broapp-openrouter-'));
+    try {
+      const ai = createAi({ dataDir, providers: [adapter], app: { name: 'test', purpose: 'test' }, fetch: counting });
+      await ai.registry.update({ provider: 'openrouter', modelId: 'anthropic/claude-opus-5' });
+      await expect(ai.registry.resolve()).rejects.toMatchObject({
+        code: 'unavailable',
+        message: 'An API key is required for OpenRouter.',
+      });
+      expect(sent).toBe(0);
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
   });
 });

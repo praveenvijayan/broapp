@@ -24,6 +24,7 @@ import type { Envelope, HostLogger } from 'broapp/host';
 import { fromTransportError } from 'broapp/shared';
 import { createRunStore } from 'broapp-autoapp/host';
 import {
+  costOf,
   estimateFor,
   MAX_PRICED_MODELS,
   openIntents,
@@ -417,6 +418,22 @@ describe('17a: prices are the person’s', () => {
     expect(none.cost).not.toBe(0);
     // A model with no id is never priced.
     expect(spendOf([{ modelId: null, inputTokens: 10, outputTokens: 0, partial: false }], prices).cost).toBeNull();
+  });
+
+  // 18a, 10.
+  test('18a: a row naming its provider is priced by its own string first, then by its bare id', () => {
+    const ids = ['ollama', 'openrouter'];
+    const bare = { models: { 'qwen3:27b': { input: 1, output: 0 } }, budgetDay: null };
+    // A price under the bare id prices a qualified row.
+    expect(costOf({ modelId: 'ollama:qwen3:27b', inputTokens: 1_000_000, outputTokens: 0 }, bare, ids)).toBe(1);
+    // A price under the qualified id wins over one under the bare id.
+    const both = { models: { 'qwen3:27b': { input: 1, output: 0 }, 'openrouter:qwen3:27b': { input: 3, output: 0 } }, budgetDay: null };
+    expect(costOf({ modelId: 'openrouter:qwen3:27b', inputTokens: 1_000_000, outputTokens: 0 }, both, ids)).toBe(3);
+    expect(costOf({ modelId: 'ollama:qwen3:27b', inputTokens: 1_000_000, outputTokens: 0 }, both, ids)).toBe(1);
+    // An unqualified row is only its own string: `qwen3:27b` is not read as a provider `qwen3`.
+    const tag = { models: { '27b': { input: 5, output: 0 } }, budgetDay: null };
+    expect(costOf({ modelId: 'qwen3:27b', inputTokens: 1_000_000, outputTokens: 0 }, tag, ids)).toBeNull();
+    expect(spendOf([{ modelId: 'ollama:qwen3:27b', inputTokens: 1_000_000, outputTokens: 0, partial: false }], bare, ids).cost).toBe(1);
   });
 
   // 7.

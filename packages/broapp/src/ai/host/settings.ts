@@ -1,23 +1,45 @@
 /**
  * Where the AI layer's non-secret settings live.
  *
- * `<dataDir>/ai/settings.json` holds which provider and model the user chose
- * and where to reach them. It never holds the API key — that is
- * `secrets.ts` — and a test asserts the string does not appear in the file,
- * because "we do not write it there" is the kind of promise that quietly
- * stops being true.
+ * `<dataDir>/ai/settings.json` holds which provider is in use, and for every
+ * provider the person has set up, where to reach it, which model it runs and
+ * whether it is turned on. It never holds an API key — that is `secrets.ts` —
+ * and a test asserts the string does not appear in the file, because "we do
+ * not write it there" is the kind of promise that quietly stops being true.
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** The settings file's shape. `version` exists so a later format can migrate. */
-export interface StoredSettings {
-  version: 1;
-  provider: string | null;
-  modelId: string | null;
+/** One provider's own settings, kept whether or not it is the one in use. */
+export interface ProviderEntry {
   baseUrl: string | null;
-  /** False means the key is held in memory only and forgotten on exit. */
+  modelId: string | null;
+  /**
+   * Whether this provider may be sent anything. The provider in use always
+   * is; any other only when a person turned it on, so a model reference in a
+   * file cannot send their work somewhere they never chose.
+   */
+  enabled: boolean;
+}
+
+/**
+ * The settings file's shape.
+ *
+ * Version 1 held one `provider`, `modelId` and `baseUrl`, so changing provider
+ * lost the other's address and model. Version 2 keeps an entry per provider;
+ * a version-1 file is read as version 2 and left as it is until the next write.
+ */
+export interface StoredSettings {
+  version: 2;
+  /** The provider a turn runs on when nothing names another. */
+  active: string | null;
+  /** False means every key is held in memory only and forgotten on exit. */
   remember: boolean;
+  /**
+   * Keyed by provider id. An entry for an id this build has no adapter for is
+   * kept on write and ignored on read: another build may own it.
+   */
+  providers: Record<string, ProviderEntry>;
 }
 
 /** Reads and writes {@link StoredSettings}. */
@@ -28,20 +50,47 @@ export interface SettingsStore {
 
 /** What a fresh installation has. No provider, so the layer is off. */
 export function defaultSettings(): StoredSettings {
-  return { version: 1, provider: null, modelId: null, baseUrl: null, remember: true };
+  return { version: 2, active: null, remember: true, providers: {} };
+}
+
+function text(raw: Record<string, unknown>, key: string): string | null {
+  const value = raw[key];
+  return typeof value === 'string' ? value : null;
+}
+
+/** A version-1 file, as version 2: the one provider it named, turned on. */
+function fromVersion1(raw: Record<string, unknown>): StoredSettings {
+  const active = text(raw, 'provider');
+  return {
+    version: 2,
+    active,
+    remember: raw['remember'] !== false,
+    providers:
+      active === null
+        ? {}
+        : { [active]: { baseUrl: text(raw, 'baseUrl'), modelId: text(raw, 'modelId'), enabled: true } },
+  };
 }
 
 function coerce(value: unknown): StoredSettings | null {
   if (typeof value !== 'object' || value === null) return null;
   const raw = value as Record<string, unknown>;
-  const text = (key: string): string | null => (typeof raw[key] === 'string' ? (raw[key] as string) : null);
-  return {
-    version: 1,
-    provider: text('provider'),
-    modelId: text('modelId'),
-    baseUrl: text('baseUrl'),
-    remember: raw['remember'] !== false,
-  };
+  // A file written before `version` existed, or by version 1, has the old shape.
+  if (raw['version'] === undefined || raw['version'] === 1) return fromVersion1(raw);
+  if (raw['version'] !== 2) return null;
+  const listed = raw['providers'];
+  if (typeof listed !== 'object' || listed === null || Array.isArray(listed)) return null;
+  const providers: Record<string, ProviderEntry> = {};
+  for (const [id, entry] of Object.entries(listed as Record<string, unknown>)) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const fields = entry as Record<string, unknown>;
+    providers[id] = {
+      baseUrl: text(fields, 'baseUrl'),
+      modelId: text(fields, 'modelId'),
+      enabled: fields['enabled'] === true,
+    };
+  }
+  return { version: 2, active: text(raw, 'active'), remember: raw['remember'] !== false, providers };
 }
 
 /** Open the settings store for one data directory. */

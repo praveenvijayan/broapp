@@ -40,6 +40,16 @@ const providerInfo = s.object({
   defaultBaseUrl: s.nullable(s.string()),
 });
 
+const providerSettings = s.object({
+  id: s.string(),
+  baseUrl: s.nullable(s.string()),
+  modelId: s.nullable(s.string()),
+  enabled: s.boolean(),
+  hasKey: s.boolean(),
+  keyHint: s.nullable(s.string()),
+  configured: s.boolean(),
+});
+
 const settings = s.object({
   provider: s.nullable(s.string()),
   modelId: s.nullable(s.string()),
@@ -48,6 +58,7 @@ const settings = s.object({
   keyHint: s.nullable(s.string()),
   remember: s.boolean(),
   configured: s.boolean(),
+  providers: s.array(providerSettings, { max: 50 }),
 });
 
 const chatTurn = s.object({
@@ -145,12 +156,18 @@ export const aiContract = defineContract({
     },
     'ai.settingsUpdate': {
       input: s.object({
+        // Makes this provider the one in use. Sent with `target`, only the same.
         provider: s.optional(s.string({ max: 64 })),
+        // The provider the fields below apply to; absent, the one in use.
+        target: s.optional(s.string({ max: 64 })),
         modelId: s.optional(s.string({ max: 200 })),
         baseUrl: s.optional(s.nullable(s.string({ max: 2000 }))),
         // Null clears the stored key; a string replaces it. It goes to the
         // secret store and is never read back out to the browser.
         apiKey: s.optional(s.nullable(s.string({ max: 4000 }))),
+        // Whether the target may be sent anything. The one in use cannot be
+        // turned off.
+        enabled: s.optional(s.boolean()),
         remember: s.optional(s.boolean()),
       }),
       output: settings,
@@ -237,10 +254,10 @@ export const aiContract = defineContract({
         // Images travel with the turn they arrive on. History keeps a
         // placeholder instead, because a transcript of base64 would not fit.
         files: s.optional(s.array(chatFile, { max: 4 })),
-        // The model for this turn only, and only *within* the configured
-        // provider. A provider is never overridden per turn: a different
-        // provider means a different key and a different answer to "does this
-        // leave my computer", and that stays a Settings decision.
+        // The model for this turn only, as a model reference: bare, a model
+        // of the provider in use; `<provider>:<model>`, a model of a provider
+        // the person turned on in Settings, with that provider's own key and
+        // address. A provider that is off is sent nothing.
         modelId: s.optional(s.string({ max: 200 })),
       }),
       event: chatEvent,

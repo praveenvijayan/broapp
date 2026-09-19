@@ -24,7 +24,8 @@
  * business with either.
  */
 import { jsonSchema, streamObject, type LanguageModel } from 'ai';
-import type { Ai, ChatEvent, InProcessQuestion } from 'broapp/ai/host';
+import { parseModelRef } from 'broapp/ai';
+import type { AdapterConfig, Ai, ChatEvent, InProcessQuestion, ProviderAdapter } from 'broapp/ai/host';
 import { publicError } from 'broapp/host';
 import type { Envelope, HostLogger } from 'broapp/host';
 import { s } from 'broapp/shared';
@@ -825,13 +826,35 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     }
   };
 
-  /** The ids the provider offers, or `null` when the list cannot be read. */
-  async function offered(): Promise<{ readonly ids: readonly string[]; readonly provider: string } | null> {
+  /**
+   * Why a task cannot run on the model reference it names, or `null` when it
+   * can or nobody can tell.
+   *
+   * A reference naming a provider asks that provider, with its own key and
+   * address; a bare one asks the provider in use. A provider that is not
+   * turned on is refused in `resolve`'s own words before anything is sent to
+   * it. A list that cannot be read is not a refusal: the turn will say what
+   * went wrong in the provider's words.
+   */
+  async function notOffered(ref: string): Promise<string | null> {
+    const registry = options.ai().registry;
+    const { provider, modelId } = parseModelRef(
+      ref,
+      registry.adapters.map((adapter) => adapter.id),
+    );
+    let reached: { adapter: ProviderAdapter; config: AdapterConfig } | null;
+    if (provider === null) {
+      reached = await registry.currentConfig();
+    } else {
+      reached = await registry.configOf(provider);
+      if (reached === null) return `${registry.adapter(provider)?.label ?? provider} is not turned on in Settings.`;
+    }
+    if (reached === null) return null;
     try {
-      const configured = await options.ai().registry.currentConfig();
-      if (configured === null) return null;
-      const models = await configured.adapter.models(configured.config, AbortSignal.timeout(20_000));
-      return { ids: models.map((model) => model.modelId), provider: configured.adapter.label };
+      const models = await reached.adapter.models(reached.config, AbortSignal.timeout(20_000));
+      return models.some((model) => model.modelId === modelId)
+        ? null
+        : `The model ${modelId} is no longer offered by ${reached.adapter.label}.`;
     } catch {
       return null;
     }
@@ -1145,9 +1168,8 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     for (let turn = 1; ; turn += 1) {
       const modelId = modelFor(task, mapping());
       if (modelId !== null) {
-        const list = await offered();
-        if (list !== null && !list.ids.includes(modelId)) {
-          const reason = `The model ${modelId} is no longer offered by ${list.provider}.`;
+        const reason = await notOffered(modelId);
+        if (reason !== null) {
           task = move(task, 'failed', reason);
           store.setFailure(task.id, { reasons: [reason], runIds, at: Date.now() });
           stopIntent(active, `${task.slug} failed: ${reason}`);

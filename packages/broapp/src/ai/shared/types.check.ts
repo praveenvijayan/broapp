@@ -18,6 +18,7 @@ import type {
   ChatEvent,
   ChatFile,
   ProviderInfo,
+  ProviderSettings,
   StoredMessage,
   Thread,
 } from './types.ts';
@@ -28,6 +29,12 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ?
 
 const settingsMatch: Equal<OperationOutput<AiContract, 'ai.settingsGet'>, AiSettings> = true;
 void settingsMatch;
+
+const providerSettingsMatch: Equal<
+  OperationOutput<AiContract, 'ai.settingsGet'>['providers'][number],
+  ProviderSettings
+> = true;
+void providerSettingsMatch;
 
 const settingsUpdateReturnsSettings: Equal<
   OperationOutput<AiContract, 'ai.settingsUpdate'>,

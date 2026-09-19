@@ -7,6 +7,7 @@
  * in-process, so what is being tested is the layer, not a vendor.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +17,7 @@ import type { ProviderAdapter } from 'broapp/ai/host';
 import { aiContract } from 'broapp/ai';
 import { createGate, createHostApp } from 'broapp/host';
 import { defineContract, mergeContracts, s } from 'broapp/shared';
+import { ollama, openai, openrouter } from 'broapp-ai-compatible';
 
 import { harness, type Harness } from './harness.ts';
 
@@ -36,13 +38,13 @@ let live: Harness | null = null;
 let directory = '';
 
 /** Start a bridge with the application and the AI layer mounted side by side. */
-async function start(adapter: ProviderAdapter, dataDir?: string): Promise<Harness> {
+async function start(adapter: ProviderAdapter | readonly ProviderAdapter[], dataDir?: string): Promise<Harness> {
   directory = dataDir ?? (await mkdtemp(join(tmpdir(), 'broapp-ai-host-')));
   const app = createHostApp(appContract);
   app.operation('demo.ping', () => ({ pong: true }));
   const ai = createAi({
     dataDir: directory,
-    providers: [adapter],
+    providers: Array.isArray(adapter) ? [...adapter] : [adapter as ProviderAdapter],
     app: { name: 'test', purpose: 'testing the AI layer' },
     // Injected and never called: a test that can reach the network is a test
     // that can fail for reasons that have nothing to do with the code.
@@ -76,6 +78,9 @@ describe('the AI layer on a bridge', () => {
       keyHint: null,
       remember: true,
       configured: false,
+      providers: [
+        { id: 'fake', baseUrl: null, modelId: null, enabled: false, hasKey: false, keyHint: null, configured: true },
+      ],
     });
   });
 
@@ -377,5 +382,179 @@ describe('Ai.turn()', () => {
     } finally {
       await rm(dataDir, { recursive: true, force: true });
     }
+  });
+});
+
+/** A fresh data directory and an `Ai` over the given adapters, with a `fetch` that counts and refuses. */
+async function multi(providers: readonly ProviderAdapter[]): Promise<{
+  ai: ReturnType<typeof createAi>;
+  dataDir: string;
+  fetched: () => number;
+}> {
+  const dataDir = await mkdtemp(join(tmpdir(), 'broapp-ai-multi-'));
+  let count = 0;
+  const counting: typeof fetch = Object.assign(
+    () => {
+      count += 1;
+      return Promise.reject(new Error('no network in tests'));
+    },
+    { preconnect: () => undefined },
+  );
+  const ai = createAi({ dataDir, providers: [...providers], app: { name: 'test', purpose: 'test' }, fetch: counting });
+  return { ai, dataDir, fetched: () => count };
+}
+
+describe('18a: every provider keeps its settings, and a reference may name one', () => {
+  test('changing provider and changing back types nothing twice', async () => {
+    const { ai, dataDir } = await multi([ollama(), openai()]);
+    try {
+      await ai.registry.update({ provider: 'ollama', baseUrl: 'http://127.0.0.1:9999/v1', modelId: 'qwen3:27b' });
+      await ai.registry.update({ provider: 'openai', baseUrl: 'https://gateway.example/v1', modelId: 'gpt-x' });
+      const back = await ai.registry.update({ provider: 'ollama' });
+      expect(back).toMatchObject({ provider: 'ollama', baseUrl: 'http://127.0.0.1:9999/v1', modelId: 'qwen3:27b' });
+      // B's settings are kept too, and it stays on: it was made active once.
+      expect(back.providers.find((provider) => provider.id === 'openai')).toMatchObject({
+        baseUrl: 'https://gateway.example/v1',
+        modelId: 'gpt-x',
+        enabled: true,
+      });
+      // A provider with no entry yet gets its default address, no model, and is turned on by being chosen.
+      const fresh = await (await multi([ollama(), openai()])).ai.registry.update({ provider: 'openai' });
+      expect(fresh).toMatchObject({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', modelId: null });
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('resolve: a qualified reference runs on an enabled second provider, with its own key and address', async () => {
+    const second = createFakeAdapter({ id: 'second', needsKey: true });
+    const { ai, dataDir } = await multi([createFakeAdapter(), second]);
+    try {
+      // Nothing set up: "not set up" comes first, even for a reference naming another provider.
+      await expect(ai.registry.resolve({ modelId: 'second:m' })).rejects.toMatchObject({
+        message: 'AI is not set up yet. Open Settings to choose a provider.',
+      });
+      await ai.registry.update({ provider: 'fake', modelId: 'fake-1', apiKey: 'sk-first-key-0001' });
+      await expect(ai.registry.resolve({ modelId: 'second:m' })).rejects.toMatchObject({
+        code: 'unavailable',
+        message: 'Fake provider is not turned on in Settings.',
+      });
+      await ai.registry.update({ target: 'second', enabled: true, baseUrl: 'http://second.example/v1' });
+      // Turned on but its key missing: that provider's own sentence, not the first's.
+      await expect(ai.registry.resolve({ modelId: 'second:m' })).rejects.toMatchObject({
+        message: 'An API key is required for Fake provider.',
+      });
+      await ai.registry.update({ target: 'second', apiKey: 'sk-second-key-0002' });
+      const resolved = await ai.registry.resolve({ modelId: 'second:m:with-colon' });
+      expect(resolved.adapter.id).toBe('second');
+      expect(resolved.modelId).toBe('m:with-colon');
+      expect(resolved.config.apiKey).toBe('sk-second-key-0002');
+      expect(resolved.config.baseUrl).toBe('http://second.example/v1');
+      // Unqualified, and qualified with the provider in use, both run where they ran before.
+      expect((await ai.registry.resolve({ modelId: 'other:thing' })).adapter.id).toBe('fake');
+      expect(await ai.registry.resolve({ modelId: 'fake:fake-2' })).toMatchObject({ modelId: 'fake-2' });
+      expect((await ai.registry.resolve()).config.apiKey).toBe('sk-first-key-0001');
+      ai.close();
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a reference naming a provider that is not turned on sends nothing anywhere', async () => {
+    const { ai, dataDir, fetched } = await multi([ollama(), openai()]);
+    try {
+      await ai.registry.update({ provider: 'ollama', modelId: 'qwen3:27b' });
+      await ai.registry.update({ target: 'openai', apiKey: 'sk-openai-key-0003' });
+      await expect(ai.registry.resolve({ modelId: 'openai:gpt-x' })).rejects.toMatchObject({
+        message: 'OpenAI is not turned on in Settings.',
+      });
+      expect(await ai.registry.configOf('openai')).toBeNull();
+      const turn = await ai.turn({ runId: 'turn-off-provider-1', message: 'hello', modelId: 'openai:gpt-x' }, { answer: () => true });
+      expect(turn.status).toBe('failed');
+      expect(turn.error).toContain('not turned on');
+      expect(fetched()).toBe(0);
+      ai.close();
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('configFor gives a provider not in use its own stored address', async () => {
+    const { ai, dataDir } = await multi([ollama(), openai()]);
+    try {
+      await ai.registry.update({ provider: 'openai', baseUrl: 'https://gateway.example/v1' });
+      await ai.registry.update({ provider: 'ollama', baseUrl: 'http://127.0.0.1:9999/v1' });
+      const openaiAdapter = ai.registry.adapter('openai');
+      expect(openaiAdapter).not.toBeNull();
+      if (openaiAdapter === null) return;
+      expect(ai.registry.configFor(openaiAdapter)).toMatchObject({ baseUrl: 'https://gateway.example/v1', apiKey: null });
+      // And a provider nobody has set up gets its own default, never the one in use's.
+      const { ai: other, dataDir: otherDir } = await multi([ollama(), openai()]);
+      await other.registry.update({ provider: 'ollama', baseUrl: 'http://127.0.0.1:9999/v1' });
+      const unset = other.registry.adapter('openai');
+      if (unset !== null) expect(other.registry.configFor(unset).baseUrl).toBe('https://api.openai.com/v1');
+      await rm(otherDir, { recursive: true, force: true });
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('ai.settingsUpdate with a target: its own key, the one in use unchanged, and remember moves every key', async () => {
+    const test = await start([createFakeAdapter({ needsKey: true }), createFakeAdapter({ id: 'second', needsKey: true })]);
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'fake', modelId: 'fake-1', apiKey: 'sk-first-key-0001' });
+    const after = await client.call('ai.settingsUpdate', { target: 'second', apiKey: 'sk-second-key-0002', enabled: true });
+    expect(after.provider).toBe('fake');
+    expect(after.keyHint).toBe('0001');
+    expect(after.providers.find((provider) => provider.id === 'second')).toMatchObject({ enabled: true, hasKey: true, keyHint: '0002' });
+    const secretsFile = join(directory, 'ai', 'secrets.json');
+    const stored = JSON.parse(await readFile(secretsFile, 'utf8')) as { secrets: Record<string, string> };
+    expect(stored.secrets['provider:second:apiKey']).toBe('sk-second-key-0002');
+    expect(stored.secrets['provider:fake:apiKey']).toBe('sk-first-key-0001');
+
+    await expect(client.call('ai.settingsUpdate', { enabled: false })).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: 'The provider in use cannot be turned off. Choose another first.',
+    });
+    await expect(client.call('ai.settingsUpdate', { target: 'fake', enabled: false })).rejects.toMatchObject({ code: 'invalid_input' });
+    await expect(client.call('ai.settingsUpdate', { target: 'nobody' })).rejects.toMatchObject({ code: 'invalid_input' });
+    await expect(client.call('ai.settingsUpdate', { provider: 'second', target: 'fake' })).rejects.toMatchObject({ code: 'invalid_input' });
+
+    const forgotten = await client.call('ai.settingsUpdate', { remember: false });
+    expect(existsSync(secretsFile)).toBe(false);
+    // Both keys still work, from memory.
+    expect(forgotten.hasKey).toBe(true);
+    expect(forgotten.providers.map((provider) => provider.hasKey)).toEqual([true, true]);
+    const settingsRaw = await readFile(join(directory, 'ai', 'settings.json'), 'utf8');
+    expect(settingsRaw).not.toContain('sk-');
+  });
+
+  test('AiSettings.providers: one per adapter in order, the top level equal to the one in use', async () => {
+    const test = await start([ollama(), openai(), openrouter()]);
+    const client = await test.connect(merged);
+    const settings = await client.call('ai.settingsUpdate', { provider: 'openai', modelId: 'gpt-x', apiKey: 'sk-openai-key-0003' });
+    expect(settings.providers.map((provider) => provider.id)).toEqual(['ollama', 'openai', 'openrouter']);
+    const inUse = settings.providers[1];
+    expect(inUse).toBeDefined();
+    if (inUse === undefined) return;
+    expect({
+      provider: settings.provider,
+      modelId: settings.modelId,
+      baseUrl: settings.baseUrl,
+      hasKey: settings.hasKey,
+      keyHint: settings.keyHint,
+    }).toEqual({ provider: inUse.id, modelId: inUse.modelId, baseUrl: inUse.baseUrl, hasKey: inUse.hasKey, keyHint: inUse.keyHint });
+    expect(inUse.enabled).toBe(true);
+    // An adapter with no entry: its default address, off, and configured as far as its needs go.
+    expect(settings.providers[0]).toEqual({
+      id: 'ollama',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      modelId: null,
+      enabled: false,
+      hasKey: false,
+      keyHint: null,
+      configured: true,
+    });
+    expect(settings.providers[2]).toMatchObject({ id: 'openrouter', enabled: false, configured: false });
   });
 });
