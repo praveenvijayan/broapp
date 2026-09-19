@@ -202,7 +202,19 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.17: Settings is one set of controls. The AI settings panel draws
+Version 0.4.18: more than one model source at once. Every provider keeps its
+own address, model and key, and is either turned on or never contacted. A
+model written `<provider>:<model>` runs on that provider from a conversation,
+a task or a tier, so light work can stay on Ollama while deep work goes to a
+hosted model, and nothing falls back from one provider to another. Settings
+holds a section per provider with its own test and switch; the model list is
+every turned-on provider's, read at once, and one that cannot be reached costs
+its own group and says why; wherever a model is chosen or named it says `on
+this computer` or `sent to` its provider. OpenRouter has a preset of its own.
+Four packages: `broapp` 0.4.7, additive; `broapp-ai-compatible` 0.4.2, for the
+preset; `broapp-ai-elements` 0.4.7, for the picker; and `broapp-autoapp`
+0.3.17, which depends on all three. Before it, 0.4.17: Settings is one set of
+controls. The AI settings panel draws
 itself whole in any application: one height, corner and border for a field, a
 select and a button, "Required" or "Saved" beside the label, a saved key shown
 as its last characters with Replace and Remove, a switch for remembering it,
@@ -211,7 +223,7 @@ Settings panels share one header, and the panel's lengths follow the
 renderer's control tokens, so a preset moves both. The vocabulary is written
 down in `docs/autoapp/components.md` for the next component. Two packages:
 `broapp` 0.4.6, for the panel and `ai.css`, and `broapp-autoapp` 0.3.16, which
-depends on it. Before it, 0.4.16: the launcher opens on what needs you. An
+depended on it. Before it, 0.4.16: the launcher opens on what needs you. An
 Overview, the first
 screen and a view beside the chat, says what is waiting for you, which task is
 running and at what stage with its limits, what the day has cost as far as it
@@ -244,7 +256,7 @@ task whose builds were refused names the tool, the count and the error, to
 the person, the advice and the next attempt; a turn that ends with unbuilt
 edits is built once by the host; `broapp-autoapp stop` and `status`, a
 **Quit** in the panel, and children that exit when their launcher is gone.
-`broapp-ai-elements` stays at 0.4.6, the providers and `create-broapp` at 0.4.1.
+`broapp-ai-anthropic` and `create-broapp` stay at 0.4.1.
 Earlier: 0.4.12, a backlog. The engineer restates a request, checks it against
 the application's real routes and pages, and splits it into tasks a person
 reviews in a Backlog panel; **Run** builds each task as its own turn on the
