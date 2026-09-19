@@ -49,7 +49,7 @@ import type { LauncherContract } from '../contract.ts';
 
 import { AppsTable } from './AppsTable.tsx';
 import { CandidatePanel } from './CandidatePanel.tsx';
-import { IntentPanel } from './IntentPanel.tsx';
+import { IntentPanel, modelName, usePlaces } from './IntentPanel.tsx';
 import { KnowledgePanel } from './KnowledgePanel.tsx';
 import { LogsPanel } from './LogsPanel.tsx';
 import { startOverviewPoller, type LauncherView } from './overview-poll.ts';
@@ -132,6 +132,8 @@ export function App(): React.ReactElement {
 
 function Workspace({ onStopped }: { readonly onStopped: () => void }): React.ReactElement {
   const connection = useConnection();
+  // Where each provider runs, for naming the running task's model on the Overview.
+  const places = usePlaces([]);
   const apps = useOperation<LauncherContract, 'launcher.appsList'>('launcher.appsList');
   const open = useOperation<LauncherContract, 'launcher.appOpen'>('launcher.appOpen');
   const stop = useOperation<LauncherContract, 'launcher.appStop'>('launcher.appStop');
@@ -653,6 +655,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
         <aside aria-label="Conversations" className="launcher__history">
           <BroappThreadList
             activeId={activeId}
+            describeModel={(ref) => modelName(ref, [], places)}
             loading={threads.loading}
             onCollapse={() => toggleColumn('history', HISTORY_OPEN, setHistoryOpen, false)}
             onDelete={(id) => void deleteThread(id)}
@@ -679,6 +682,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
           onViewAll={showApplications}
           overview={overview}
           readAt={readAt}
+          places={places}
           previewError={previewOpen.error?.message ?? (previewOpen.data?.opened === false ? 'No browser could be opened; the preview’s address is in the launcher’s terminal.' : null)}
           stale={overviewRead.error !== null}
         />
@@ -727,6 +731,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
                 onChange={(modelId) => {
                   if (activeId !== null) void threads.setModel(activeId, modelId);
                 }}
+                sent={active?.messageCount ?? 0}
                 value={active?.modelId ?? null}
               />
               <span className="launcher__spacer" />

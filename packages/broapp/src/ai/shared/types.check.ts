@@ -21,6 +21,7 @@ import type {
   ProviderSettings,
   StoredMessage,
   Thread,
+  UnavailableProvider,
 } from './types.ts';
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
@@ -47,6 +48,12 @@ const modelMatch: Equal<
   BroappModel
 > = true;
 void modelMatch;
+
+const unavailableMatch: Equal<
+  OperationOutput<AiContract, 'ai.modelsList'>['unavailable'][number],
+  UnavailableProvider
+> = true;
+void unavailableMatch;
 
 const providerMatch: Equal<
   OperationOutput<AiContract, 'ai.providersList'>['providers'][number],

@@ -366,6 +366,8 @@ describe('both providers in a running application', () => {
       modelId: 'claude-opus-5',
       apiKey: 'sk-ant-test-1234',
     });
+    // Ollama was in use a moment ago, which turned it on, and it stays on: the
+    // list is both providers', in the build's order.
     expect(await client.call('ai.modelsList', undefined)).toEqual({
       models: [
         {
@@ -374,16 +376,27 @@ describe('both providers in a running application', () => {
           label: 'Opus 5',
           capabilities: { tools: true, vision: true, structuredOutput: true },
         },
+        {
+          provider: 'ollama',
+          modelId: 'llama3',
+          label: 'llama3',
+          capabilities: { tools: true, vision: true, structuredOutput: false },
+        },
       ],
+      unavailable: [],
     });
 
     const tested = await client.call('ai.connectionTest', undefined);
     expect(tested.ok).toBe(true);
     expect(tested.message).toBe('Connected to Anthropic.');
-    // The key travelled to the provider and nowhere else.
-    expect(fetchImpl.seen.every((entry) => entry.url.startsWith('https://api.anthropic.com'))).toBe(
-      true,
-    );
+    // The key travelled to its provider and nowhere else. Ollama, still on, was
+    // asked for its list without it.
+    const keyed = fetchImpl.seen.filter((entry) => Object.values(entry.headers).some((value) => value.includes('sk-ant-test-1234')));
+    expect(keyed.length).toBeGreaterThan(0);
+    expect(keyed.every((entry) => entry.url.startsWith('https://api.anthropic.com'))).toBe(true);
+    expect(
+      fetchImpl.seen.filter((entry) => !entry.url.startsWith('https://api.anthropic.com')).every((entry) => entry.url.startsWith('http://127.0.0.1:11434')),
+    ).toBe(true);
     await client.close();
   });
 });

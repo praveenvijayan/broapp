@@ -23,6 +23,7 @@ import { useOperation } from 'broapp/react';
 import type { OperationOutput } from 'broapp/shared';
 
 import type { LauncherContract } from '../contract.ts';
+import { modelName, type ModelPlaces } from './IntentPanel.tsx';
 
 export type OverviewData = OperationOutput<LauncherContract, 'launcher.overview'>;
 export type NeedsYouItem = OverviewData['needsYou'][number];
@@ -186,6 +187,18 @@ export interface OverviewScreenProps {
   readonly readAt?: number | null;
   /** What Open preview answered, when it could not open one. */
   readonly previewError?: string | null;
+  /**
+   * Where each provider runs and which is in use, so the running task's model
+   * is named with where it runs. Absent, the model is named by its reference.
+   */
+  readonly places?: ModelPlaces;
+}
+
+/** The running task's model, named with where it runs, in the words every picker uses. */
+export function runningModel(ref: string | null, places: ModelPlaces | undefined): string | null {
+  if (ref === null) return null;
+  if (places === undefined) return ref;
+  return modelName(ref, [], places);
 }
 
 export function OverviewScreen(props: OverviewScreenProps): React.ReactElement {
@@ -254,6 +267,7 @@ export function OverviewScreen(props: OverviewScreenProps): React.ReactElement {
           now={now}
           onDetails={() => (running === null ? props.onOpenBacklog(null) : props.onOpenBacklog({ appId: running.appId, intentId: running.intentId }))}
           onPreview={() => (running === null ? undefined : props.onOpenPreview(running.appId))}
+          model={running === null ? null : runningModel(running.modelId, props.places)}
           previewError={props.previewError ?? null}
           running={running}
         />
@@ -472,6 +486,7 @@ function Stepper({ stage }: { readonly stage: Running['stage'] }): React.ReactEl
 function RunningCard({
   running,
   appName,
+  model,
   now,
   filled,
   onPreview,
@@ -480,6 +495,8 @@ function RunningCard({
 }: {
   readonly running: Running | null;
   readonly appName: string;
+  /** The model the task is on, with where it runs; `null` when not known. */
+  readonly model: string | null;
   readonly now: number;
   readonly filled: 'attention' | 'preview' | 'backlog';
   readonly onPreview: () => void;
@@ -516,6 +533,7 @@ function RunningCard({
       <h2 className="launcher__ov-now-title">{running.taskTitle}</h2>
       <p className="launcher__ov-where">
         {appName} · Task {running.taskIndex} of {running.taskCount}
+        {model === null ? null : ` · ${model}`}
       </p>
       <Stepper stage={running.stage} />
       <div className="launcher__ov-facts">

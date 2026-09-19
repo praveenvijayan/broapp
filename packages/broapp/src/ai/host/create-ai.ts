@@ -20,15 +20,16 @@ import type { Bridge } from 'brobridge';
 // this code from being bundled into a page.
 import { createPendingApprovals, createReservedHostApp } from '../../host/index.ts';
 import type { HostApp, HostLogger, StreamSink } from '../../host/app.ts';
-import { publicError } from '../../shared/errors.ts';
+import { isPublicError, publicError, type PublicError } from '../../shared/errors.ts';
 import { aiContract, type AiContract } from '../shared/contract.ts';
-import type { ChatTurn, ProviderInfo } from '../shared/types.ts';
+import { formatModelRef } from '../shared/model-ref.ts';
+import type { BroappModel, ChatTurn, ProviderInfo } from '../shared/types.ts';
 
 import { AdapterError, toPublicError, type AdapterConfig, type ProviderAdapter } from './adapter.ts';
 import { createRegistry, type Registry } from './registry.ts';
 import { runChat, type RunDeps } from './run.ts';
 import type { ChatEvent } from './run-types.ts';
-import { createFileSecretStore, createMemorySecretStore } from './secrets.ts';
+import { apiKeySecretName, createFileSecretStore, createMemorySecretStore } from './secrets.ts';
 import { createSettingsStore } from './settings.ts';
 import { openThreads, type ThreadStore } from './threads.ts';
 import { GUARDED, type AiContextProviders, type AiTool, type ContextDocument } from './tool.ts';
@@ -228,6 +229,73 @@ const ANSWER_INTERVAL_MS = 5;
 /** How long a provider is given to answer a listing or a connection test. */
 const PROVIDER_TIMEOUT_MS = 20_000;
 
+/** The contract's bound on `ai.modelsList`, over every provider's list together. */
+const MAX_LISTED_MODELS = 1000;
+
+const NOT_SET_UP = 'AI is not set up yet. Open Settings to choose a provider.';
+
+/**
+ * A model id no provider offers, for asking `resolve` whether a provider's
+ * key and address are there. `resolve` checks the model last and never sends
+ * anything, so the id is never used.
+ */
+const NO_MODEL = '-';
+
+/** One provider's list, read. */
+interface Listed {
+  readonly adapter: ProviderAdapter;
+  readonly models: BroappModel[];
+}
+
+/** One provider that could not be listed, and the error that says why. */
+interface Unlisted {
+  readonly adapter: ProviderAdapter;
+  readonly failure: PublicError;
+}
+
+/**
+ * What stops a provider being tested, in `resolve`'s words, or `null`.
+ *
+ * Written here as well as in the registry because a provider that is off
+ * cannot go through `resolve` — which refuses it for being off — and still has
+ * to be testable. A test holds the two sets of sentences equal.
+ */
+function unmet(adapter: ProviderAdapter, config: AdapterConfig): string | null {
+  if (adapter.needs.apiKey === 'required' && (config.apiKey === null || config.apiKey === '')) {
+    return `An API key is required for ${adapter.label}.`;
+  }
+  if (adapter.needs.baseUrl === 'required' && (config.baseUrl === null || config.baseUrl === '')) {
+    return `A server address is required for ${adapter.label}.`;
+  }
+  return null;
+}
+
+/**
+ * Split `limit` rows between lists of the given lengths so that no list gives
+ * up rows while another keeps more than it: a short list is shown whole, and
+ * what is left is shared equally between the long ones.
+ */
+export function fairShares(lengths: readonly number[], limit: number): number[] {
+  const shares = lengths.map(() => 0);
+  let left = limit;
+  let open = lengths.map((_, index) => index).filter((index) => (lengths[index] ?? 0) > 0);
+  // Each round gives every list still wanting rows an equal part of what is
+  // left, at least one, so the loop ends: rows run out or every list is whole.
+  while (open.length > 0 && left > 0) {
+    const each = Math.max(1, Math.floor(left / open.length));
+    const next: number[] = [];
+    for (const index of open) {
+      if (left === 0) break;
+      const given = Math.min((lengths[index] ?? 0) - (shares[index] ?? 0), each, left);
+      shares[index] = (shares[index] ?? 0) + given;
+      left -= given;
+      if ((shares[index] ?? 0) < (lengths[index] ?? 0)) next.push(index);
+    }
+    open = next;
+  }
+  return shares;
+}
+
 /** Defaults for the run loop, all overridable per application. */
 const DEFAULT_CONTEXT_BUDGET_CHARS = 40_000;
 const DEFAULT_MAX_STEPS = 8;
@@ -263,11 +331,14 @@ export function createAi(options: CreateAiOptions): Ai {
   // Both stores are built once and kept. `remember` chooses between them, and
   // switching has to move a key from one to the other rather than construct a
   // new store and lose what the old one held.
+  const settingsStore = createSettingsStore(options.dataDir);
+  const fileSecrets = createFileSecretStore(options.dataDir);
+  const memorySecrets = createMemorySecretStore();
   const registry = createRegistry({
     adapters: options.providers,
-    settingsStore: createSettingsStore(options.dataDir),
-    fileSecrets: createFileSecretStore(options.dataDir),
-    memorySecrets: createMemorySecretStore(),
+    settingsStore,
+    fileSecrets,
+    memorySecrets,
     fetch: options.fetch ?? globalThis.fetch,
   });
 
@@ -295,13 +366,38 @@ export function createAi(options: CreateAiOptions): Ai {
   }));
 
   host.operation('ai.modelsList', async () => {
-    const { adapter, config } = await requireConfig();
-    try {
-      const models = await adapter.models(config, AbortSignal.timeout(PROVIDER_TIMEOUT_MS));
-      return { models };
-    } catch (cause) {
-      throw toPublicError(cause);
+    // Nothing set up is still "not set up", in today's words, whatever else is
+    // turned on: a launcher with no provider in use has not been set up.
+    await requireConfig();
+    const settings = await registry.settings();
+    const enabled = options.providers.filter((adapter) =>
+      settings.providers.some((entry) => entry.id === adapter.id && entry.enabled),
+    );
+    // Every enabled provider at once, each under its own deadline, so one that
+    // is slow or down costs its own group and not the whole list.
+    const answers = await Promise.all(enabled.map((adapter) => listOf(adapter)));
+    const read = answers.filter((answer): answer is Listed => 'models' in answer);
+    const failed = answers.filter((answer): answer is Unlisted => 'failure' in answer);
+    if (read.length === 0) {
+      // An application with one provider sees exactly what it saw: that
+      // provider's own error. With several, the first in the build's order.
+      const first = failed[0];
+      throw first === undefined ? publicError.unavailable(NOT_SET_UP) : first.failure;
     }
+    const shares = fairShares(read.map((answer) => answer.models.length), MAX_LISTED_MODELS);
+    const unavailable = failed.map((answer) => ({ provider: answer.adapter.id, message: answer.failure.message }));
+    const models: BroappModel[] = [];
+    read.forEach((answer, index) => {
+      const share = shares[index] ?? 0;
+      models.push(...answer.models.slice(0, share));
+      if (share < answer.models.length) {
+        unavailable.push({
+          provider: answer.adapter.id,
+          message: `${answer.adapter.label}: only the first ${String(share)} models are shown.`,
+        });
+      }
+    });
+    return { models, unavailable };
   });
 
   host.operation('ai.connectionTest', async () => {
@@ -309,6 +405,30 @@ export function createAi(options: CreateAiOptions): Ai {
     // missing its key would just ask the provider to reject it, and the layer
     // already knows the answer and can say it in better words.
     const { adapter, config } = await registry.resolve();
+    return tryConnection(adapter, config);
+  });
+
+  host.operation('ai.providerTest', async ({ provider }) => {
+    const adapter = registry.adapter(provider);
+    if (adapter === null) throw publicError.invalidInput('Unknown provider.');
+    // Its own stored address and key, whether or not it is turned on: a person
+    // tests a provider before they decide to use it. Testing leaves it as it was.
+    const settings = settingsStore.read();
+    const secrets = settings.remember ? fileSecrets : memorySecrets;
+    const config: AdapterConfig = {
+      ...registry.configFor(adapter),
+      apiKey: await secrets.get(apiKeySecretName(adapter.id)),
+    };
+    const problem = unmet(adapter, config);
+    if (problem !== null) throw publicError.unavailable(problem);
+    return tryConnection(adapter, config);
+  });
+
+  /** One test of one provider: an answer either way, never a failed route for a provider's refusal. */
+  async function tryConnection(
+    adapter: ProviderAdapter,
+    config: AdapterConfig,
+  ): Promise<{ ok: boolean; message: string; latencyMs: number }> {
     const started = Bun.nanoseconds();
     const elapsed = (): number => Math.round((Bun.nanoseconds() - started) / 1_000_000);
     try {
@@ -321,7 +441,23 @@ export function createAi(options: CreateAiOptions): Ai {
       if (!(cause instanceof AdapterError)) throw cause;
       return { ok: false, message: cause.message, latencyMs: elapsed() };
     }
-  });
+  }
+
+  /**
+   * One enabled provider's list, or why there is none. A provider whose key
+   * or address is missing is not asked: `resolve` names what is missing, in
+   * the same words a turn would hear, so the rule stays written once.
+   */
+  async function listOf(adapter: ProviderAdapter): Promise<Listed | Unlisted> {
+    try {
+      const { config } = await registry.resolve({ modelId: formatModelRef(adapter.id, NO_MODEL) });
+      return { adapter, models: await adapter.models(config, AbortSignal.timeout(PROVIDER_TIMEOUT_MS)) };
+    } catch (cause) {
+      if (cause instanceof AdapterError) return { adapter, failure: toPublicError(cause) };
+      if (isPublicError(cause)) return { adapter, failure: cause };
+      throw cause;
+    }
+  }
 
   // Opened on the first conversation route and not before: an application
   // whose user never opens the panel should not find a database in its data
@@ -374,7 +510,7 @@ export function createAi(options: CreateAiOptions): Ai {
   async function requireConfig(): Promise<{ adapter: ProviderAdapter; config: AdapterConfig }> {
     const current = await registry.currentConfig();
     if (current === null) {
-      throw publicError.unavailable('AI is not set up yet. Open Settings to choose a provider.');
+      throw publicError.unavailable(NOT_SET_UP);
     }
     return current;
   }

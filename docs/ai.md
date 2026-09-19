@@ -127,8 +127,11 @@ const [open, setOpen] = useState(false);
 **The workspace pieces, from the same package.** A panel is not always a
 drawer. `BroappChat` takes a `topBar` — anything the application wants above
 the conversation — and the pieces that usually go in one are components of
-their own: `BroappModelPicker` (a searchable list of the provider's models,
-with a mark for each provider and a badge on the ones that can see),
+their own: `BroappModelPicker` (a searchable list of every enabled provider's
+models, grouped by provider with each group saying whether its models run on
+this computer or are sent to a named provider, a badge on the ones that can
+see, and one line under it when a choice moves the conversation on or off this
+computer),
 `BroappChatMenu` (copy the transcript, empty the conversation, delete it —
 asked twice, inside the menu), `BroappThreadList` (the conversations, grouped
 by the day they last changed, renamed in place) and `BroappSchemeToggle`
@@ -224,10 +227,17 @@ handed back unread. Two things are deliberately not stored:
   test asserts the configured key does not appear in `threads.sqlite`.
 
 A thread's `modelId` is sent with each turn and overrides the model chosen in
-Settings **within the configured provider**. The provider is never overridden
-per turn: a different provider means a different key and a different answer to
-"does this leave my computer", and that stays a Settings decision. A thread
-with `modelId: null` follows Settings.
+Settings. It is a **model reference**: a bare id is a model of the provider in
+use, and `<provider>:<model>` — `ollama:qwen3:27b`,
+`openrouter:anthropic/claude-opus-5` — is a model of that provider, run with
+its own key and address, split on the first colon (`parseModelRef` and
+`formatModelRef` in `broapp/ai`). A reference may name only a provider the
+person turned on in Settings; one that is off is sent nothing. Because a
+different provider means a different key and a different answer to "does this
+leave my computer", every place a model is chosen or named says which: `on this
+computer`, or `sent to <provider>`. The pickers always write a qualified
+reference; a bare one stored earlier still works and is shown as the model of
+the provider in use. A thread with `modelId: null` follows Settings.
 
 Every thread route answers even when no provider is configured. A conversation
 is the user's own writing; somebody who has just deleted their key still owns
@@ -326,16 +336,27 @@ is that a tool which changes anything has to be approved by the user.
 | `ai.settingsGet` | Current settings. Never contains the key. |
 | `ai.settingsUpdate` | Change one or more settings; returns the result. |
 | `ai.providersList` | The providers compiled into this build. |
-| `ai.modelsList` | The models the configured provider offers. |
-| `ai.connectionTest` | One cheap call to the provider, and what happened. |
+| `ai.modelsList` | Every enabled provider's models, asked at once, in the build's order, plus `unavailable`: the providers that could not be read, each with its sentence. It fails only when none could be read. |
+| `ai.connectionTest` | One cheap call to the provider in use, and what happened. |
+| `ai.providerTest` | The same for one named provider, with its own address and key, whether or not it is turned on. |
 | `ai.chat` (stream) | One turn. |
 | `ai.chatConfirm` | Answer a `confirm` event. |
 
 Two files, under `<dataDir>/ai/`:
 
-- `settings.json` — provider, model, server address, and the `remember` flag.
-  Never a key; a test asserts the string does not appear in it.
-- `secrets.json` — the key, written with mode `0600`.
+- `settings.json` — the provider in use, and for every provider set up its own
+  server address, model and whether it is turned on; and the `remember` flag,
+  which covers every key. Never a key; a test asserts the string does not
+  appear in it. A version-1 file (one provider) is read as it stands.
+- `secrets.json` — the keys, one per provider, written with mode `0600`.
+
+**More than one provider.** Settings keep every provider's address, model and
+key, so changing the provider in use and changing back types nothing twice. A
+provider is either turned on or not: the one in use always is, and any other
+only when the person turns it on. Only a provider that is on offers its models
+to `ai.modelsList` and runs a model reference that names it. Nothing falls
+back: a reference to a provider that fails fails, and is never sent to another
+provider instead.
 
 The key file is **not encrypted**. It is a file owned by the user's own account,
 the same posture as `~/.aws/credentials` or `~/.npmrc`. What that protects
@@ -359,7 +380,7 @@ characters are a small fraction of them.
 Two packages ship:
 
 - **`broapp-ai-anthropic`** — `anthropic()`.
-- **`broapp-ai-compatible`** — `ollama()`, `openai()`, `customServer()`, and
+- **`broapp-ai-compatible`** — `ollama()`, `openai()`, `openrouter()`, `customServer()`, and
   `openaiCompatible(options)` for anything else. One adapter covers OpenAI,
   Ollama, LM Studio, llama.cpp's server, vLLM and OpenRouter, because they
   answer `GET /models` with the same envelope and accept the same chat request.
@@ -369,8 +390,8 @@ vision its own way. `ollama()` asks the server's native `POST /api/show`, which
 reports `capabilities`, and treats any failure there as "unknown" rather than
 "cannot see". `openai()` matches the id against the vision-capable families
 (`gpt-4o`, `gpt-4.1`, `gpt-4-turbo`, `gpt-5`, `o1`, `o3`, `o4`, `chatgpt-4o`),
-a list that will age. `customServer()`, and `openaiCompatible()` without the
-`vision` option, assume every model can see.
+a list that will age. `openrouter()`, `customServer()`, and `openaiCompatible()`
+without the `vision` option, assume every model can see.
 
 An adapter is small. It answers what it needs, lists models, proves a
 configuration works, and builds a model:
@@ -491,5 +512,6 @@ cancellation.
   panel"). Set both if you want native scrollbars and form controls to follow
   too.
 - **One turn at a time.** Sending while a turn is running is ignored.
-- **`ai.modelsList` needs a configured provider**, so a settings panel cannot
-  preview another provider's models before switching to it.
+- **`ai.modelsList` lists only providers that are turned on**, so a provider's
+  models appear once it is on. `ai.providerTest` tries one that is off without
+  turning it on.

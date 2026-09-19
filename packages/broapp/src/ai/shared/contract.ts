@@ -40,6 +40,11 @@ const providerInfo = s.object({
   defaultBaseUrl: s.nullable(s.string()),
 });
 
+/** A provider whose models are missing from the list, and the sentence that says why. */
+const unavailableProvider = s.object({ provider: s.string(), message: s.string() });
+
+const connectionResult = s.object({ ok: s.boolean(), message: s.string(), latencyMs: s.number() });
+
 const providerSettings = s.object({
   id: s.string(),
   baseUrl: s.nullable(s.string()),
@@ -180,13 +185,23 @@ export const aiContract = defineContract({
     },
     'ai.modelsList': {
       input: s.void(),
-      output: s.object({ models: s.array(model, { max: 1000 }) }),
-      summary: 'The models the configured provider offers.',
+      output: s.object({
+        // Every enabled provider's models, in the build's provider order.
+        models: s.array(model, { max: 1000 }),
+        // The providers that could not be read, or were cut short, and why.
+        unavailable: s.array(unavailableProvider, { max: 50 }),
+      }),
+      summary: 'The models every provider turned on in Settings offers.',
     },
     'ai.connectionTest': {
       input: s.void(),
-      output: s.object({ ok: s.boolean(), message: s.string(), latencyMs: s.number() }),
+      output: connectionResult,
       summary: 'Try the configured provider once and report what happened.',
+    },
+    'ai.providerTest': {
+      input: s.object({ provider: s.string({ max: 64 }) }),
+      output: connectionResult,
+      summary: 'Try one provider with its own address and key, whether or not it is turned on.',
     },
     'ai.chatConfirm': {
       input: s.object({ runId, callId: s.string({ max: 200 }), approve: s.boolean() }),

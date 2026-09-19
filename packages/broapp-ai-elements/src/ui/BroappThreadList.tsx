@@ -32,6 +32,11 @@ export interface BroappThreadListProps {
   readonly onCollapse?: () => void;
   /** For the day grouping. Default `Date.now()`, which is what a browser wants. */
   readonly now?: number;
+  /**
+   * How a pinned conversation's model reference is named, with where it runs.
+   * Absent, the reference itself is shown.
+   */
+  readonly describeModel?: (ref: string) => string;
 }
 
 /** The three buckets, in the order they are shown. */
@@ -96,6 +101,7 @@ export function BroappThreadList({
   emptyText = 'No conversations yet.',
   onCollapse,
   now,
+  describeModel,
 }: BroappThreadListProps): React.ReactElement {
   // Which row is being renamed, and the draft in its field. One at a time:
   // two open fields would be two answers to "what is this called".
@@ -186,7 +192,7 @@ export function BroappThreadList({
                     >
                       <span className="broapp-chat-threads__name">{thread.title}</span>
                       {thread.modelId === null ? null : (
-                        <span className="broapp-chat-threads__model">{thread.modelId}</span>
+                        <span className="broapp-chat-threads__model">{describeModel?.(thread.modelId) ?? thread.modelId}</span>
                       )}
                     </button>
                     <RowMenu

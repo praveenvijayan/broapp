@@ -32,7 +32,8 @@ export interface AiSettingsHook {
   readonly pending: boolean;
   readonly error: BroappError | null;
   update(patch: UpdatePatch): Promise<void>;
-  test(): Promise<ConnectionResult | null>;
+  /** Test the provider in use, or, given an id, that provider with its own address and key. */
+  test(provider?: string): Promise<ConnectionResult | null>;
   refresh(): Promise<void>;
 }
 
@@ -47,21 +48,25 @@ export function useAiSettings(): AiSettingsHook {
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<BroappError | null>(null);
 
-  // The provider list cannot change while the application runs — it is what
-  // was compiled in — so it is fetched once.
-  const fetched = React.useRef(false);
+  // The providers cannot change while the application runs — they are what
+  // was compiled in — but whether each runs on this computer is a property of
+  // its address, so the list is read again when an address changes.
+  const addresses = JSON.stringify((shared.settings?.providers ?? []).map((entry) => [entry.id, entry.baseUrl]));
   React.useEffect(() => {
-    if (fetched.current) return;
-    fetched.current = true;
+    let current = true;
     void (async () => {
       try {
         const connected = await shared.client();
-        setProviders((await connected.call('ai.providersList', undefined)).providers);
+        const listed = (await connected.call('ai.providersList', undefined)).providers;
+        if (current) setProviders(listed);
       } catch (cause) {
-        setError(asBroappError(cause, 'The provider list could not be read.'));
+        if (current) setError(asBroappError(cause, 'The provider list could not be read.'));
       }
     })();
-  }, [shared]);
+    return () => {
+      current = false;
+    };
+  }, [shared, addresses]);
 
   const update = React.useCallback(
     async (patch: UpdatePatch): Promise<void> => {
@@ -79,12 +84,14 @@ export function useAiSettings(): AiSettingsHook {
     [shared],
   );
 
-  const test = React.useCallback(async (): Promise<ConnectionResult | null> => {
+  const test = React.useCallback(async (provider?: string): Promise<ConnectionResult | null> => {
     setPending(true);
     setError(null);
     try {
       const connected = await shared.client();
-      return await connected.call('ai.connectionTest', undefined);
+      return provider === undefined
+        ? await connected.call('ai.connectionTest', undefined)
+        : await connected.call('ai.providerTest', { provider });
     } catch (cause) {
       setError(asBroappError(cause, 'The connection could not be tested.'));
       return null;

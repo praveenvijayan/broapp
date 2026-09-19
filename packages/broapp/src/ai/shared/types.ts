@@ -25,6 +25,15 @@ export interface BroappModel {
   };
 }
 
+/**
+ * A provider whose models are missing from `ai.modelsList`, or cut short, and
+ * why, in a sentence a person can read.
+ */
+export interface UnavailableProvider {
+  provider: string;
+  message: string;
+}
+
 /** A provider compiled into this application, as the browser sees it. */
 export interface ProviderInfo {
   id: string;

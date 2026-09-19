@@ -19,6 +19,8 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 
+import { describeModel, findModel, formatModelRef, whereItRuns } from 'broapp/ai';
+import type { ProviderPlace, UnavailableProvider } from 'broapp/ai';
 import { useAiModels, useAiSettings } from 'broapp/ai/react';
 import type { AiContract, AiModelsHook } from 'broapp/ai/react';
 import { useOperation } from 'broapp/react';
@@ -131,35 +133,78 @@ function Frame({
 
 // ── Drawing: rows in, callbacks out ─────────────────────────────────────────
 
-/** The models a task may be given: the provider's, able to call tools. */
+/**
+ * Where the models come from: the providers in the build's order with where
+ * each runs, which of them are turned on, the one in use, and the ones whose
+ * list could not be read. A stored reference is read against these, through
+ * the same `describeModel` the conversation picker uses.
+ */
+export interface ModelPlaces {
+  readonly providers: readonly ProviderPlace[];
+  readonly enabled: readonly string[];
+  readonly activeProvider: string | null;
+  readonly unavailable: readonly UnavailableProvider[];
+}
+
+/** The models a task may be given: every enabled provider's, able to call tools. */
 function toolModels(models: readonly Model[]): Model[] {
   return models.filter((model) => model.capabilities.tools);
 }
 
-/** A model as the list names it, or its id when the list has not got it. */
-function modelName(modelId: string, models: readonly Model[]): string {
-  return models.find((model) => model.modelId === modelId)?.label ?? modelId;
+/**
+ * A model as a person should read it: its name, where it runs, and what is
+ * wrong with it, if anything. Without `places`, the name alone, as the list
+ * names it or by its id.
+ */
+export function modelName(ref: string, models: readonly Model[], places?: ModelPlaces): string {
+  if (places === undefined) return models.find((model) => model.modelId === ref)?.label ?? ref;
+  const described = describeModel(ref, { models, ...places });
+  // With no list to look in, nothing can be said to be missing from it; a
+  // provider that is off is still said.
+  const problem = models.length === 0 && described.problem === 'not offered' ? null : described.problem;
+  return [described.name, described.where, problem].filter((part) => part !== null).join(' · ');
 }
 
 /**
- * What a select's empty choice runs on, by name: the tier's model when the tier
- * has one, otherwise the model chosen in Settings. A person choosing a model
- * has to see which one they would be choosing instead of.
+ * What a select's empty choice runs on, by name and where it runs: the tier's
+ * model when the tier has one, otherwise the model chosen in Settings. A person
+ * choosing a model has to see which one they would be choosing instead of.
  */
 export function inheritedModel(
   tier: { readonly name: string; readonly model: string | null } | null,
   settingsModel: string | null,
   models: readonly Model[],
+  places?: ModelPlaces,
 ): string {
-  if (tier !== null && tier.model !== null) return `${tier.name} tier: ${modelName(tier.model, models)}`;
-  return settingsModel === null ? 'Settings model' : `Settings: ${modelName(settingsModel, models)}`;
+  if (tier !== null && tier.model !== null) return `${tier.name} tier: ${modelName(tier.model, models, places)}`;
+  return settingsModel === null ? 'Settings model' : `Settings: ${modelName(settingsModel, models, places)}`;
 }
 
-/** A model `<select>`, keeping the current value even when the list has not got it. */
+/**
+ * Why a tier's model cannot run, in one sentence, or `null`: its provider is
+ * turned off, or its list could not be read. Said above the tier rows, because
+ * a run that will fail at its first task of that tier should say so first.
+ */
+export function tierProblem(tier: string, ref: string, models: readonly Model[], places: ModelPlaces): string | null {
+  const found = findModel(ref, models, places.activeProvider, places.providers.map((entry) => entry.id));
+  const place = places.providers.find((entry) => entry.id === found.provider);
+  if (place === undefined) return null;
+  if (!places.enabled.includes(place.id)) return `The ${tier} tier names ${place.label}, which is off in Settings.`;
+  const down = places.unavailable.find((entry) => entry.provider === place.id && !entry.message.includes('only the first'));
+  if (down !== undefined) return `The ${tier} tier names ${place.label}, which cannot be reached: ${down.message}`;
+  return null;
+}
+
+/**
+ * A model `<select>`, grouped by provider, each group saying where its models
+ * run; keeping the current value even when the list has not got it. A choice
+ * is written as a reference naming its provider.
+ */
 function ModelSelect({
   label,
   value,
   models,
+  places,
   unreadable,
   disabled,
   first,
@@ -168,13 +213,29 @@ function ModelSelect({
   label: string;
   value: string | null;
   models: readonly Model[];
+  places?: ModelPlaces | undefined;
   unreadable: boolean;
   disabled: boolean;
   first: string;
   onChange(modelId: string | null): void;
 }): React.ReactElement {
   const offered = toolModels(models);
-  const missing = value !== null && !offered.some((model) => model.modelId === value);
+  const found =
+    value === null
+      ? null
+      : findModel(value, offered, places?.activeProvider ?? null, places?.providers.map((entry) => entry.id) ?? []);
+  // A stored bare id that the list offers shows as that model's option; the
+  // reference is only rewritten when the person chooses.
+  const selected = value === null ? '' : found?.model != null ? formatModelRef(found.model.provider, found.model.modelId) : value;
+  const order = [...(places?.providers.map((entry) => entry.id) ?? [])];
+  for (const model of offered) if (!order.includes(model.provider)) order.push(model.provider);
+  const groups = order
+    .map((provider) => ({ provider, models: offered.filter((model) => model.provider === provider) }))
+    .filter((group) => group.models.length > 0);
+  const heading = (provider: string): string => {
+    const place = places?.providers.find((entry) => entry.id === provider);
+    return place === undefined ? provider : `${place.label} — ${whereItRuns(place)}`;
+  };
   return (
     <span className="launcher__intent-model">
       <select
@@ -182,14 +243,18 @@ function ModelSelect({
         className="launcher__input launcher__intent-select"
         disabled={disabled}
         onChange={(event) => onChange(event.target.value === '' ? null : event.target.value)}
-        value={value ?? ''}
+        value={selected}
       >
         <option value="">{first}</option>
-        {missing ? <option value={value}>{value}</option> : null}
-        {offered.map((model) => (
-          <option key={model.modelId} value={model.modelId}>
-            {model.label}
-          </option>
+        {value !== null && found?.model == null ? <option value={value}>{modelName(value, models, places)}</option> : null}
+        {groups.map((group) => (
+          <optgroup key={group.provider} label={heading(group.provider)}>
+            {group.models.map((model) => (
+              <option key={`${model.provider}/${model.modelId}`} value={formatModelRef(model.provider, model.modelId)}>
+                {model.label}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
       {unreadable ? <span className="launcher__intent-note">{MODELS_UNREADABLE}</span> : null}
@@ -197,9 +262,20 @@ function ModelSelect({
   );
 }
 
+/** Where a task or a tier would run: its own reference, else the Settings model's provider. */
+function runsWhere(ref: string | null, models: readonly Model[], places: ModelPlaces | undefined): string | null {
+  if (places === undefined) return null;
+  const provider =
+    ref === null ? places.activeProvider : findModel(ref, models, places.activeProvider, places.providers.map((entry) => entry.id)).provider;
+  const place = places.providers.find((entry) => entry.id === provider);
+  return place === undefined ? null : whereItRuns(place);
+}
+
 export interface TierModelsBlockProps {
   readonly value: TierModels | null;
   readonly models: readonly Model[];
+  /** Where each provider runs, which are on, and which could not be read. */
+  readonly places?: ModelPlaces;
   /** The model chosen in Settings, which a tier with none runs on. */
   readonly settingsModel?: string | null;
   readonly unreadable: boolean;
@@ -208,8 +284,16 @@ export interface TierModelsBlockProps {
 }
 
 /** The three tier models, collapsed until somebody wants them. */
-export function TierModelsBlock({ value, models, settingsModel = null, unreadable, error, onChange }: TierModelsBlockProps): React.ReactElement {
+export function TierModelsBlock({ value, models, places, settingsModel = null, unreadable, error, onChange }: TierModelsBlockProps): React.ReactElement {
   const tiers = ['light', 'standard', 'deep'] as const;
+  const problems =
+    value === null || places === undefined
+      ? []
+      : tiers.flatMap((tier) => {
+          const ref = value[tier];
+          const problem = ref === null ? null : tierProblem(tier, ref, models, places);
+          return problem === null ? [] : [problem];
+        });
   return (
     <details className="launcher__intent-tiers">
       <summary className="launcher__intent-summary">Models by tier</summary>
@@ -217,24 +301,34 @@ export function TierModelsBlock({ value, models, settingsModel = null, unreadabl
         A task runs on its own model when one is chosen, otherwise on its tier&apos;s, otherwise on the model chosen in
         Settings.
       </p>
+      {problems.map((problem) => (
+        <p className="launcher__message launcher__message--error" key={problem} role="alert">
+          {problem}
+        </p>
+      ))}
       {value === null ? (
         <p className="launcher__lede">Reading the tier models…</p>
       ) : (
         <div className="launcher__intent-tier-list">
-          {tiers.map((tier) => (
-            <label className="launcher__log-control" key={tier}>
-              {tier}
-              <ModelSelect
-                disabled={false}
-                first={inheritedModel(null, settingsModel, models)}
-                label={`Model for ${tier} tasks`}
-                models={models}
-                onChange={(modelId) => onChange({ ...value, [tier]: modelId })}
-                unreadable={unreadable}
-                value={value[tier]}
-              />
-            </label>
-          ))}
+          {tiers.map((tier) => {
+            const where = runsWhere(value[tier], models, places);
+            return (
+              <label className="launcher__log-control" key={tier}>
+                {tier}
+                <ModelSelect
+                  disabled={false}
+                  first={inheritedModel(null, settingsModel, models, places)}
+                  label={`Model for ${tier} tasks`}
+                  models={models}
+                  onChange={(modelId) => onChange({ ...value, [tier]: modelId })}
+                  places={places}
+                  unreadable={unreadable}
+                  value={value[tier]}
+                />
+                {where === null ? null : <span className="launcher__intent-note">{where}</span>}
+              </label>
+            );
+          })}
         </div>
       )}
       {error === null ? null : (
@@ -365,6 +459,7 @@ export interface TaskRowProps {
   /** The model chosen in Settings, which a task with no other model runs on. */
   readonly settingsModel?: string | null;
   readonly models: readonly Model[];
+  readonly places?: ModelPlaces | undefined;
   readonly unreadable: boolean;
   readonly open: boolean;
   onToggle(): void;
@@ -381,12 +476,14 @@ export function TaskRow({
   tierModel,
   settingsModel = null,
   models,
+  places,
   unreadable,
   open,
   onToggle,
   onModel,
   children,
 }: TaskRowProps): React.ReactElement {
+  const where = runsWhere(task.modelOverride ?? tierModel, models, places);
   return (
     <li className="launcher__log-row launcher__intent-task">
       <div className="launcher__intent-line">
@@ -401,13 +498,15 @@ export function TaskRow({
         </span>
         <ModelSelect
           disabled={!MODEL_EDITABLE.has(task.stored)}
-          first={inheritedModel({ name: task.tier, model: tierModel }, settingsModel, models)}
+          first={inheritedModel({ name: task.tier, model: tierModel }, settingsModel, models, places)}
           label={`Model for ${task.slug}`}
           models={models}
           onChange={onModel}
+          places={places}
           unreadable={unreadable}
           value={task.modelOverride}
         />
+        {where === null ? null : <span className="launcher__intent-note">{where}</span>}
       </div>
       {task.status === 'blocked' ? (
         <p className="launcher__intent-note launcher__intent-state launcher__intent-blocked">{`blocked by ${task.waitingOn.join(', ')}`}</p>
@@ -584,6 +683,7 @@ export interface IntentDetailViewProps {
   readonly tierModels: TierModels | null;
   readonly settingsModel?: string | null;
   readonly models: readonly Model[];
+  readonly places?: ModelPlaces | undefined;
   readonly unreadable: boolean;
   readonly withdrawError: string | null;
   readonly modelError: string | null;
@@ -599,6 +699,7 @@ export function IntentDetailView({
   tierModels,
   settingsModel = null,
   models,
+  places,
   unreadable,
   withdrawError,
   modelError,
@@ -739,6 +840,7 @@ export function IntentDetailView({
               run={run}
               {...(onAnswer === undefined ? {} : { onAnswer: (answer: string) => onAnswer(task.id, answer) })}
               models={models}
+              places={places}
               onModel={(modelId) => onModel(task.id, modelId)}
               onToggle={() => setOpenTask(openTask === task.id ? null : task.id)}
               open={renderTask !== undefined && openTask === task.id}
@@ -915,6 +1017,17 @@ function usePolling(moving: boolean, tick: () => void): void {
 
 // ── Reading: the live panel ─────────────────────────────────────────────────
 
+/** The providers as Settings and `ai.providersList` describe them, for reading a reference. */
+export function usePlaces(unavailable: readonly UnavailableProvider[]): ModelPlaces {
+  const { settings, providers } = useAiSettings();
+  return {
+    providers: providers.map((entry) => ({ id: entry.id, label: entry.label, local: entry.local })),
+    enabled: (settings?.providers ?? []).filter((entry) => entry.enabled).map((entry) => entry.id),
+    activeProvider: settings?.provider ?? null,
+    unavailable,
+  };
+}
+
 function LiveIntentPanel({
   appId,
   onClose,
@@ -930,6 +1043,7 @@ function LiveIntentPanel({
   const tierGet = useOperation<LauncherContract, 'launcher.intentModelsGet'>('launcher.intentModelsGet');
   const tierSet = useOperation<LauncherContract, 'launcher.intentModelsSet'>('launcher.intentModelsSet');
   const models = useAiModels();
+  const places = usePlaces(models.unavailable);
   const settingsModel = useAiSettings().settings?.modelId ?? null;
   const [reload, setReload] = useState(0);
   const [opened, setOpened] = useState<number | null>(null);
@@ -956,6 +1070,7 @@ function LiveIntentPanel({
           error={tierSet.error?.message ?? tierGet.error?.message ?? null}
           models={models.models}
           onChange={(next) => void tierSet.run(next).then(refresh)}
+          places={places}
           settingsModel={settingsModel}
           unreadable={models.error !== null}
           value={tiers}
@@ -980,6 +1095,7 @@ function LiveIntentPanel({
                   id={intent.id}
                   models={models.models}
                   onChanged={refresh}
+                  places={places}
                   reload={reload}
                   settingsModel={settingsModel}
                   tierModels={tiers}
@@ -1000,6 +1116,7 @@ function LiveIntentDetail({
   tierModels,
   settingsModel,
   models,
+  places,
   unreadable,
   onChanged,
 }: {
@@ -1008,6 +1125,7 @@ function LiveIntentDetail({
   tierModels: TierModels | null;
   settingsModel: string | null;
   models: readonly Model[];
+  places: ModelPlaces;
   unreadable: boolean;
   onChanged(): void;
 }): React.ReactElement {
@@ -1037,6 +1155,7 @@ function LiveIntentDetail({
       detail={detail.data}
       modelError={setModel.error?.message ?? null}
       models={models}
+      places={places}
       onModel={(taskId, modelId) => void setModel.run({ taskId, modelId }).then(onChanged)}
       onWithdraw={() => void withdraw.run({ id }).then(onChanged)}
       renderTask={(task) => <LiveTaskDetail onChanged={onChanged} task={task} />}

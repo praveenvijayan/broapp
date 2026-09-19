@@ -24,6 +24,7 @@ describe('aiContract', () => {
       'ai.providersList',
       'ai.modelsList',
       'ai.connectionTest',
+      'ai.providerTest',
       'ai.chatConfirm',
       'ai.threadsList',
       'ai.threadsCreate',

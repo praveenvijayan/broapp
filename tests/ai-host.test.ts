@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import { AdapterError, createAi, createFakeAdapter, guardedTool } from 'broapp/ai/host';
 import type { ProviderAdapter } from 'broapp/ai/host';
-import { aiContract } from 'broapp/ai';
+import { aiContract, describeModel, findModel } from 'broapp/ai';
 import { createGate, createHostApp } from 'broapp/host';
 import { defineContract, mergeContracts, s } from 'broapp/shared';
 import { ollama, openai, openrouter } from 'broapp-ai-compatible';
@@ -132,6 +132,7 @@ describe('the AI layer on a bridge', () => {
           capabilities: { tools: true, vision: false, structuredOutput: true },
         },
       ],
+      unavailable: [],
     });
   });
 
@@ -556,5 +557,173 @@ describe('18a: every provider keeps its settings, and a reference may name one',
       configured: true,
     });
     expect(settings.providers[2]).toMatchObject({ id: 'openrouter', enabled: false, configured: false });
+  });
+});
+
+/** A fake provider whose list can be slow, fail, or be counted. */
+function listing(
+  id: string,
+  options: { readonly fail?: string; readonly delayMs?: number; readonly needsKey?: boolean; readonly count?: number } = {},
+): ProviderAdapter & { asked: () => number } {
+  const fake = createFakeAdapter({
+    id,
+    ...(options.needsKey === true ? { needsKey: true } : {}),
+    models: Array.from({ length: options.count ?? 1 }, (_, index) => ({
+      provider: id,
+      modelId: `${id}-${String(index + 1)}`,
+      label: `${id} ${String(index + 1)}`,
+      capabilities: { tools: true, vision: false, structuredOutput: true },
+    })),
+  });
+  let asked = 0;
+  return {
+    ...fake,
+    label: `Provider ${id}`,
+    models: async (config, signal) => {
+      asked += 1;
+      if (options.delayMs !== undefined) await Bun.sleep(options.delayMs);
+      if (options.fail !== undefined) throw new AdapterError('network', options.fail);
+      return fake.models(config, signal);
+    },
+    asked: () => asked,
+  };
+}
+
+describe('18b: one list of every enabled provider’s models', () => {
+  test('both lists in build order; one failing costs its own group; both failing throws; one off is never asked', async () => {
+    const first = listing('first');
+    const second = listing('second');
+    const test = await start([first, second]);
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'first', modelId: 'first-1' });
+    // Off: never asked.
+    expect(await client.call('ai.modelsList', undefined)).toMatchObject({ models: [{ modelId: 'first-1' }], unavailable: [] });
+    expect(second.asked()).toBe(0);
+    await client.call('ai.settingsUpdate', { target: 'second', enabled: true });
+    const both = await client.call('ai.modelsList', undefined);
+    expect(both.models.map((model) => `${model.provider}:${model.modelId}`)).toEqual(['first:first-1', 'second:second-1']);
+    expect(both.unavailable).toEqual([]);
+  });
+
+  test('a provider that fails is listed with its sentence, and the others still answer', async () => {
+    const test = await start([listing('first', { fail: 'Could not reach Provider first.' }), listing('second')]);
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'first', modelId: 'first-1' });
+    await client.call('ai.settingsUpdate', { target: 'second', enabled: true });
+    expect(await client.call('ai.modelsList', undefined)).toEqual({
+      models: [expect.objectContaining({ provider: 'second', modelId: 'second-1' })],
+      unavailable: [{ provider: 'first', message: 'Could not reach Provider first.' }],
+    });
+  });
+
+  test('every enabled provider failing throws, as one provider did', async () => {
+    const test = await start([listing('first', { fail: 'Could not reach Provider first.' }), listing('second', { fail: 'Could not reach Provider second.' })]);
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'first', modelId: 'first-1' });
+    await client.call('ai.settingsUpdate', { target: 'second', enabled: true });
+    await expect(client.call('ai.modelsList', undefined)).rejects.toMatchObject({ code: 'unavailable', message: 'Could not reach Provider first.' });
+  });
+
+  test('a provider missing its required key is not asked, and says so in resolve’s words', async () => {
+    const keyed = listing('keyed', { needsKey: true });
+    const test = await start([listing('first'), keyed]);
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'first', modelId: 'first-1' });
+    await client.call('ai.settingsUpdate', { target: 'keyed', enabled: true });
+    const listed = await client.call('ai.modelsList', undefined);
+    expect(listed.unavailable).toEqual([{ provider: 'keyed', message: 'An API key is required for Provider keyed.' }]);
+    expect(keyed.asked()).toBe(0);
+  });
+
+  test('the providers are asked at the same time', async () => {
+    const test = await start([listing('first', { delayMs: 400 }), listing('second', { delayMs: 400 })]);
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'first', modelId: 'first-1' });
+    await client.call('ai.settingsUpdate', { target: 'second', enabled: true });
+    const started = performance.now();
+    const listed = await client.call('ai.modelsList', undefined);
+    const took = performance.now() - started;
+    expect(listed.models).toHaveLength(2);
+    // One interval, not two.
+    expect(took).toBeLessThan(700);
+  });
+
+  test('more than 1000 models together: each provider keeps a fair share, and the cut one says so', async () => {
+    const test = await start([listing('first', { count: 990 }), listing('second', { count: 20 })]);
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'first', modelId: 'first-1' });
+    await client.call('ai.settingsUpdate', { target: 'second', enabled: true });
+    const listed = await client.call('ai.modelsList', undefined);
+    expect(listed.models).toHaveLength(1000);
+    expect(listed.models.filter((model) => model.provider === 'second')).toHaveLength(20);
+    expect(listed.unavailable).toEqual([{ provider: 'first', message: 'Provider first: only the first 980 models are shown.' }]);
+  });
+});
+
+describe('18b: ai.providerTest', () => {
+  test('tests a provider that is off with its own address and key and leaves it off; an unknown id is invalid input', async () => {
+    const test = await start([listing('first'), createFakeAdapter({ id: 'second', needsKey: true })]);
+    const client = await test.connect(merged);
+    await client.call('ai.settingsUpdate', { provider: 'first', modelId: 'first-1' });
+    // Missing its key: the words `resolve` would use, before anything is sent.
+    await expect(client.call('ai.providerTest', { provider: 'second' })).rejects.toMatchObject({
+      message: 'An API key is required for Fake provider.',
+    });
+    await client.call('ai.settingsUpdate', { target: 'second', apiKey: 'sk-second-key-0002' });
+    expect(await client.call('ai.providerTest', { provider: 'second' })).toMatchObject({ ok: true, message: 'Connected to Fake provider.' });
+    const after = await client.call('ai.settingsGet', undefined);
+    expect(after.providers.find((provider) => provider.id === 'second')?.enabled).toBe(false);
+    expect(after.provider).toBe('first');
+    await expect(client.call('ai.providerTest', { provider: 'nobody' })).rejects.toMatchObject({ code: 'invalid_input' });
+    // The provider in use is still tested by the old route, unchanged.
+    expect(await client.call('ai.connectionTest', undefined)).toMatchObject({ ok: true, message: 'Connected to Provider first.' });
+  });
+
+  test('its sentences for a missing key and a missing address are resolve’s', async () => {
+    const { ai, dataDir } = await multi([createFakeAdapter({ id: 'needs', needsKey: true }), openai(), ollama()]);
+    try {
+      await ai.registry.update({ provider: 'needs', modelId: 'm' });
+      await expect(ai.registry.resolve()).rejects.toMatchObject({ message: 'An API key is required for Fake provider.' });
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('18b: findModel', () => {
+  const models = [
+    { provider: 'ollama', modelId: 'qwen3:27b', label: 'qwen3:27b' },
+    { provider: 'openrouter', modelId: 'anthropic/claude-opus-5', label: 'Claude Opus 5' },
+    { provider: 'openrouter', modelId: 'qwen3:27b', label: 'Qwen via OpenRouter' },
+  ];
+  const ids = ['ollama', 'openrouter', 'openai'];
+
+  test('a qualified reference names its provider’s model', () => {
+    expect(findModel('openrouter:qwen3:27b', models, 'ollama', ids).model?.label).toBe('Qwen via OpenRouter');
+    expect(findModel('ollama:qwen3:27b', models, 'openrouter', ids).model?.label).toBe('qwen3:27b');
+  });
+
+  test('a bare reference is the provider in use now, never the one it was stored under', () => {
+    expect(findModel('qwen3:27b', models, 'ollama', ids).model?.provider).toBe('ollama');
+    // The provider in use changed: the same bare id now names OpenRouter's model, not Ollama's.
+    expect(findModel('qwen3:27b', models, 'openrouter', ids).model?.provider).toBe('openrouter');
+    // And a bare id the new provider does not offer matches nothing.
+    expect(findModel('anthropic/claude-opus-5', models, 'ollama', ids).model).toBeNull();
+  });
+
+  test('a provider that is off is named and described as off', () => {
+    const found = findModel('openai:gpt-x', models, 'ollama', ids);
+    expect(found).toEqual({ provider: 'openai', modelId: 'gpt-x', model: null });
+    expect(
+      describeModel('openai:gpt-x', {
+        models,
+        providers: [
+          { id: 'ollama', label: 'Ollama (local)', local: true },
+          { id: 'openai', label: 'OpenAI', local: false },
+        ],
+        enabled: ['ollama'],
+        activeProvider: 'ollama',
+      }),
+    ).toEqual({ name: 'gpt-x', where: 'sent to OpenAI', problem: 'OpenAI is off' });
   });
 });

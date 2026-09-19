@@ -184,7 +184,9 @@ interface Tab {
   readonly errors: string[];
 }
 
-function tabOver(options: { script?: readonly FakeStep[]; chunkDelayMs?: number; failFrom?: number } = {}): Tab {
+function tabOver(
+  options: { script?: readonly FakeStep[]; chunkDelayMs?: number; failFrom?: number; extra?: readonly ProviderAdapter[] } = {},
+): Tab {
   const root = fresh();
   const dataDir = join(root, 'launcher');
   const intents = openIntents(dataDir);
@@ -228,7 +230,7 @@ function tabOver(options: { script?: readonly FakeStep[]; chunkDelayMs?: number;
     store: runs,
     templates: TEMPLATES,
     versions: STARTER_VERSIONS,
-    providers: [adapter],
+    providers: [adapter, ...(options.extra ?? [])],
     fetch: Object.assign(() => Promise.reject(new Error('no network in tests')), { preconnect: () => undefined }) as typeof fetch,
     logger,
     intents,
@@ -1329,11 +1331,18 @@ interface InBrowser {
 
 let browser: Browser | null = null;
 
-async function openInBrowser(options: { script?: readonly FakeStep[]; seed?: (world: Tab) => void; init?: string } = {}): Promise<InBrowser> {
-  const world = tabOver({ ...(options.script === undefined ? {} : { script: options.script }), chunkDelayMs: 200 });
+async function openInBrowser(
+  options: { script?: readonly FakeStep[]; seed?: (world: Tab) => void; init?: string; extra?: readonly ProviderAdapter[]; settle?: (world: Tab) => Promise<void> } = {},
+): Promise<InBrowser> {
+  const world = tabOver({
+    ...(options.script === undefined ? {} : { script: options.script }),
+    ...(options.extra === undefined ? {} : { extra: options.extra }),
+    chunkDelayMs: 200,
+  });
   mkdirSync(join(world.root, 'apps'), { recursive: true });
   options.seed?.(world);
   await world.tab.ai.registry.update({ provider: 'fake', modelId: 'fake-1' });
+  await options.settle?.(world);
   const live = await harness((bridge) => world.tab.mount(bridge), { page: launcherPage });
   closers.push(() => live.stop());
   if (browser === null) {
@@ -1551,4 +1560,98 @@ describe.skipIf(!browserAvailable)('17b: the Overview in a browser', () => {
     });
     expect(await refusing.page.getByRole('checkbox', { name: 'Sound' }).isChecked()).toBe(false);
   }, 120_000);
+});
+
+/** A provider that says it is not on this computer; it answers in-process all the same. */
+function hosted(): ProviderAdapter {
+  const fake = createFakeAdapter({
+    id: 'hosted',
+    models: [{ provider: 'hosted', modelId: 'big-1', label: 'Big One', capabilities: { tools: true, vision: false, structuredOutput: true } }],
+  });
+  return {
+    ...fake,
+    label: 'Hosted',
+    local: () => false,
+    needs: { apiKey: 'optional', baseUrl: 'optional' },
+    defaultBaseUrl: 'https://hosted.example/v1',
+  };
+}
+
+describe.skipIf(!browserAvailable)('18b: Settings and the picker in a browser', () => {
+  beforeAll(async () => {
+    if (launcherPage === '') launcherPage = await buildLauncherPage();
+  }, 180_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    browser = null;
+  });
+
+  // 5.
+  test('Settings: one section per provider, a key typed for one not in use is its own, and the second sentence appears only when a hosted one is on', async () => {
+    const { world, page } = await openInBrowser({ extra: [hosted()] });
+    await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+    await page.waitForSelector('.ai-settings__provider');
+    expect(await page.locator('details.ai-settings__provider').count()).toBe(2);
+    const summaries = await page.locator('.ai-settings__provider-summary').allTextContents();
+    expect(summaries).toEqual(['Fake provider — on this computer · in use', 'Hosted — sent to hosted.example · off']);
+    expect(await page.locator('#ai-offer-fake').isDisabled()).toBe(true);
+    expect(await page.locator('#ai-offer-fake').isChecked()).toBe(true);
+    expect(await page.locator('.ai-settings').textContent()).not.toContain('are sent there instead');
+
+    await page.locator('.ai-settings__provider-summary', { hasText: 'Hosted' }).click();
+    await page.fill('#ai-key-hosted', 'sk-hosted-key-0009');
+    await page.locator('#ai-key-hosted').press('Tab');
+    await page.waitForSelector('#ai-key-meta-hosted.ai-settings__meta--ok');
+    const saved = await world.tab.ai.registry.settings();
+    expect(saved.provider).toBe('fake');
+    expect(saved.providers.find((entry) => entry.id === 'hosted')).toMatchObject({ hasKey: true, keyHint: '0009', enabled: false });
+
+    // The switch is controlled by what the host saved, so it changes once the write returns.
+    await page.locator('#ai-offer-hosted').click();
+    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('#ai-offer-hosted')?.checked === true);
+    await page.waitForFunction(() => document.querySelector('.ai-settings')?.textContent?.includes('are sent there instead') === true);
+    expect(await page.locator('.ai-settings__notice').textContent()).toContain(
+      'Tasks and conversations that choose a model from Hosted are sent there instead.',
+    );
+    expect((await world.tab.ai.registry.settings()).providers.find((entry) => entry.id === 'hosted')?.enabled).toBe(true);
+  }, 90_000);
+
+  // 6.
+  test('the picker: two groups, a hosted choice is stored qualified with one line under it, and sending a message removes the line', async () => {
+    const { world, page } = await openInBrowser({
+      extra: [hosted()],
+      script: [{ kind: 'text', chunks: ['ok'] }],
+      settle: async (tab) => {
+        await tab.tab.ai.registry.update({ target: 'hosted', enabled: true });
+      },
+    });
+    await page.locator('.launcher__rail').getByRole('button', { name: 'New conversation' }).click();
+    await page.waitForSelector('.broapp-chat-picker:not([disabled])', { timeout: 20_000 });
+    expect(await page.locator('.broapp-chat-picker__label').textContent()).toBe('Default · Fake 1 · on this computer');
+    await page.locator('.broapp-chat-picker').click();
+    await page.waitForSelector('[cmdk-group-heading]');
+    expect(await page.locator('[cmdk-group-heading]').allTextContents()).toEqual(['Fake provider — on this computer', 'Hosted — sent to Hosted']);
+    await page.getByRole('option', { name: /Big One/ }).click();
+    await page.waitForSelector('.broapp-chat-picker__notice');
+    expect(await page.locator('.broapp-chat-picker__notice').textContent()).toBe('From the next message, this conversation is sent to Hosted.');
+    await page.waitForFunction(
+      () => document.querySelector('.broapp-chat-picker__label')?.textContent === 'Big One · sent to Hosted',
+      undefined,
+      { timeout: 10_000 },
+    );
+    const stored = new Database(join(world.dataDir, 'ai', 'threads.sqlite'), { readonly: true });
+    try {
+      // The conversation that was pinned; the others follow Settings.
+      expect(stored.query<{ model_id: string | null }, []>('SELECT model_id FROM threads WHERE model_id IS NOT NULL').all()).toEqual([
+        { model_id: 'hosted:big-1' },
+      ]);
+    } finally {
+      stored.close();
+    }
+
+    await page.fill('.broapp-chat textarea', 'Hello.');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.broapp-chat-picker__notice', { state: 'detached', timeout: 20_000 });
+  }, 90_000);
 });

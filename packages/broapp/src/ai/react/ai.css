@@ -338,6 +338,54 @@
 }
 
 /*
+ * The two parts of the panel, "In use" and "Providers". Each provider is a
+ * `<details>` whose summary says where it runs and whether it is on, so the
+ * list reads without opening anything.
+ */
+.ai-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.ai-settings__section-title {
+  margin: 0;
+  font-size: var(--ai-label-size);
+  font-weight: var(--ai-label-weight);
+  color: var(--text, #1b1a18);
+}
+
+.ai-settings__providers {
+  display: flex;
+  flex-direction: column;
+  border: var(--ai-border-width) solid var(--border, #e3e2df);
+  border-radius: var(--ai-control-radius);
+}
+
+.ai-settings__provider + .ai-settings__provider {
+  border-top: var(--ai-border-width) solid var(--border, #e3e2df);
+}
+
+.ai-settings__provider-summary {
+  padding: 0.6rem 0.75rem;
+  font-size: var(--ai-control-size);
+  color: var(--text, #1b1a18);
+  cursor: pointer;
+}
+
+.ai-settings__provider-summary:focus-visible {
+  outline: var(--ai-focus-ring-width) solid var(--ai-focus-ring);
+  outline-offset: var(--ai-focus-ring-offset);
+}
+
+.ai-settings__provider-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.25rem 0.75rem 0.9rem;
+}
+
+/*
  * Always visible once a provider is chosen. "Where do my notes go" is not a
  * question a user should have to open a menu to answer.
  */

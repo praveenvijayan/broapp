@@ -140,6 +140,28 @@ chosen; an application must not hide the notice. Whether a provider counts as
 local is decided by its address, so a loopback proxy that forwards elsewhere
 would be reported as local.
 
+**A provider that is off is sent nothing.** Settings keep more than one
+provider, but only the one in use and the ones a person turned on may be sent
+anything — not a request for a model list, not a turn. A model reference
+(`<provider>:<model>`) in a stored conversation, a task or a tier file that
+names a provider that is off is refused before anything is sent; only that
+provider's own Test button contacts it while it is off. Enabling is what stands
+between a line in a file and a person's work leaving their computer.
+
+**A model reference can move a conversation off this computer.** Pinning a
+conversation, a task or a tier to a model of a hosted provider sends what that
+turn carries to that provider, while the rest stay where they were. So the
+person is told wherever a model is chosen or named — the conversation's picker
+and its heading, the conversation list, every tier and task select, and the
+Overview's running task — in words: `on this computer` or `sent to <provider>`.
+A choice that moves a conversation across that line also puts one sentence
+under the picker until the next message is sent. Nothing falls back from a
+failed provider to another.
+
+**Keys are per provider, under one switch.** Each provider's key is stored
+under its own name; "Remember key on this computer" covers every one of them,
+and turning it off moves all of them off the disk.
+
 **Rendered markdown is narrowed, not trusted.** `broapp-ai-elements` turns
 assistant text into React elements — never raw HTML, and never through
 `dangerouslySetInnerHTML`. Links and images are removed before rendering: their

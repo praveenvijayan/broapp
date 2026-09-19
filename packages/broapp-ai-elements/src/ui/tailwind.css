@@ -553,6 +553,26 @@
     box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
   }
 
+  /* The picker and, under it until the next message, where a choice moved the conversation. */
+  .broapp-chat-picker__wrap {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+  }
+
+  .broapp-chat-picker__notice {
+    max-width: 22rem;
+    color: var(--muted-foreground);
+    font-size: 0.8rem;
+  }
+
+  /* A provider whose models are missing from the list, one line each. */
+  .broapp-chat-picker__unavailable {
+    margin: 0;
+    padding: 0.3rem 0.6rem;
+  }
+
   .broapp-chat-picker__error {
     margin: 0;
     padding: 0.4rem 0.6rem;

@@ -685,4 +685,46 @@ describe('the launcher tab', () => {
     expect(markup).toContain('Settings: Big One');
     expect(markup).not.toContain('>Settings model<');
   });
+
+  test('18b: the tier selects group by provider with where each runs, write qualified references, and warn about a tier that cannot run', () => {
+    const model = (provider: string, modelId: string, label: string) =>
+      ({ provider, modelId, label, capabilities: { tools: true, vision: false, structuredOutput: false } }) as Parameters<typeof inheritedModel>[2][number];
+    const models = [model('ollama', 'qwen3:27b', 'qwen3:27b'), model('openrouter', 'anthropic/claude-opus-5', 'Claude Opus 5')];
+    const providers = [
+      { id: 'ollama', label: 'Ollama (local)', local: true },
+      { id: 'openrouter', label: 'OpenRouter', local: false },
+    ];
+    const draw = (enabled: string[], unavailable: { provider: string; message: string }[] = []) =>
+      renderToString(
+        createElement(TierModelsBlock, {
+          value: { light: 'ollama:qwen3:27b', standard: null, deep: 'openrouter:anthropic/claude-opus-5' },
+          models,
+          places: { providers, enabled, activeProvider: 'ollama', unavailable },
+          settingsModel: 'qwen3:27b',
+          unreadable: false,
+          error: null,
+          onChange: () => undefined,
+        }),
+      ).replaceAll('<!-- -->', '');
+
+    const on = draw(['ollama', 'openrouter']);
+    expect(on).toContain('label="Ollama (local) — on this computer"');
+    expect(on).toContain('label="OpenRouter — sent to OpenRouter"');
+    // Every option's value is a reference naming its provider.
+    expect(on).toContain('value="ollama:qwen3:27b"');
+    expect(on).toContain('value="openrouter:anthropic/claude-opus-5"');
+    expect(on).not.toContain('value="qwen3:27b"');
+    // Beside each tier, where it runs; the empty choice names the Settings model and where it runs.
+    expect(on).toContain('sent to OpenRouter</span>');
+    expect(on).toContain('Settings: qwen3:27b · on this computer');
+    expect(on).not.toContain('role="alert"');
+
+    const off = draw(['ollama']);
+    expect(off).toContain('The deep tier names OpenRouter, which is off in Settings.');
+    // Above the rows.
+    expect(off.indexOf('The deep tier names OpenRouter')).toBeLessThan(off.indexOf('Model for light tasks'));
+
+    const down = draw(['ollama', 'openrouter'], [{ provider: 'ollama', message: 'Could not reach Ollama (local).' }]);
+    expect(down).toContain('The light tier names Ollama (local), which cannot be reached: Could not reach Ollama (local).');
+  });
 });

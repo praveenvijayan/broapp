@@ -6,8 +6,8 @@
  */
 export { aiContract } from './contract.ts';
 export type { AiContract } from './contract.ts';
-export { formatModelRef, parseModelRef } from './model-ref.ts';
-export type { ModelRef } from './model-ref.ts';
+export { describeModel, findModel, formatModelRef, parseModelRef, whereItRuns } from './model-ref.ts';
+export type { FoundModel, ModelDescription, ModelRef, ProviderPlace } from './model-ref.ts';
 export type {
   AiSettings,
   BroappModel,
@@ -19,4 +19,5 @@ export type {
   StoredMessage,
   Thread,
   ToolPermission,
+  UnavailableProvider,
 } from './types.ts';

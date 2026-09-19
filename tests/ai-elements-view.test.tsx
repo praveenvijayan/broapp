@@ -19,6 +19,7 @@ import {
   BroappChatView,
   BroappModelList,
   BroappModelPicker,
+  moveLine,
   BroappSchemeToggle,
   BroappThreadList,
   STATUS_LINE_MS,
@@ -452,6 +453,7 @@ describe('the model picker', () => {
   test('marks the vision models and the current one', () => {
     const html = renderToString(
       <BroappModelList
+        activeProvider="ollama"
         defaultLabel="gemma4:31b-mlx"
         models={models}
         onChange={() => undefined}
@@ -465,6 +467,57 @@ describe('the model picker', () => {
     expect(html).toContain('gemma4:31b-mlx');
     // The check is on the pinned model, not on the default row.
     expect(html.split('aria-label="Current"').length - 1).toBe(1);
+  });
+});
+
+describe('18b: the picker groups every provider and says where each runs', () => {
+  const both: BroappModel[] = [
+    { provider: 'ollama', modelId: 'qwen3:27b', label: 'qwen3:27b', capabilities: { tools: true, vision: false, structuredOutput: false } },
+    { provider: 'openrouter', modelId: 'anthropic/claude-opus-5', label: 'Claude Opus 5', capabilities: { tools: true, vision: true, structuredOutput: false } },
+  ];
+  const providers = [
+    { id: 'ollama', label: 'Ollama (local)', local: true },
+    { id: 'openrouter', label: 'OpenRouter', local: false },
+  ];
+
+  test('two groups with their headings, in the build’s order, and the default row says where Settings runs', () => {
+    const html = renderToString(
+      <BroappModelList
+        activeProvider="ollama"
+        defaultLabel="qwen3:27b"
+        defaultWhere="on this computer"
+        models={[...both].reverse()}
+        onChange={() => undefined}
+        providers={providers}
+        unavailable={[{ provider: 'openai', message: 'Could not reach OpenAI.' }]}
+        value={null}
+      />,
+    ).replaceAll('<!-- -->', '');
+    const first = html.indexOf('Ollama (local) — on this computer');
+    const second = html.indexOf('OpenRouter — sent to OpenRouter');
+    expect(first).toBeGreaterThan(-1);
+    expect(second).toBeGreaterThan(first);
+    expect(html).toContain('qwen3:27b · on this computer');
+    // A provider that could not be read costs a line under the list, not the list.
+    expect(html).toContain('Could not reach OpenAI.');
+  });
+
+  test('a stored bare reference shows as the model of the provider in use', () => {
+    const html = renderToString(
+      <BroappModelList activeProvider="ollama" defaultLabel="x" models={both} onChange={() => undefined} providers={providers} value="qwen3:27b" />,
+    ).replaceAll('<!-- -->', '');
+    expect(html.split('aria-label="Current"').length - 1).toBe(1);
+    // The check sits in the Ollama group, after its heading and before OpenRouter's.
+    const check = html.indexOf('aria-label="Current"');
+    expect(check).toBeGreaterThan(html.indexOf('Ollama (local) — on this computer'));
+    expect(check).toBeLessThan(html.indexOf('OpenRouter — sent to OpenRouter'));
+  });
+
+  test('moving a conversation off this computer, or back, earns one line; staying put earns none', () => {
+    expect(moveLine(true, false, 'OpenRouter')).toBe('From the next message, this conversation is sent to OpenRouter.');
+    expect(moveLine(false, true, 'Ollama (local)')).toBe('From the next message, this conversation stays on this computer.');
+    expect(moveLine(true, true, 'Ollama (local)')).toBeNull();
+    expect(moveLine(null, false, 'OpenRouter')).toBeNull();
   });
 });
 

@@ -168,10 +168,10 @@ provider and a model. In your own code it is `registry.resolve()` throwing
 
 ### "An API key is required for Anthropic." right after saving a key
 
-The key is stored per provider. Check that the provider selected when you
-saved is the one selected now — switching providers does not carry a key
-across. `ai.settingsGet` reports `hasKey` and a `keyHint` for the current
-provider.
+The key is stored per provider, in that provider's own section under
+**Providers**. Check that you saved it in the section of the provider that
+needs it. `ai.settingsGet` reports `hasKey` and a `keyHint` for the provider in
+use, and for every provider in `providers`.
 
 ### "Anthropic rejected the API key." / "Could not reach …"
 
@@ -186,6 +186,23 @@ lists models, which costs no tokens.
 `local` is computed from the server URL, not the provider name. A URL whose
 host is not `127.0.0.1`, `localhost` or `::1` counts as remote, and so does
 an OpenAI-compatible server on another machine, even on your own network.
+
+### A provider's models are missing from the list
+
+The model list holds only providers that are turned on in Settings: open the
+provider under **Providers** and check **Offer this provider's models** (the
+provider in use always is). A provider that is on but could not be read is
+named under the list with its reason — "Could not reach Ollama (local)…" when
+the server is not running, "An API key is required for …" when it has no key —
+and the other providers' models are still shown. Refresh reads every provider
+again. More than 1000 models together are cut fairly between providers, and
+the one cut says "only the first n models are shown".
+
+### "<provider> is not turned on in Settings."
+
+A conversation, a task or a tier names a model of a provider that is off
+(`openrouter:…`, `ollama:…`). Turn it on in Settings, or choose another model.
+Nothing was sent.
 
 ### The key disappeared after a restart
 

@@ -113,7 +113,10 @@ rather than retry. Nobody answering is also a decline, after
   a key in a page is a published key. All provider traffic is host-side.
 - **Never hide the data notice.** `<AiSettings/>` says whether the chosen
   provider runs on this computer or receives the user's documents. It stays
-  visible.
+  visible. So do the words beside every model a picker offers or a screen
+  names (`on this computer` / `sent to <provider>`): a model reference such as
+  `openrouter:anthropic/claude-opus-5` can send one conversation somewhere the
+  others are not.
 - **Never put a key in `settings.json`, a log, an error, or a transcript.**
   The browser gets `hasKey` and the last four characters, nothing more.
 - **Never quote a provider's response body in a user-facing message.** It can
