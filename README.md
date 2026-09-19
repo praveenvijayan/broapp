@@ -202,7 +202,20 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.15: a completed task means it. An acceptance example can say a
+Version 0.4.16: the launcher opens on what needs you. An Overview, the first
+screen and a view beside the chat, says what is waiting for you, which task is
+running and at what stage with its limits, what the day has cost as far as it
+is known, what is left, and what each application is doing, each with the one
+action that opens where it is decided. Every turn now leaves a usage row,
+partial when it was cut short; prices are a file you write, and a model
+without one shows tokens and never a cost. Six events can raise a
+notification, the ones that need you with a short generated sound, and
+permission is asked only by a click. A preview that cannot start says why, to
+the builder and to you, and a plan no longer sends you to try an `external`
+route in a preview, which refuses it. Two packages: `broapp` 0.4.5, for a
+running turn's usage and the model a turn ran on, both additive, and
+`broapp-autoapp` 0.3.15, which depends on it. Before it, 0.4.15: a completed
+task means it. An acceptance example can say a
 value's kind (`{"$is": "number"}`) and that a route refuses (`fails`), and
 activation runs the examples where the preview ran them, on a copy that is
 thrown away, so an example that writes passes both. A step refuses a key it
@@ -213,7 +226,7 @@ backlog turn refused four times for the same reason is ended; a turn too long
 to give back whole gives its newest calls; and the evaluation counts an edit
 when it lands and tokens only when they are known. Two packages: `broapp`
 0.4.4, for a cut-short turn's partial usage and the history expansion, both
-additive, and `broapp-autoapp` 0.3.14, which depends on it. Before it, 0.4.14:
+additive, and `broapp-autoapp` 0.3.14, which depended on it. Before it, 0.4.14:
 a wider Backlog panel, tasks beside the request's analysis, and a task row
 whose model select stays on its row; one package, `broapp-autoapp` 0.3.13.
 Before it, 0.4.13: a failed task says why, and the launcher can be stopped. A
