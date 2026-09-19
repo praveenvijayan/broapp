@@ -230,8 +230,10 @@ measured what a local model does with one long open-ended turn.
    chosen from its run id, which the backlog records in `task_runs`; the line is
    for a reader), says to build this one task with one example per
    criterion under exactly the ids `<slug>-c<n>`, to use `candidate.cycle`
-   until every check passes, not to remove or rename an example already there,
-   and not to activate or plan. Then the plan, then any answers the person
+   until every check passes, not to remove, rename or change an example already
+   there (and, if an older one fails, to cycle once more on a fresh preview
+   before saying with `intent.ask` whether the change or the plan is wrong), and
+   not to activate or plan. Then the plan, then any answers the person
    gave, then why the last attempt was not completed.
 5. During the turn the executor answers the gate for the person, as described
    in [security.md](security.md#a-run-answers-for-the-person). A question it
@@ -264,7 +266,9 @@ nothing was edited after it; its checks ran on the preview that is running now;
 every check passed, so no earlier task's example regressed; every example of the
 application's completed tasks is still among the checks ("The example
 0004-author-column-c2, from a finished task, is gone."), so none was removed to
-make that true; and for every criterion an example named `<slug>-c<n>` ran. Otherwise each condition that did not hold is a
+make that true, and each still has the steps it had when its task completed
+("The example 0004-author-column-c2, from a finished task, was changed."), so
+none was rewritten to make that true either; and for every criterion an example named `<slug>-c<n>` ran. Otherwise each condition that did not hold is a
 sentence ("No example named 0007-add-tags-c2 was run.", "The turn ran out of
 time."). When nothing was built, the sentences after "Nothing was built." say
 what the tools refused, read from the gate's own record of the turn in the
@@ -273,8 +277,10 @@ launcher's run store: one per refused group of `candidate.cycle` and
 array."), at most three, then one for every refused edit ("22 edits were
 refused; most often: message: expected a string."). A completed verdict never
 mentions refusals, and a call the gate denied is not a refusal. A completed task records `rev_after`, `release_id` and `actual_lines`
-(from `git diff --shortstat`), and each criterion whose example passed is drawn
-`[x]` in its plan. A verdict is only as strong as the examples the builder wrote;
+(from `git diff --shortstat`), and for each criterion the hash of its example's
+steps (not its title) in the specification the completing build was made from;
+a task completed before those hashes were kept is held by its examples' ids
+alone. Each criterion whose example passed is drawn `[x]` in its plan. A verdict is only as strong as the examples the builder wrote;
 the backlog's **A verdict as strong as its examples** row says what would
 strengthen it.
 

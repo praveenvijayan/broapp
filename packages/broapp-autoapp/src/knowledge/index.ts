@@ -23,7 +23,7 @@ export type { EventKind, EventLog, EventLogOptions, Origin } from './log.ts';
 export { origin, sourceRevision } from './ids.ts';
 export type { FullOrigin } from './ids.ts';
 
-export { createEvidence, exampleHash, recordContext } from './evidence.ts';
+export { createEvidence, exampleHash, recordContext, stepsHash } from './evidence.ts';
 export type { ContextInput, EpisodeRow, Evidence, OpenEpisode } from './evidence.ts';
 
 export { EVIDENCE_MAX_CHARS, ORIENTATION_MAX_CHARS, indexWorkspace, orientation, taskEvidence } from './path.ts';

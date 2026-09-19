@@ -32,8 +32,9 @@ import { s } from 'broapp/shared';
 import type { CandidateStatus, CandidateStates } from '../engineer/state.ts';
 import type { RunStore } from '../host/run-store.ts';
 import { sourceRevision } from '../knowledge/ids.ts';
+import { stepsHash } from '../knowledge/evidence.ts';
 import { sanitise, type EventLog } from '../knowledge/log.ts';
-import type { Layout } from '../spec/index.ts';
+import { readRelease, type Layout } from '../spec/index.ts';
 
 import { modelFor, readTierModels, type TierModels } from './models.ts';
 import { exampleIdFor, FAILURE_MARK, renderPlan, validateGraph } from './plan.ts';
@@ -241,8 +242,16 @@ export function refusalSentences(refusals: readonly RefusalGroup[]): string[] {
  * it; its checks ran on the preview that is running now; every check passed, so
  * no earlier task's example regressed; every example in `required` — those of
  * the application's finished tasks — is still there, so none was removed to
- * make that true; and for each criterion an example named `<slug>-<id>` ran.
- * The model's closing words are not an input.
+ * make that true, and still says what it said when its task completed, so
+ * none was rewritten to make that true either; and for each criterion an
+ * example named `<slug>-<id>` ran. The model's closing words are not an input.
+ *
+ * What an example says is the hash of its steps: `required` carries the hash
+ * kept when its task completed, `current` the hash of each example in the
+ * specification this build was made from. A required example with a null hash
+ * belongs to a task completed before hashes were kept, and is held by its id
+ * alone. One whose current hash is unknown cannot be shown to be unchanged,
+ * and reads as changed.
  */
 export function verdictOf(
   task: Pick<TaskRecord, 'slug' | 'criteria'>,
@@ -250,8 +259,9 @@ export function verdictOf(
   revBefore: string,
   revNow: string,
   ending: TurnEnding = {},
-  required: readonly string[] = [],
+  required: readonly RequiredExample[] = [],
   refusals: readonly RefusalGroup[] = [],
+  current: Readonly<Record<string, string>> = {},
 ): Verdict {
   const reasons: string[] = [];
   if (revNow === revBefore) reasons.push('The workspace did not change.');
@@ -266,9 +276,12 @@ export function verdictOf(
   if (failed.length > 5) reasons.push(`${plural(failed.length - 5, 'more example', 'more examples')} failed.`);
 
   const byId = new Map(status.checks.map((check) => [check.id, check]));
-  for (const id of required) {
-    if (!byId.has(id)) reasons.push(`The example ${id}, from a finished task, is gone.`);
-  }
+  const gone = required.filter((example) => !byId.has(example.id));
+  const changed = required.filter(
+    (example) => byId.has(example.id) && example.hash !== null && current[example.id] !== example.hash,
+  );
+  for (const example of gone) reasons.push(`The example ${example.id}, from a finished task, is gone.`);
+  for (const example of changed) reasons.push(`The example ${example.id}, from a finished task, was changed.`);
   const passed: string[] = [];
   for (const criterion of task.criteria) {
     const id = exampleIdFor(task.slug, criterion.id);
@@ -282,6 +295,12 @@ export function verdictOf(
     if (ending.error !== undefined) reasons.push(`The turn ended with an error: ${ending.error}`);
   }
   return { completed: reasons.length === 0, reasons, passed };
+}
+
+/** An example a finished task left, and the hash of its steps when it finished (`null` before 15b). */
+export interface RequiredExample {
+  readonly id: string;
+  readonly hash: string | null;
 }
 
 /** What the builder of one task is told: one message, no history. */
@@ -299,7 +318,7 @@ export function builderMessage(
   const ids = task.criteria.map((criterion) => exampleIdFor(task.slug, criterion.id));
   const parts = [
     `Application: ${task.appId}`,
-    `Build this one task and nothing else. Add one acceptance example to autoapp.json for each criterion, with exactly these ids: ${ids.join(', ')}. Do not remove or rename an acceptance example that is already there. ${FAILURE_SENTENCE} Use candidate.cycle until every check passes, then stop. Do not request activation. Do not plan or change the backlog.`,
+    `Build this one task and nothing else. Add one acceptance example to autoapp.json for each criterion, with exactly these ids: ${ids.join(', ')}. Do not remove, rename or change an acceptance example that is already there. If an older example fails, run candidate.cycle again so the checks run on a fresh preview. If it still fails, your change is wrong or the plan is: say which with intent.ask. ${FAILURE_SENTENCE} Use candidate.cycle until every check passes, then stop. Do not request activation. Do not plan or change the backlog.`,
     'If the plan leaves a real choice open that changes what you build, call intent.ask once with one question rather than guessing. Do not ask about anything the plan or the application already answers.',
     '',
     renderPlan(task).trimEnd(),
@@ -626,16 +645,37 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     }
   }
 
-  /** The example ids of every task of `appId` already completed, which a later task may not lose. */
-  function finishedExamples(appId: string): string[] {
-    const ids: string[] = [];
+  /**
+   * The examples of every task of `appId` already completed, which a later
+   * task may neither lose nor change, each with the hash kept when it finished.
+   */
+  function finishedExamples(appId: string): RequiredExample[] {
+    const required: RequiredExample[] = [];
     for (const intent of store.list({ appId, limit: Number.MAX_SAFE_INTEGER })) {
       for (const task of store.runOrder(intent.id)) {
         if (task.stored !== 'completed') continue;
-        for (const criterion of task.criteria) ids.push(exampleIdFor(task.slug, criterion.id));
+        for (const criterion of task.criteria) {
+          required.push({ id: exampleIdFor(task.slug, criterion.id), hash: task.exampleHashes[criterion.id] ?? null });
+        }
       }
     }
-    return ids;
+    return required;
+  }
+
+  /**
+   * The hash of every example's steps, by id, in the specification `releaseId`
+   * was built from — the build the checks ran on, not the workspace as it is
+   * now, which may have moved since. Empty when nothing was built or the
+   * release cannot be read, which the verdict reads as "cannot be shown
+   * unchanged".
+   */
+  function builtExampleHashes(appId: string, releaseId: string | null): Record<string, string> {
+    if (releaseId === null) return {};
+    try {
+      return Object.fromEntries(readRelease(layout, appId, releaseId).acceptance.map((example) => [example.id, stepsHash(example)]));
+    } catch {
+      return {};
+    }
   }
 
   /** The stand-in: answer, refuse, or bring the question to the person. */
@@ -922,6 +962,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       // here from the revision just read.
       const builtFrom = states.get(active.appId).builtFromRev;
       const status = { ...states.status(active.appId), editsSinceBuild: builtFrom !== null && builtFrom !== revNow };
+      const built = builtExampleHashes(active.appId, status.releaseId);
       // Against the revision before the task's first turn, not this one's: an
       // attempt that only builds what the last one edited has still changed
       // the workspace for this task.
@@ -937,10 +978,19 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         },
         finishedExamples(active.appId),
         refusedIn(runId),
+        built,
       );
       task = store.recordResult(task.id, { passed: verdict.passed });
       if (verdict.completed) {
+        // What each of this task's examples said in the build that completed
+        // it: from here on a later task is held to it.
+        const exampleHashes: Record<string, string> = {};
+        for (const criterion of task.criteria) {
+          const hash = built[exampleIdFor(task.slug, criterion.id)];
+          if (hash !== undefined) exampleHashes[criterion.id] = hash;
+        }
         task = store.recordResult(task.id, {
+          exampleHashes,
           revAfter: revNow,
           releaseId: status.releaseId,
           actualLines: changedLines(sourceDir, task.revBefore ?? revBefore, revNow),

@@ -222,6 +222,12 @@ export interface TaskRecord {
   readonly answers: readonly { readonly question: string; readonly answer: string; readonly at: number }[];
   readonly startedAt: number | null;
   readonly endedAt: number | null;
+  /**
+   * By criterion id, the hash of the steps of that criterion's example when
+   * the task completed. Empty for a task not completed, and for one completed
+   * before these were kept.
+   */
+  readonly exampleHashes: Readonly<Record<string, string>>;
 }
 
 /** An intent's analysis: what the engineer understood the request to be. */

@@ -9,6 +9,7 @@
  * `idle()` and stops every child in `afterEach`.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createElement } from 'react';
@@ -61,7 +62,15 @@ import {
   type TaskInput,
   type TaskRecord,
 } from 'broapp-autoapp/intent';
-import { createEventLog, createEvidence, openKnowledge, sanitisedLogger, type Knowledge } from 'broapp-autoapp/knowledge';
+import {
+  backlogDocument,
+  createEventLog,
+  createEvidence,
+  openKnowledge,
+  sanitisedLogger,
+  stepsHash,
+  type Knowledge,
+} from 'broapp-autoapp/knowledge';
 import {
   buildCandidate,
   createApplication,
@@ -693,14 +702,15 @@ describe('verdictOf', () => {
   });
 
   test('an example of a finished task that is gone is named; present and passing, it is completed', () => {
-    const earlier = ['0003-author-column-c1', '0003-author-column-c2'];
+    // Tasks completed before 15b kept no hash, and are held by id alone.
+    const earlier = ['0003-author-column-c1', '0003-author-column-c2'].map((id) => ({ id, hash: null }));
     const gone = verdictOf(task, passing, 'rev-1', 'rev-2', {}, earlier);
     expect(gone.completed).toBe(false);
     expect(gone.reasons).toEqual([
       'The example 0003-author-column-c1, from a finished task, is gone.',
       'The example 0003-author-column-c2, from a finished task, is gone.',
     ]);
-    const kept = { ...passing, checks: [...passing.checks, ...earlier.map((id) => ({ id, title: id, passed: true }))] };
+    const kept = { ...passing, checks: [...passing.checks, ...earlier.map(({ id }) => ({ id, title: id, passed: true }))] };
     expect(verdictOf(task, kept, 'rev-1', 'rev-2', {}, earlier)).toEqual({ completed: true, reasons: [], passed: ['c1', 'c2'] });
   });
 
@@ -1172,7 +1182,7 @@ describe('13d: holding a run to its earlier examples, and letting progress earn 
       `The example ${slugs[0] ?? ''}-c2, from a finished task, is gone.`,
     ]);
     // The builder was told not to.
-    expect(prompts(w.fake).some((prompt) => prompt.includes('Do not remove or rename an acceptance example that is already there.'))).toBe(true);
+    expect(prompts(w.fake).some((prompt) => prompt.includes('Do not remove, rename or change an acceptance example that is already there.'))).toBe(true);
   }, 240_000);
 
   // 3.
@@ -1282,6 +1292,241 @@ describe('13d: holding a run to its earlier examples, and letting progress earn 
     expect(task?.stored).toBe('failed');
     expect(reasonsOf(w, task?.id ?? 0)).not.toContain(idleSentence(400));
   }, 60_000);
+});
+
+// ── 15b. A finished task's example keeps what it says ───────────────────────
+
+describe('15b: a finished task’s example is held by what it says', () => {
+  const task = {
+    slug: '0007-add-tags',
+    criteria: [
+      { id: 'c1', text: 'a', failure: false },
+      { id: 'c2', text: 'b', failure: true },
+    ],
+  };
+  const earlier = '0003-author-column-c1';
+  const passing = {
+    releaseId: 'a'.repeat(32),
+    problems: [],
+    editsSinceBuild: false,
+    checksVerified: true,
+    checks: [
+      { id: earlier, title: 'e', passed: true },
+      { id: '0007-add-tags-c1', title: 'c1', passed: true },
+      { id: '0007-add-tags-c2', title: 'c2', passed: true },
+    ],
+  };
+  const kept = 'b'.repeat(32);
+
+  // 1.
+  test('the same hash and passing is completed; the same id with another hash is not, though every check passed', () => {
+    expect(verdictOf(task, passing, 'rev-1', 'rev-2', {}, [{ id: earlier, hash: kept }], [], { [earlier]: kept })).toEqual({
+      completed: true,
+      reasons: [],
+      passed: ['c1', 'c2'],
+    });
+    const changed = verdictOf(task, passing, 'rev-1', 'rev-2', {}, [{ id: earlier, hash: kept }], [], { [earlier]: 'c'.repeat(32) });
+    expect(changed.completed).toBe(false);
+    expect(changed.reasons).toEqual([`The example ${earlier}, from a finished task, was changed.`]);
+    expect(changed.passed).toEqual(['c1', 'c2']);
+    // A hash that cannot be read cannot show the example unchanged.
+    expect(verdictOf(task, passing, 'rev-1', 'rev-2', {}, [{ id: earlier, hash: kept }]).reasons).toEqual([
+      `The example ${earlier}, from a finished task, was changed.`,
+    ]);
+  });
+
+  // 2.
+  test('gone and changed together: both sentences, gone first, before the per-criterion lines', () => {
+    const missing = { ...passing, checks: passing.checks.filter((check) => check.id !== '0007-add-tags-c2') };
+    const required = [
+      { id: earlier, hash: kept },
+      { id: '0003-author-column-c2', hash: kept },
+    ];
+    expect(verdictOf(task, missing, 'rev-1', 'rev-2', {}, required, [], { [earlier]: 'c'.repeat(32) }).reasons).toEqual([
+      'The example 0003-author-column-c2, from a finished task, is gone.',
+      `The example ${earlier}, from a finished task, was changed.`,
+      'No example named 0007-add-tags-c2 was run.',
+    ]);
+  });
+
+  // 3.
+  test('a null hash is held by id only', () => {
+    expect(verdictOf(task, passing, 'rev-1', 'rev-2', {}, [{ id: earlier, hash: null }], [], { [earlier]: 'c'.repeat(32) }).completed).toBe(true);
+    expect(verdictOf(task, passing, 'rev-1', 'rev-2', {}, [{ id: earlier, hash: null }]).completed).toBe(true);
+    const gone = { ...passing, checks: passing.checks.filter((check) => check.id !== earlier) };
+    expect(verdictOf(task, gone, 'rev-1', 'rev-2', {}, [{ id: earlier, hash: null }]).reasons).toEqual([
+      `The example ${earlier}, from a finished task, is gone.`,
+    ]);
+  });
+
+  // 4.
+  test('the hash ignores the title and key order, and changes with any step field and with a step added', () => {
+    const step = { route: 'items.list', input: { page: 1 }, match: { count: 0 } };
+    const base = stepsHash({ steps: [step] } as never);
+    expect(stepsHash({ id: 'x', title: 'Reworded', steps: [step] } as never)).toBe(base);
+    expect(stepsHash({ steps: [{ match: { count: 0 }, input: { page: 1 }, route: 'items.list' }] } as never)).toBe(base);
+    const variants: unknown[] = [
+      { ...step, input: { page: 2 } },
+      { ...step, expect: { count: 0 } },
+      { ...step, match: {} },
+      { route: 'items.list', input: { page: 1 }, fails: {} },
+      { view: { page: 'items' } },
+    ];
+    for (const variant of variants) expect(stepsHash({ steps: [variant] } as never)).not.toBe(base);
+    expect(stepsHash({ steps: [{ view: { page: 'items' } }] } as never)).not.toBe(stepsHash({ steps: [{ view: { page: 'items', component: 'a' } }] } as never));
+    expect(stepsHash({ steps: [step, step] } as never)).not.toBe(base);
+  });
+
+  /** One example per id; the first carries `match`, so there is something to weaken. */
+  function cycleHolding(slug: string, ids: readonly string[], then: readonly FakeStep[] = [text('done')]): FakeStep {
+    const examples = ids
+      .map((id, index) =>
+        index === 0
+          ? `\n    { "id": "${slug}-${id}", "title": "${slug} ${id}", "steps": [{ "route": "items.list", "input": null, "match": { "count": 0 } }] },`
+          : `\n    { "id": "${slug}-${id}", "title": "${slug} ${id}", "steps": [{ "route": "items.list", "input": null }] },`,
+      )
+      .join('');
+    return tool(
+      'candidate.cycle',
+      { appId: 'items', message: `examples for ${slug}`, hunks: [{ path: 'autoapp.json', find: '"acceptance": [', replace: `"acceptance": [${examples}` }] },
+      then,
+    );
+  }
+  const reasonsOf = (w: World, taskId: number): string[] => (w.intents.task(taskId)?.failure as { reasons: string[] } | null)?.reasons ?? [];
+
+  // 5.
+  test('a later task that keeps a finished example’s id and weakens its steps is not completed, and the backlog names it', async () => {
+    const weaken = tool('candidate.cycle', {
+      appId: 'items',
+      message: 'the second part, and a looser first example',
+      hunks: [
+        {
+          path: 'autoapp.json',
+          find: '"steps": [{ "route": "items.list", "input": null, "match": { "count": 0 } }]',
+          replace: '"steps": [{ "route": "items.list", "input": null }]',
+        },
+        {
+          path: 'autoapp.json',
+          find: '"acceptance": [',
+          replace:
+            '"acceptance": [\n    { "id": "0002-second-part-c1", "title": "c1", "steps": [{ "route": "items.list", "input": null }] },\n    { "id": "0002-second-part-c2", "title": "c2", "steps": [{ "route": "items.list", "input": null }] },',
+        },
+      ],
+    });
+    const w = await world([cycleHolding('0001-first-part', ['c1', 'c2']), weaken, text('not advice')], { maxAttempts: 1 });
+    const { id, slugs } = submitted(w.intents, [plan('first-part'), plan('second-part', { blockedBy: ['first-part'] })]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+
+    const [first, second] = w.intents.runOrder(id);
+    expect(first?.stored).toBe('completed');
+    expect(Object.keys(first?.exampleHashes ?? {}).sort()).toEqual(['c1', 'c2']);
+    expect(first?.exampleHashes['c1']).not.toBe(first?.exampleHashes['c2']);
+    expect(second?.stored).toBe('failed');
+    // Every check ran and passed, its own included: what it did to the first
+    // task's example is the only thing wrong.
+    expect(second?.criteria.map((criterion) => criterion.passed)).toEqual([true, true]);
+    const sentence = `The example ${slugs[0] ?? ''}-c1, from a finished task, was changed.`;
+    expect(reasonsOf(w, second?.id ?? 0)).toEqual([sentence]);
+    expect(second?.exampleHashes).toEqual({});
+    expect(backlogDocument(w.intents, 'items')).toContain(sentence);
+  }, 240_000);
+
+  // 6.
+  test('the same, with the later task leaving the example alone: completed', async () => {
+    const w = await world([cycleHolding('0001-first-part', ['c1', 'c2']), cycle('0002-second-part')]);
+    const { id } = submitted(w.intents, [plan('first-part'), plan('second-part', { blockedBy: ['first-part'] })]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const [first, second] = w.intents.runOrder(id);
+    expect(first?.stored).toBe('completed');
+    expect(second?.stored).toBe('completed');
+    expect(Object.keys(second?.exampleHashes ?? {}).sort()).toEqual(['c1', 'c2']);
+    expect(w.intents.get(id)?.intent.status).toBe('done');
+  }, 240_000);
+
+  // 7.
+  test('a retry of a task not yet completed may rewrite its own examples', async () => {
+    // Attempt 1 writes c1 wrong (a count the list does not have) and c2 right;
+    // attempt 2 rewrites c1. Nothing holds a task's own examples until it completes.
+    const wrong = tool('candidate.cycle', {
+      appId: 'items',
+      message: 'first try',
+      hunks: [
+        {
+          path: 'autoapp.json',
+          find: '"acceptance": [',
+          replace:
+            '"acceptance": [\n    { "id": "0001-only-part-c1", "title": "c1", "steps": [{ "route": "items.list", "input": null, "match": { "count": 5 } }] },\n    { "id": "0001-only-part-c2", "title": "c2", "steps": [{ "route": "items.list", "input": null }] },',
+        },
+      ],
+    });
+    const rewrite = tool('candidate.cycle', {
+      appId: 'items',
+      message: 'the count is zero',
+      hunks: [{ path: 'autoapp.json', find: '"match": { "count": 5 }', replace: '"match": { "count": 0 }' }],
+    });
+    const w = await world([wrong, rewrite]);
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(task?.stored).toBe('completed');
+    expect(task?.runIds).toHaveLength(2);
+    expect(Object.keys(task?.exampleHashes ?? {}).sort()).toEqual(['c1', 'c2']);
+  }, 240_000);
+
+  test('a removed task and a replaced plan contribute nothing, exactly as before; a completed task can be neither', async () => {
+    const w = await world([cycle('0002-kept-part')]);
+    const { id } = submitted(w.intents, [plan('dropped-part'), plan('kept-part')]);
+    const [dropped, keptTask] = w.intents.runOrder(id);
+    w.intents.removeTask(dropped?.id ?? 0);
+    // A replaced plan keeps its slug and takes new criteria; only a proposed or
+    // failed-and-stopped task may be replaced, so it has completed nothing.
+    w.intents.replaceTask(keptTask?.id ?? 0, plan('kept-part', { criteria: [{ text: 'items.list returns the items', failure: false }, { text: 'An empty list reads as empty', failure: true }] }));
+    // A changed plan is a draft again until it is submitted.
+    expect(w.intents.submit(id)).toEqual([]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+    const done = w.intents.task(keptTask?.id ?? 0);
+    expect(done?.stored).toBe('completed');
+    expect(w.intents.task(dropped?.id ?? 0)?.stored).toBe('removed');
+    expect(() => w.intents.removeTask(done?.id ?? 0)).toThrow();
+    expect(() => w.intents.replaceTask(done?.id ?? 0, plan('kept-part'))).toThrow();
+  }, 240_000);
+
+  // 8.
+  test('a store written before the migration opens, and its completed tasks read back with no hash', () => {
+    const directory = mkdtempSync(join(runRoot, 'intent-hash-'));
+    scratch.push(directory);
+    const dataDir = join(directory, 'launcher');
+    const first = openIntents(dataDir);
+    const { id } = submitted(first, [plan('only-part')]);
+    const taskId = first.runOrder(id)[0]?.id ?? 0;
+    first.moveTask(taskId, 'in-queue', 'queued');
+    first.moveTask(taskId, 'in-progress', 'started', 'run-one');
+    first.recordResult(taskId, { revAfter: 'rev-2', passed: ['c1', 'c2'] });
+    first.moveTask(taskId, 'completed', 'done', 'run-one');
+    first.close();
+
+    // As a store written before 15b: no `task_criteria`, and `user_version` 2.
+    const raw = new Database(join(dataDir, 'intents.sqlite'));
+    raw.exec('DROP TABLE task_criteria');
+    raw.exec('PRAGMA user_version = 2');
+    raw.close();
+
+    const intents = openIntents(dataDir);
+    closers.push(() => intents.close());
+    const task = intents.task(taskId);
+    expect(task?.stored).toBe('completed');
+    expect(task?.exampleHashes).toEqual({});
+    // The table is back, and a later completion writes to it.
+    expect(intents.recordResult(taskId, { exampleHashes: { c1: 'd'.repeat(32) } }).exampleHashes).toEqual({ c1: 'd'.repeat(32) });
+  });
 });
 
 // ── 10. Restart ─────────────────────────────────────────────────────────────

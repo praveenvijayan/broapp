@@ -100,6 +100,7 @@ export type {
   CreateExecutorOptions,
   Executor,
   RunProgress,
+  RequiredExample,
   RunQuestion,
   StandingAnswer,
   TurnEnding,

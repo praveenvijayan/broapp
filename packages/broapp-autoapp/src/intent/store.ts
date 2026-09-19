@@ -110,6 +110,17 @@ const MIGRATIONS: readonly string[] = [
                     FROM task_events WHERE to_status = 'in-progress') AS s
          ON s.task_id = t.id AND s.n = CAST(r.key AS INTEGER) + 1
       WHERE r.type = 'text';`,
+  // 15b: one row per criterion of a completed task, holding the hash of its
+  // example's steps as the build that completed it had them. A criterion's
+  // text lives in the task's `criteria` column; this is the one thing about a
+  // criterion that is written after the plan, and only once. A task completed
+  // before this migration has no row, which reads as a null hash: it is held
+  // by its example's id alone, as it was. `IF NOT EXISTS`, because a store
+  // taken back to an earlier version by hand still has it, and a migration
+  // that only adds a table has nothing to redo.
+  `CREATE TABLE IF NOT EXISTS task_criteria (
+     task_id INTEGER NOT NULL REFERENCES tasks(id), criterion_id TEXT NOT NULL,
+     example_hash TEXT, PRIMARY KEY (task_id, criterion_id));`,
 ];
 
 /** An intent as the list shows it. */
@@ -228,6 +239,12 @@ export interface TaskResult {
   readonly actualLines?: number | null;
   /** Criterion ids whose example passed; the others are marked not passed. */
   readonly passed?: readonly string[];
+  /**
+   * By criterion id, the hash of that criterion's example's steps in the
+   * specification the verified build was made from. Written with `revAfter`
+   * when a task completes.
+   */
+  readonly exampleHashes?: Readonly<Record<string, string>>;
 }
 
 /** Why a run that was going when the launcher stopped is not going now. */
@@ -461,7 +478,21 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
       answers: parsed<TaskRecord['answers']>(row.answers, []),
       startedAt: row.started_at,
       endedAt: row.ended_at,
+      exampleHashes: exampleHashesOf(row.id),
     };
+  }
+
+  /** The stored example hashes of one task, by criterion id; none for a task not completed since 15b. */
+  function exampleHashesOf(taskId: number): Record<string, string> {
+    const hashes: Record<string, string> = {};
+    for (const row of db
+      .query<{ criterion_id: string; example_hash: string | null }, [number]>(
+        'SELECT criterion_id, example_hash FROM task_criteria WHERE task_id = ?',
+      )
+      .all(taskId)) {
+      if (row.example_hash !== null) hashes[row.criterion_id] = row.example_hash;
+    }
+    return hashes;
   }
 
   function statuses(appId: string): Map<string, StoredTaskStatus> {
@@ -960,6 +991,13 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
         if (result.revAfter !== undefined) set('rev_after', result.revAfter);
         if (result.releaseId !== undefined) set('release_id', result.releaseId);
         if (result.actualLines !== undefined) set('actual_lines', result.actualLines);
+        if (result.exampleHashes !== undefined) {
+          for (const [criterionId, hash] of Object.entries(result.exampleHashes)) {
+            db.query<null, [number, string, string]>(
+              'INSERT OR REPLACE INTO task_criteria (task_id, criterion_id, example_hash) VALUES (?, ?, ?)',
+            ).run(taskId, criterionId, hash);
+          }
+        }
         if (result.passed !== undefined) {
           const passed = new Set(result.passed);
           const criteria = parsed<Criterion[]>(row.criteria, []).map((criterion) => ({ ...criterion, passed: passed.has(criterion.id) }));

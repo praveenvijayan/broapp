@@ -108,6 +108,16 @@ export function exampleHash(example: AcceptanceExample): string {
   return hashOf(example);
 }
 
+/**
+ * What an acceptance example says: the hash of its steps alone.
+ *
+ * Not {@link exampleHash}, which covers the title too. Rewording a title
+ * weakens nothing, so a finished task's example is held by its steps (15b).
+ */
+export function stepsHash(example: Pick<AcceptanceExample, 'steps'>): string {
+  return hashOf(example.steps);
+}
+
 /** The first 32 hex characters of the `sha256` of a value's canonical JSON. */
 function hashOf(value: unknown): string {
   return sha256(canonicalJson(value)).slice(0, 32);
