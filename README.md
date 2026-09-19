@@ -202,7 +202,17 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.16: the launcher opens on what needs you. An Overview, the first
+Version 0.4.17: Settings is one set of controls. The AI settings panel draws
+itself whole in any application: one height, corner and border for a field, a
+select and a button, "Required" or "Saved" beside the label, a saved key shown
+as its last characters with Replace and Remove, a switch for remembering it,
+and a full-width connection test. The launcher's Log, Knowledge, Backlog and
+Settings panels share one header, and the panel's lengths follow the
+renderer's control tokens, so a preset moves both. The vocabulary is written
+down in `docs/autoapp/components.md` for the next component. Two packages:
+`broapp` 0.4.6, for the panel and `ai.css`, and `broapp-autoapp` 0.3.16, which
+depends on it. Before it, 0.4.16: the launcher opens on what needs you. An
+Overview, the first
 screen and a view beside the chat, says what is waiting for you, which task is
 running and at what stage with its limits, what the day has cost as far as it
 is known, what is left, and what each application is doing, each with the one
@@ -214,7 +224,7 @@ permission is asked only by a click. A preview that cannot start says why, to
 the builder and to you, and a plan no longer sends you to try an `external`
 route in a preview, which refuses it. Two packages: `broapp` 0.4.5, for a
 running turn's usage and the model a turn ran on, both additive, and
-`broapp-autoapp` 0.3.15, which depends on it. Before it, 0.4.15: a completed
+`broapp-autoapp` 0.3.15, which depended on it. Before it, 0.4.15: a completed
 task means it. An acceptance example can say a
 value's kind (`{"$is": "number"}`) and that a route refuses (`fails`), and
 activation runs the examples where the preview ran them, on a copy that is
