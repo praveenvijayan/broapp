@@ -85,7 +85,29 @@ export interface RunDeps {
 /** What a turn counts as it goes, for {@link RunEndDetail}. */
 interface TurnTally {
   steps: number;
-  usage?: { inputTokens: number; outputTokens: number };
+  /**
+   * The turn's usage. The SDK's total when the turn reached `finish`;
+   * otherwise the sum of the steps that completed, marked `partial`, because
+   * the step in flight when it stopped used tokens nobody reported.
+   */
+  usage?: { inputTokens: number; outputTokens: number; partial?: true };
+  /** Model steps that completed, and what they reported, added as each ends. */
+  stepsEnded: number;
+  stepInput: number;
+  stepOutput: number;
+}
+
+/**
+ * What the completed steps of a turn that did not finish add up to, or
+ * nothing when no step completed.
+ *
+ * A turn cut short by a time limit, a stop or an error never sees `finish`,
+ * and so never sees the total. Counting it as zero made a turn that ran for
+ * twenty minutes look free; this is what is known, and says it is not all.
+ */
+function partialUsage(tally: TurnTally): TurnTally['usage'] {
+  if (tally.stepsEnded === 0) return undefined;
+  return { inputTokens: tally.stepInput, outputTokens: tally.stepOutput, partial: true };
 }
 
 /**
@@ -661,7 +683,7 @@ export async function runChat(
   // or a run store is left with something that looks like it is still running.
   let ended = false;
   const started = Date.now();
-  const tally: TurnTally = { steps: 0 };
+  const tally: TurnTally = { steps: 0, stepsEnded: 0, stepInput: 0, stepOutput: 0 };
   const recorder = new TranscriptRecorder();
   const transcript = new TranscriptWriter(params.runId, deps);
   // A turn that never reaches `finish` — stopped, failed, or cut off by the
@@ -677,6 +699,8 @@ export async function runChat(
   const end = (status: 'succeeded' | 'failed' | 'cancelled'): void => {
     if (ended) return;
     ended = true;
+    // A turn that never reached `finish` still leaves its record what it knows.
+    tally.usage ??= partialUsage(tally);
     const onRunEnd = deps.onRunEnd;
     if (onRunEnd === undefined) return;
     const detail: RunEndDetail = {
@@ -808,11 +832,22 @@ async function runTurn(
     onChunk: ({ chunk }) => {
       if (chunk.type === 'text-delta') recorder.wrote(chunk.text);
     },
-    onStepEnd: (step) => recorder.stepEnded(step.response.messages),
+    onStepEnd: (step) => {
+      recorder.stepEnded(step.response.messages);
+      // Per step, as the step ends: the only usage a turn that does not reach
+      // `finish` will ever have.
+      tally.stepsEnded += 1;
+      tally.stepInput += step.usage.inputTokens ?? 0;
+      tally.stepOutput += step.usage.outputTokens ?? 0;
+    },
   });
 
   for await (const part of result.fullStream) {
-    if (sink.signal.aborted) return;
+    // Stopped: the sink is closed, so the subtotal goes to the run record only.
+    if (sink.signal.aborted) {
+      tally.usage ??= partialUsage(tally);
+      return;
+    }
     switch (part.type) {
       case 'text-delta':
         await sink.emit({ type: 'text', text: part.text });
@@ -837,7 +872,14 @@ async function runTurn(
         await sink.emit({ type: 'done' });
         break;
       }
-      case 'error':
+      case 'error': {
+        // The sink is still open, so what the completed steps used is said,
+        // marked as not the whole, before the error that ends the turn.
+        const partial = partialUsage(tally);
+        if (partial !== undefined) {
+          tally.usage = partial;
+          await sink.emit({ type: 'usage', ...partial });
+        }
         await sink.emit({
           type: 'error',
           code: 'provider',
@@ -847,6 +889,7 @@ async function runTurn(
         // settled here too.
         end('failed');
         return;
+      }
       case 'tool-error': {
         // `execute` never throws, so this means the SDK failed before the tool
         // ran — a malformed call, usually. The browser still needs a result
@@ -861,6 +904,7 @@ async function runTurn(
         break;
       }
       case 'abort':
+        tally.usage ??= partialUsage(tally);
         end('cancelled');
         return;
       default:

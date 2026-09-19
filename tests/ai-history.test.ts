@@ -655,3 +655,121 @@ describe('the clients name the run', () => {
     ]);
   });
 });
+
+describe('15d: a turn’s usage, step by step', () => {
+  /** The three-step turn: two read tools, then words. Each fake step reports 11 in and 7 out. */
+  const THREE_STEPS: readonly FakeStep[] = [
+    {
+      kind: 'tool',
+      name: 'look',
+      input: { q: 1 },
+      then: [{ kind: 'tool', name: 'peek', input: { q: 2 }, then: [{ kind: 'text', chunks: ['Looked ', 'and peeked.'] }] }],
+    },
+  ];
+
+  /** An `Ai` over the fake, with the run record's usage kept, and a provider that can be made to fail from one step on. */
+  async function counted(options: { chunkDelayMs?: number; failFromStep?: number } = {}): Promise<{
+    ai: Ai;
+    ended: { status: string; usage: unknown }[];
+  }> {
+    const fake = createFakeAdapter({ script: THREE_STEPS, ...(options.chunkDelayMs === undefined ? {} : { chunkDelayMs: options.chunkDelayMs }) });
+    let calls = 0;
+    const failFrom = options.failFromStep;
+    const adapter = {
+      ...fake,
+      model: (config: Parameters<typeof fake.model>[0], modelId: string) => {
+        const model = fake.model(config, modelId);
+        if (failFrom === undefined || typeof model !== 'object') return model;
+        return new Proxy(model, {
+          get(target, property, receiver) {
+            const value: unknown = Reflect.get(target, property, receiver);
+            if (property !== 'doStream' || typeof value !== 'function') return value;
+            return (...args: unknown[]): unknown => {
+              calls += 1;
+              if (calls >= failFrom) return Promise.reject(new Error('the provider went away'));
+              return (value as (...inner: unknown[]) => unknown).apply(target, args);
+            };
+          },
+        });
+      },
+    };
+    const gate = createGate({ appId: 'usage-test', releaseId: 'usage-test' });
+    const read = (name: string) =>
+      guardedTool(gate, { name, effect: 'read', description: name, inputSchema: { type: 'object' }, run: () => Promise.resolve({ ok: name }) });
+    const ended: { status: string; usage: unknown }[] = [];
+    const ai = createAi({
+      dataDir: fresh(),
+      providers: [adapter],
+      app: { name: 'test', purpose: 'counting usage' },
+      fetch: noNetwork,
+      logger: recordingLogger(),
+      tools: { look: read('look'), peek: read('peek') },
+      onRunEnd: (_runId, status, _summary, detail) => ended.push({ status, usage: detail?.usage }),
+    });
+    await ai.registry.update({ provider: 'fake', modelId: 'fake-1' });
+    return { ai, ended };
+  }
+
+  // 4.
+  test('three steps then finish: the events are today’s, byte for byte, and the steps sum to the total', async () => {
+    const { ai, ended } = await counted();
+    const result = await ai.turn({ runId: 'run-usage-1', message: 'go' }, { answer: () => true });
+    // Captured from the code before this change, on the same script.
+    expect(JSON.stringify(result.events)).toBe(
+      '[{"type":"tool-call","callId":"call-0","tool":"look","input":{"q":1},"permission":"read"},{"type":"tool-result","callId":"call-0","tool":"look","output":{"ok":"look"}},{"type":"tool-call","callId":"call-1","tool":"peek","input":{"q":2},"permission":"read"},{"type":"tool-result","callId":"call-1","tool":"peek","output":{"ok":"peek"}},{"type":"text","text":"Looked "},{"type":"text","text":"and peeked."},{"type":"usage","inputTokens":33,"outputTokens":21},{"type":"done"}]',
+    );
+    // The total is the SDK's; three steps of 11 and 7 each are what it adds up.
+    expect(ended).toEqual([{ status: 'succeeded', usage: { inputTokens: 33, outputTokens: 21 } }]);
+    ai.close();
+  });
+
+  // 5.
+  test('stopped during step three: the record has steps one and two, marked partial; stopped during step one: nothing', async () => {
+    const third = await counted({ chunkDelayMs: 40 });
+    const stop = new AbortController();
+    const result = await third.ai.turn(
+      { runId: 'run-usage-2', message: 'go' },
+      {
+        answer: () => true,
+        signal: stop.signal,
+        onEvent: (event) => {
+          if (event.type === 'text') stop.abort();
+        },
+      },
+    );
+    expect(result.status).toBe('cancelled');
+    // A stopped turn's sink is closed, so the subtotal is the run record's.
+    expect(result.events.some((event) => event.type === 'usage')).toBe(false);
+    expect(third.ended).toEqual([{ status: 'cancelled', usage: { inputTokens: 22, outputTokens: 14, partial: true } }]);
+    third.ai.close();
+
+    const first = await counted({ chunkDelayMs: 40 });
+    const early = new AbortController();
+    setTimeout(() => early.abort(), 10);
+    await first.ai.turn({ runId: 'run-usage-3', message: 'go' }, { answer: () => true, signal: early.signal });
+    expect(first.ended).toEqual([{ status: 'cancelled', usage: undefined }]);
+    first.ai.close();
+  });
+
+  test('a provider that fails during step three: one usage event with steps one and two, partial, before the error', async () => {
+    const { ai, ended } = await counted({ failFromStep: 3 });
+    const result = await ai.turn({ runId: 'run-usage-4', message: 'go' }, { answer: () => true });
+    expect(result.status).toBe('failed');
+    const tail = result.events.slice(-2).map((event) => ({ type: event.type, inputTokens: event.inputTokens, outputTokens: event.outputTokens, partial: event.partial }));
+    expect(tail).toEqual([
+      { type: 'usage', inputTokens: 22, outputTokens: 14, partial: true },
+      { type: 'error', inputTokens: undefined, outputTokens: undefined, partial: undefined },
+    ]);
+    expect(result.events.filter((event) => event.type === 'usage')).toHaveLength(1);
+    expect(ended).toEqual([{ status: 'failed', usage: { inputTokens: 22, outputTokens: 14, partial: true } }]);
+    ai.close();
+  });
+
+  test('a provider that fails at step one sends no usage at all, as before', async () => {
+    const { ai, ended } = await counted({ failFromStep: 1 });
+    const result = await ai.turn({ runId: 'run-usage-5', message: 'go' }, { answer: () => true });
+    expect(result.events.some((event) => event.type === 'usage')).toBe(false);
+    expect(ended[0]?.usage).toBeUndefined();
+    ai.close();
+  });
+});

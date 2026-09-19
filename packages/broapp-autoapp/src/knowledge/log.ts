@@ -148,7 +148,7 @@ const ALLOWED: Readonly<Record<EventKind, Readonly<Record<string, FieldRule>>>> 
   },
   edit: { paths: 'keep', hunks: 'keep', matchedBy: 'keep', bytes: 'keep' },
   run: { status: 'keep', steps: 'keep', ms: 'keep' },
-  usage: { inputTokens: 'keep', outputTokens: 'keep' },
+  usage: { inputTokens: 'keep', outputTokens: 'keep', partial: 'keep' },
   activate: { ok: 'keep', phase: 'keep', reason: 'text', recovered: 'text', releaseId: 'keep' },
   // Every field is a count or a host-made path, so all of them are kept: a
   // sanitiser that trimmed the trash path would leave a row that cannot say

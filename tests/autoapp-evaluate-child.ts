@@ -11,13 +11,16 @@
  * one of the evaluation's tasks, so the evaluation runs here and the test
  * reads the rows it prints.
  *
- *   bun run tests/autoapp-evaluate-child.ts <launcher root> [two-turn]
+ *   bun run tests/autoapp-evaluate-child.ts <launcher root> [two-turn | refused-edit]
  *
  * Without a mode it runs the single-turn tasks under every condition, one edit
  * a run. `two-turn` runs the starter's two-turn task under `baseline` and the
  * restart condition, with a script whose second turn re-reads what the first
  * read and re-applies the first's hunk under text history, and only re-applies
- * it under structured history.
+ * it under structured history. `refused-edit` runs Notes' two-turn task under
+ * `baseline` alone, with a first turn whose first edit is refused (its `find`
+ * is not in the file) and whose second lands: turn one has to stop after the
+ * second, not the first.
  *
  * The root's `launcher/` directory must already hold any lesson the test wants
  * the `learned` condition to carry. Prints `{ rows, markdown, runs, prompts }`
@@ -62,6 +65,23 @@ function twoTurnScript(appId: string, history: string | undefined, turn: 1 | 2 |
   return [call('source.read', { appId, path: 'src/shared/contract.ts' }, [edit(second)])];
 }
 
+/** A hunk that matches nothing in Notes' `db.ts`, and one that matches once and keeps its `find`. */
+const NO_SUCH_LINE = { path: 'src/host/db.ts', find: 'this line is not in db.ts', replace: 'nor is this one' };
+const NOTES_HUNK = {
+  path: 'src/host/db.ts',
+  find: 'export const LATEST_SCHEMA_VERSION = MIGRATIONS.length;',
+  replace: 'export const LATEST_SCHEMA_VERSION = MIGRATIONS.length; // kept',
+};
+
+/** Turn one reads, is refused an edit, lands one (and is stopped there); turn two reads and is done. */
+function refusedEditScript(appId: string): FakeStep[] {
+  const done: FakeStep = { kind: 'text', chunks: ['done'] };
+  const second: FakeStep[] = [call('source.read', { appId, path: 'src/host/db.ts' }, [done])];
+  const good = call('source.edit', { appId, message: 'Keep the version', hunks: [NOTES_HUNK] }, second);
+  const refused = call('source.edit', { appId, message: 'A line that is not there', hunks: [NO_SUCH_LINE] }, [good]);
+  return [call('source.read', { appId, path: 'src/host/db.ts' }, [refused])];
+}
+
 async function main(): Promise<void> {
   const directory = process.argv[2];
   const mode = process.argv[3];
@@ -76,20 +96,25 @@ async function main(): Promise<void> {
     const runs: string[] = [];
     const prompts: Record<string, unknown[]> = {};
     const twoTurn = mode === 'two-turn';
+    const refusedEdit = mode === 'refused-edit';
     const { rows, markdown } = await evaluate({
       layout: layout(directory),
       knowledge,
       runs: 1,
       tasks: twoTurn
         ? EVALUATION_TASKS.filter((task) => task.id === 'starter-priority')
-        : EVALUATION_TASKS.filter((task) => task.turns !== 2),
-      conditions: twoTurn ? ['baseline', RESTART_CONDITION] : CONDITIONS,
+        : refusedEdit
+          ? EVALUATION_TASKS.filter((task) => task.id === 'notes-tags')
+          : EVALUATION_TASKS.filter((task) => task.turns !== 2),
+      conditions: twoTurn ? ['baseline', RESTART_CONDITION] : refusedEdit ? ['baseline'] : CONDITIONS,
       model: () => Promise.resolve(createFakeAdapter().model({ apiKey: null, baseUrl: null, fetch: noNetwork }, 'fake-1')),
       providers: (run) => {
         const adapter = createFakeAdapter({
           script: twoTurn
             ? twoTurnScript(run.appId, run.history, run.restart === true ? run.turn : undefined)
-            : [
+            : refusedEdit
+              ? refusedEditScript(run.appId)
+              : [
                 // One edit per run, the same in every workspace: a file of its own under src/.
                 {
                   kind: 'tool',

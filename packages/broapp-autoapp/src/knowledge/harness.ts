@@ -159,7 +159,11 @@ export interface TurnOutcome {
   /** Questions the gate asked during the turn. */
   readonly approvals: number;
   readonly calls: readonly ToolCall[];
-  readonly tokens: { readonly input: number; readonly output: number };
+  /**
+   * What the turn is known to have used. `complete` only when the turn
+   * reported its total; otherwise the steps that completed, which is a floor.
+   */
+  readonly tokens: { readonly input: number; readonly output: number; readonly complete: boolean };
   /** Everything the model said, in order: what a browser would put in history. */
   readonly text: string;
   /** `stopAfter` ended it. */
@@ -316,7 +320,7 @@ export function openRun(options: OpenRunOptions): RunHandle {
         toolMs,
         approvals,
         calls: callsOf(result.events),
-        tokens: tokensOf(result.events),
+        tokens: tokensOf(result.events, () => recordedUsage(options.knowledge.store, runId)),
         text: result.events.map((event) => (event.type === 'text' ? (event.text ?? '') : '')).join(''),
         stopped: stop.signal.aborted && !limit.aborted,
       };
@@ -369,14 +373,45 @@ function callsOf(events: readonly ChatEvent[]): ToolCall[] {
   return calls.map(({ tool, input, output }) => ({ tool, input, output }));
 }
 
-/** What a turn's usage events add up to. */
-function tokensOf(events: readonly ChatEvent[]): { input: number; output: number } {
+/**
+ * What a turn's usage events add up to, and whether that is the whole.
+ *
+ * Complete only when a `usage` event without `partial` arrived: a turn's
+ * total. A turn stopped by its limit or by `stopAfter` has a closed sink and
+ * sends nothing, so its subtotal is read from the run record the tab wrote
+ * (`recorded`), and is marked incomplete either way.
+ */
+function tokensOf(
+  events: readonly ChatEvent[],
+  recorded: () => { input: number; output: number } | null,
+): { input: number; output: number; complete: boolean } {
   let input = 0;
   let output = 0;
+  let seen = false;
+  let complete = false;
   for (const event of events) {
     if (event.type !== 'usage') continue;
+    seen = true;
     input += event.inputTokens ?? 0;
     output += event.outputTokens ?? 0;
+    if (event.partial !== true) complete = true;
   }
-  return { input, output };
+  if (!seen) {
+    const record = recorded();
+    if (record !== null) return { ...record, complete: false };
+  }
+  return { input, output, complete };
+}
+
+/** The usage the tab recorded when `runId` ended, or `null` when it recorded none. */
+function recordedUsage(store: Knowledge, runId: string): { input: number; output: number } | null {
+  const row = store.db
+    .query<{ data: string | null }, [string]>("SELECT data FROM events WHERE kind = 'usage' AND run_id = ? ORDER BY id DESC LIMIT 1")
+    .get(runId);
+  if (row === null || row.data === null) return null;
+  const data = JSON.parse(row.data) as { inputTokens?: unknown; outputTokens?: unknown };
+  return {
+    input: typeof data.inputTokens === 'number' ? data.inputTokens : 0,
+    output: typeof data.outputTokens === 'number' ? data.outputTokens : 0,
+  };
 }

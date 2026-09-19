@@ -533,6 +533,34 @@ whose `find` turn one applied, or a creation of something that existed), its
 tokens, turn one's calls, and for `touch-file` whether it read the changed file
 before editing it.
 
+**What 15d changed in the counting, and which published numbers it touches.**
+An edit is now one that landed: a `source.edit` or `source.change` that
+succeeded, or a cycle whose patch applied (its build may still have failed).
+"Calls to the first edit" counts to that call, and a new "tried" column counts to
+the first attempt, refused or not, which is what the old column counted. Turn one
+of a two-turn task now stops at the first edit that landed; before, it stopped at
+the first attempt, so a refused edit could end it with nothing changed. Tokens
+are no longer zero for a turn that did not finish. The AI layer adds each step's
+usage as the step ends, a turn cut short by a limit, a stop or an error reports
+the steps that completed as `partial`, and the harness marks such a turn
+incomplete. "Mean tokens" is now the mean over runs whose every turn reported
+its total, printed with the count (`85,024 (2/3)`, or `— (0/3)`). "Known tokens"
+is the mean of what every run is known to have used, a floor. The reports are
+history and are not edited, so read them this way. In **12d**, both evaluation
+tables' "mean tokens" averaged a zero in for every timed-out run. A cell with
+timeouts understates its finished runs by that share, and a cell whose runs all
+timed out reads 0 though they spent tokens: in the single run, `baseline`
+`notes-archive` and `notes-tags`, `orientation` `notes-tags`, and
+`orientation+facts` `notes-archive` and `notes-tags`; in the three runs,
+`orientation` and `orientation+facts` `notes-archive` and `learned` `notes-tags`. The summary's "on notes-archive from
+a million to eighty thousand" compares a baseline with one timeout against a
+learned cell with two, so it cannot be read as written. 12d's "calls to first
+edit" counted the first attempt, refused or not. In **12j**, every two-turn row's
+turn one stopped at its first attempted edit, which may have been refused, so
+"turn-one calls" and every turn-two column measure a second turn after a first
+that may have changed nothing. Its token figures have the same zero for timeouts.
+**14b**'s "unknown" tokens are right, and the code now agrees with them.
+
 ## Retention
 
 When the store opens, events older than 30 days are deleted, and then the oldest

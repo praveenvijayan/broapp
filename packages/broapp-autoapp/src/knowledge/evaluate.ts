@@ -190,7 +190,10 @@ export interface TwoTurnColumns {
   readonly repeatedReads: number;
   /** Hunks whose `find` the first turn already applied, and creations of something that already existed. */
   readonly repeatedActions: number;
+  /** Turn two's tokens: its total, or the steps that completed when it did not finish. */
   readonly tokens: number;
+  /** Whether {@link tokens} is turn two's whole total. */
+  readonly tokensComplete: boolean;
   /** Calls the first turn made before it was stopped. */
   readonly turnOneCalls: number;
   /** For a `touch-file` task: it read the changed file before it edited it. Null otherwise. */
@@ -210,7 +213,8 @@ export interface EvaluationRow {
     readonly meanReadsBeforeEdit: number;
     readonly meanRepeatedReads: number;
     readonly meanRepeatedActions: number;
-    readonly meanTokens: number;
+    /** Over the runs whose turn two reported its total; how many did. */
+    readonly meanTokens: { readonly mean: number | null; readonly of: number };
     readonly meanTurnOneCalls: number;
     /** Runs that read the changed file before editing it; null when nothing changed between the turns. */
     readonly readChangedFirst: number | null;
@@ -220,8 +224,10 @@ export interface EvaluationRow {
   readonly workingCode: number;
   /** Runs where the engineer itself checked the release it last built, with the task's example intact, and every example passed. */
   readonly workflowCompleted: number;
-  /** Mean over the runs that edited; how many did. */
+  /** Mean over the runs whose edit landed; how many did. The call that applied it, not one that was refused. */
   readonly callsToFirstEdit: { readonly mean: number | null; readonly of: number };
+  /** The same for the first edit attempted, landed or refused: what `callsToFirstEdit` counted before 15d. */
+  readonly callsToFirstEditTried: { readonly mean: number | null; readonly of: number };
   readonly callsToFirstBuild: { readonly mean: number | null; readonly of: number };
   readonly reachedBuild: number;
   /** Builds the engineer ran that failed: its repair attempts. */
@@ -230,7 +236,10 @@ export interface EvaluationRow {
   readonly meanModelMs: number;
   readonly meanToolMs: number;
   readonly approvals: number;
-  readonly meanTokens: number;
+  /** Over the runs whose every turn reported its total; how many did. A turn cut short is not counted as zero. */
+  readonly meanTokens: { readonly mean: number | null; readonly of: number };
+  /** The mean of what every run is known to have used, whole or not: a floor, never a total. */
+  readonly knownTokens: number;
   /** Failure signatures that had already appeared in an earlier run of the same condition and task. */
   readonly recurringSignatures: number;
   /** Files an included document named that the run then read or edited. */
@@ -357,13 +366,15 @@ interface RunMeasure {
   workingCode: boolean;
   workflowCompleted: boolean;
   firstEdit: number | null;
+  firstEditTried: number | null;
   firstBuild: number | null;
   reachedBuild: boolean;
   failedBuilds: number;
   ms: number;
   toolMs: number;
   approvals: number;
-  tokens: number;
+  /** What the run is known to have used, and whether every turn reported its total. */
+  tokens: { total: number; complete: boolean };
   signatures: Set<string>;
   used: number;
   ignored: number;
@@ -403,12 +414,32 @@ export function buildOf(
   return null;
 }
 
-/** Whether a call applied an edit: `source.edit`, `source.change`, or a cycle with hunks or files. */
-export function editedBy(call: ToolCall): boolean {
+/**
+ * Whether a call tried to edit: `source.edit`, `source.change`, or a cycle
+ * with hunks or files, whatever became of it. What `editedBy` meant until 15d.
+ */
+export function triedEdit(call: ToolCall): boolean {
   if (call.tool === 'source.edit' || call.tool === 'source.change') return true;
   if (call.tool !== 'candidate.cycle') return false;
   const input = call.input as { hunks?: unknown; create?: unknown } | undefined;
   return (Array.isArray(input?.hunks) && input.hunks.length > 0) || (Array.isArray(input?.create) && input.create.length > 0);
+}
+
+/**
+ * Whether a call's edit landed: the workspace changed.
+ *
+ * A `source.edit` or `source.change` that succeeded; a cycle whose output
+ * reports files its patch changed — a cycle whose build then failed included,
+ * since the workspace moved all the same. A cycle refused before patching
+ * (the repair limit), declined, or whose hunks matched nothing comes back as
+ * an error with no `applied`, and is not an edit. The two-turn evaluation
+ * stops turn one on this, so that turn one has always changed something.
+ */
+export function editedBy(call: ToolCall): boolean {
+  if (call.tool === 'source.edit' || call.tool === 'source.change') return succeeded(call);
+  if (call.tool !== 'candidate.cycle') return false;
+  const applied = (call.output as { applied?: { changed?: unknown } } | undefined)?.applied;
+  return Array.isArray(applied?.changed) && applied.changed.length > 0;
 }
 
 /**
@@ -600,9 +631,16 @@ function succeeded(call: ToolCall): boolean {
 export function twoTurnColumns(
   one: readonly ToolCall[],
   two: readonly ToolCall[],
-  context: { readonly appId: string; readonly existing: ReadonlySet<string>; readonly changed: string | null; readonly tokens: number },
+  context: {
+    readonly appId: string;
+    readonly existing: ReadonlySet<string>;
+    readonly changed: string | null;
+    readonly tokens: number;
+    readonly tokensComplete: boolean;
+  },
 ): TwoTurnColumns {
-  const firstEdit = two.findIndex(editedBy);
+  // Attempted, as before 15d: this column's meaning did not change.
+  const firstEdit = two.findIndex(triedEdit);
   const readsBeforeEdit = (firstEdit < 0 ? two : two.slice(0, firstEdit)).filter((call) => READ_TOOLS.has(call.tool)).length;
 
   const readInOne = new Set(one.map(readKey).filter((value): value is string => value !== null));
@@ -611,7 +649,7 @@ export function twoTurnColumns(
     return readKeyOf !== null && readInOne.has(readKeyOf);
   }).length;
 
-  const appliedInOne = new Set(one.filter((call) => editedBy(call) && succeeded(call)).flatMap(hunksOf).map((hunk) => `${hunk.path}\n${hunk.find}`));
+  const appliedInOne = new Set(one.filter((call) => triedEdit(call) && succeeded(call)).flatMap(hunksOf).map((hunk) => `${hunk.path}\n${hunk.find}`));
   let repeatedActions = 0;
   for (const call of two) {
     repeatedActions += hunksOf(call).filter((hunk) => appliedInOne.has(`${hunk.path}\n${hunk.find}`)).length;
@@ -633,7 +671,15 @@ export function twoTurnColumns(
     const edited = two.findIndex((call) => pathsOf(call).edited.includes(changed));
     readChangedFirst = read >= 0 && (edited < 0 || read < edited);
   }
-  return { readsBeforeEdit, repeatedReads, repeatedActions, tokens: context.tokens, turnOneCalls: one.length, readChangedFirst };
+  return {
+    readsBeforeEdit,
+    repeatedReads,
+    repeatedActions,
+    tokens: context.tokens,
+    tokensComplete: context.tokensComplete,
+    turnOneCalls: one.length,
+    readChangedFirst,
+  };
 }
 
 /** Every file in a workspace, tracked or not, as git lists them. */
@@ -765,17 +811,19 @@ async function runCell(
       for (const path of paths.edited) touched.add(path);
     }
     const tokensOf = (outcome: TurnOutcome): number => outcome.tokens.input + outcome.tokens.output;
+    const complete = turn.tokens.complete && (one === null || one.tokens.complete);
     const measure: RunMeasure = {
       workingCode,
       workflowCompleted,
       firstEdit: firstWhere(calls, editedBy),
+      firstEditTried: firstWhere(calls, triedEdit),
       firstBuild: firstWhere(calls, (call) => buildOf(call) !== null),
       reachedBuild: calls.some((call) => buildOf(call) !== null),
       failedBuilds: failedBuildsOf(calls),
       ms: turn.ms + (one?.ms ?? 0),
       toolMs: turn.toolMs + (one?.toolMs ?? 0),
       approvals: turn.approvals + (one?.approvals ?? 0),
-      tokens: tokensOf(turn) + (one === null ? 0 : tokensOf(one)),
+      tokens: { total: tokensOf(turn) + (one === null ? 0 : tokensOf(one)), complete },
       signatures,
       used: [...offered].filter((path) => touched.has(path)).length,
       ignored: [...offered].filter((path) => !touched.has(path)).length,
@@ -791,6 +839,7 @@ async function runCell(
               existing,
               changed: task.between === 'touch-file' ? TOUCHED_FILE : null,
               tokens: tokensOf(turn),
+              tokensComplete: turn.tokens.complete,
             }),
     };
     // Written as each run ends, so a stopped evaluation still leaves every
@@ -854,6 +903,7 @@ export async function evaluate(
     const meanOf = (values: readonly number[]): number | null =>
       values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
     const edits = list.map((measure) => measure.firstEdit).filter((value): value is number => value !== null);
+    const tried = list.map((measure) => measure.firstEditTried).filter((value): value is number => value !== null);
     const builds = list.map((measure) => measure.firstBuild).filter((value): value is number => value !== null);
     const sum = (pick: (measure: RunMeasure) => number): number => list.reduce((total, measure) => total + pick(measure), 0);
     const twoTurns = list.map((measure) => measure.twoTurn).filter((value): value is TwoTurnColumns => value !== null);
@@ -869,7 +919,7 @@ export async function evaluate(
               meanReadsBeforeEdit: meanTwo((value) => value.readsBeforeEdit),
               meanRepeatedReads: meanTwo((value) => value.repeatedReads),
               meanRepeatedActions: meanTwo((value) => value.repeatedActions),
-              meanTokens: meanTwo((value) => value.tokens),
+              meanTokens: tokenMean(twoTurns.map((value) => ({ total: value.tokens, complete: value.tokensComplete }))),
               meanTurnOneCalls: meanTwo((value) => value.turnOneCalls),
               readChangedFirst: task.between === 'touch-file' ? twoTurns.filter((value) => value.readChangedFirst === true).length : null,
             }
@@ -878,13 +928,15 @@ export async function evaluate(
       workingCode: list.filter((measure) => measure.workingCode).length,
       workflowCompleted: list.filter((measure) => measure.workflowCompleted).length,
       callsToFirstEdit: { mean: meanOf(edits), of: edits.length },
+      callsToFirstEditTried: { mean: meanOf(tried), of: tried.length },
       callsToFirstBuild: { mean: meanOf(builds), of: builds.length },
       reachedBuild: list.filter((measure) => measure.reachedBuild).length,
       failedBuilds: sum((measure) => measure.failedBuilds),
       meanModelMs: meanOf(list.map((measure) => measure.ms - measure.toolMs)) ?? 0,
       meanToolMs: meanOf(list.map((measure) => measure.toolMs)) ?? 0,
       approvals: sum((measure) => measure.approvals),
-      meanTokens: meanOf(list.map((measure) => measure.tokens)) ?? 0,
+      meanTokens: tokenMean(list.map((measure) => measure.tokens)),
+      knownTokens: meanOf(list.map((measure) => measure.tokens.total)) ?? 0,
       recurringSignatures: recurring,
       includedUsed: sum((measure) => measure.used),
       includedIgnored: sum((measure) => measure.ignored),
@@ -894,6 +946,25 @@ export async function evaluate(
     });
   }
   return { model, rows, markdown: evaluationTable(rows, { model, runs, timeout }) };
+}
+
+/**
+ * The mean of the totals that are known, and how many there were.
+ *
+ * A run whose turn was cut short reported only the steps that completed, or
+ * nothing; averaging that in as if it were the total is what made a cell of
+ * three timeouts read 0 tokens. It counts in the denominator and not in the mean.
+ */
+export function tokenMean(values: readonly { readonly total: number; readonly complete: boolean }[]): { mean: number | null; of: number } {
+  const known = values.filter((value) => value.complete).map((value) => value.total);
+  return { mean: known.length === 0 ? null : known.reduce((sum, value) => sum + value, 0) / known.length, of: known.length };
+}
+
+/** A token mean as the table prints it: `85,024 (2/3)`, or `— (0/3)` when no total is known, never `0`. */
+export function tokensCell(value: { readonly mean: number | null; readonly of: number }, runs: number): string {
+  const count = ` (${String(value.of)}/${String(runs)})`;
+  if (value.mean === null) return `—${count}`;
+  return `${Math.round(value.mean).toLocaleString('en')}${value.of < runs ? count : ''}`;
 }
 
 /** The table, as Markdown. */
@@ -906,12 +977,13 @@ export function evaluationTable(
   const lines = [
     `Model ${about.model.provider}/${about.model.id}; ${String(about.runs)} run(s) per cell; ${String(LAUNCHER_MAX_STEPS)} steps a turn; ${duration(about.timeout)} a turn.`,
     'Working code: the evaluation built and previewed what the turn left, and the task example passed. Workflow completed: the engineer itself checked the release it last built and every example passed. The harness answers every question at once, so tool time holds no person’s wait; activation is never part of a run.',
+    'Calls to first edit: to the first edit that landed; tried: to the first edit attempted, refused or not. Mean tokens: over the runs whose every turn reported its total, with how many when not all did; a turn cut short by a limit or a stop reports only its completed steps. Known tokens: the mean of what every run is known to have used, a floor.',
     '',
   ];
   if (rows.some((row) => row.twoTurn === null)) {
     lines.push(
-      '| condition | task | runs | working code | workflow completed | calls to first edit | calls to first build | reached a build | failed builds | timed out | mean model time | mean tool time | approvals | mean tokens | recurring signatures | included refs used | included refs ignored | reads not offered | unrelated hint credit |',
-      '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+      '| condition | task | runs | working code | workflow completed | calls to first edit | calls to first edit tried | calls to first build | reached a build | failed builds | timed out | mean model time | mean tool time | approvals | mean tokens | known tokens (floor) | recurring signatures | included refs used | included refs ignored | reads not offered | unrelated hint credit |',
+      '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     );
   }
   for (const row of rows) {
@@ -924,6 +996,7 @@ export function evaluationTable(
         String(row.workingCode),
         String(row.workflowCompleted),
         mean(row.callsToFirstEdit, row.runs),
+        mean(row.callsToFirstEditTried, row.runs),
         mean(row.callsToFirstBuild, row.runs),
         String(row.reachedBuild),
         String(row.failedBuilds),
@@ -931,7 +1004,8 @@ export function evaluationTable(
         duration(row.meanModelMs),
         duration(row.meanToolMs),
         String(row.approvals),
-        Math.round(row.meanTokens).toLocaleString('en'),
+        tokensCell(row.meanTokens, row.runs),
+        Math.round(row.knownTokens).toLocaleString('en'),
         String(row.recurringSignatures),
         String(row.includedUsed),
         String(row.includedIgnored),
@@ -965,7 +1039,7 @@ export function evaluationTable(
           two.meanReadsBeforeEdit.toFixed(1),
           two.meanRepeatedReads.toFixed(1),
           two.meanRepeatedActions.toFixed(1),
-          Math.round(two.meanTokens).toLocaleString('en'),
+          tokensCell(two.meanTokens, row.runs),
           two.readChangedFirst === null ? '–' : `${String(two.readChangedFirst)}/${String(row.runs)}`,
         ].join(' | ')} |`,
       );

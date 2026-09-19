@@ -128,6 +128,9 @@ const chatEvent = s.object({
   expiresAt: s.optional(s.number()),
   inputTokens: s.optional(s.number()),
   outputTokens: s.optional(s.number()),
+  // On `usage`: true when the turn did not finish, so these are the steps that
+  // completed and not the whole. Absent on a finished turn's total.
+  partial: s.optional(s.boolean()),
   code: s.optional(s.string()),
   message: s.optional(s.string()),
 });

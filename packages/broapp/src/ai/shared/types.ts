@@ -127,7 +127,8 @@ export interface StoredMessage {
  *   confirm     callId, tool, input, requestId, releaseId, argumentsHash,
  *               expiresAt                    (waits for ai.chatConfirm)
  *   tool-result callId, tool, output, denied?
- *   usage       inputTokens, outputTokens
+ *   usage       inputTokens, outputTokens, partial? (true: the turn did not
+ *               finish, and these are only its completed steps)
  *   done        —
  *   error       code, message
  */
@@ -148,6 +149,8 @@ export interface ChatEvent {
   expiresAt?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /** On `usage`: the turn did not finish, so this is a subtotal, not the whole. */
+  partial?: boolean;
   code?: string;
   message?: string;
 }
