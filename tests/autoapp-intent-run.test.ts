@@ -50,6 +50,7 @@ import {
   INTENT_APPROVES,
   INTENT_REFUSES,
   LAUNCHER_STOPPED,
+  MAX_SAME_REFUSALS,
   NOT_AN_ATTEMPT,
   nothingDoneStopped,
   openIntents,
@@ -1883,3 +1884,142 @@ function submittedTask(): TaskRecord {
   if (task === undefined) throw new Error('no task');
   return task;
 }
+
+// ── 15f. The same refusal four times ends a backlog turn ─────────────────────
+
+describe('15f: a backlog turn refused the same way four times is ended', () => {
+  const reasonsOf = (w: World, taskId: number): string[] => (w.intents.task(taskId)?.failure as { reasons: string[] } | null)?.reasons ?? [];
+  /** A cycle whose `create` is a string: refused for its input, before anything is applied. */
+  const malformed = (then: readonly FakeStep[]): FakeStep =>
+    tool('candidate.cycle', { appId: 'items', message: 'add the examples', hunks: [], create: 'migrations/004.sql' }, then);
+  /** `n` malformed cycles in a row, then `after`. */
+  const malformedTimes = (n: number, after: readonly FakeStep[]): FakeStep[] => {
+    let steps: readonly FakeStep[] = after;
+    for (let i = 0; i < n; i += 1) steps = [malformed(steps)];
+    return [...steps];
+  };
+  const STUCK = 'The turn was refused 4 times for the same reason: candidate.cycle: create: expected an array.';
+  const runIdOf = (id: number, slug: string, attempt = 1): string => `intent-${String(id)}-${slug}-a${String(attempt)}`;
+
+  // 1 and 2.
+  test('four identical malformed cycles: ended after the fourth result, the reason names the tool and the reason, and the attempt counts', async () => {
+    expect(MAX_SAME_REFUSALS).toBe(4);
+    // A fifth is scripted and must never be asked for.
+    const w = await world([...malformedTimes(5, [text('never said')]), text('not advice')], { maxAttempts: 1 });
+    const { id, slugs } = submitted(w.intents, [plan('only-part')]);
+    await executorOf(w).start(id, 'the test');
+    await executorOf(w).idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(task?.stored).toBe('failed');
+    expect(task?.attempts).toBe(1);
+    expect(reasonsOf(w, task?.id ?? 0)).toContain(STUCK);
+    const steps = w.runs.getRun(runIdOf(id, slugs[0] ?? ''))?.steps ?? [];
+    expect(steps.filter((one) => one.route === 'candidate.cycle')).toHaveLength(4);
+    // 2. The second was answered with a valid input, as before.
+    expect(prompts(w.fake).some((prompt) => prompt.includes('A valid input looks like'))).toBe(true);
+    // One note, with the tool and the count.
+    const notes = w.knowledge.db.query<{ message: string }, []>("SELECT message FROM events WHERE kind = 'log' ORDER BY id").all();
+    expect(notes.filter((row) => row.message.includes('refused 4 times for the same reason by candidate.cycle'))).toHaveLength(1);
+  }, 120_000);
+
+  // 3.
+  test('three identical refusals, then a good cycle: not ended', async () => {
+    const w = await world([...malformedTimes(3, [cycle('0001-only-part')])]);
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    await executorOf(w).start(id, 'the test');
+    await executorOf(w).idle();
+    expect(w.intents.runOrder(id)[0]?.stored).toBe('completed');
+  }, 120_000);
+
+  // 4.
+  test('two refusals, an edit that lands, two more of the same: not ended, because the workspace moved', async () => {
+    const w = await world([...malformedTimes(2, [editOnly('0001-only-part', ['c1', 'c2'], malformedTimes(2, [text('done')]))])]);
+    const { id, slugs } = submitted(w.intents, [plan('only-part')]);
+    await executorOf(w).start(id, 'the test');
+    await executorOf(w).idle();
+    const task = w.intents.runOrder(id)[0];
+    // The turn ran to its own end; the host built its edit, and that completed it.
+    expect(task?.stored).toBe('completed');
+    const steps = w.runs.getRun(runIdOf(id, slugs[0] ?? ''))?.steps ?? [];
+    expect(steps.filter((one) => one.route === 'candidate.cycle' && one.outcome === 'failed')).toHaveLength(4);
+  }, 120_000);
+
+  // 5.
+  test('four refusals of four different reasons: not ended', async () => {
+    const cycleMiss = (then: readonly FakeStep[]): FakeStep =>
+      tool('candidate.cycle', { appId: 'items', message: 'm', hunks: [{ path: 'autoapp.json', find: '"no such text"', replace: 'x' }] }, then);
+    const editInput = (then: readonly FakeStep[]): FakeStep =>
+      tool('source.edit', { appId: 'items', message: 5, hunks: [{ path: 'autoapp.json', find: 'a', replace: 'b' }] }, then);
+    const editMiss = (then: readonly FakeStep[]): FakeStep =>
+      tool('source.edit', { appId: 'items', message: 'm', hunks: [{ path: 'autoapp.json', find: '"nor this"', replace: 'x' }] }, then);
+    const w = await world([malformed([cycleMiss([editInput([editMiss([text('done')])])])]), text('not advice')], { maxAttempts: 1 });
+    const { id, slugs } = submitted(w.intents, [plan('only-part')]);
+    await executorOf(w).start(id, 'the test');
+    await executorOf(w).idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(reasonsOf(w, task?.id ?? 0).some((reason) => reason.includes('times for the same reason'))).toBe(false);
+    expect(w.runs.getRun(runIdOf(id, slugs[0] ?? ''))?.steps.filter((one) => one.outcome === 'failed')).toHaveLength(4);
+  }, 120_000);
+
+  // 6.
+  test('four declined approvals: not ended by this rule', async () => {
+    const activate = (then: readonly FakeStep[]): FakeStep => tool('release.activate', { appId: 'items', releaseId: 'a'.repeat(32) }, then);
+    const w = await world([activate([activate([activate([activate([text('done')])])])]), text('not advice')], { maxAttempts: 1 });
+    const { id, slugs } = submitted(w.intents, [plan('only-part')]);
+    await executorOf(w).start(id, 'the test');
+    await executorOf(w).idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(reasonsOf(w, task?.id ?? 0).some((reason) => reason.includes('times for the same reason'))).toBe(false);
+    // All four were put to the run's standing answer, which refuses activation.
+    const steps = w.runs.getRun(runIdOf(id, slugs[0] ?? ''))?.steps ?? [];
+    expect(steps.filter((one) => one.route === 'release.activate' && one.decision === 'denied')).toHaveLength(4);
+    // And the turn went on to its own end: its closing words were asked for.
+    expect(w.fake.calls.length).toBeGreaterThanOrEqual(5);
+  }, 120_000);
+
+  // 7.
+  test('three cycles with the same build failure: the repair limit refuses the fourth, and this rule says nothing', async () => {
+    const breakIt = (then: readonly FakeStep[]): FakeStep =>
+      tool('candidate.cycle', { appId: 'items', message: 'drop a summary', hunks: [{ path: 'src/shared/contract.ts', find: "      summary: 'Add one item.',\n", replace: '' }] }, then);
+    const w = await world([breakIt([verify([verify([verify([text('done')])])])]), text('not advice')], { maxAttempts: 1 });
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    await executorOf(w).start(id, 'the test');
+    await executorOf(w).idle();
+    const task = w.intents.runOrder(id)[0];
+    expect(prompts(w.fake).some((prompt) => prompt.includes('cycles in this turn have ended with the same failure'))).toBe(true);
+    const reasons = reasonsOf(w, task?.id ?? 0);
+    expect(reasons.some((reason) => reason.startsWith('The build has'))).toBe(true);
+    expect(reasons.some((reason) => reason.includes('times for the same reason'))).toBe(false);
+  }, 180_000);
+
+  // 8.
+  test('the sentence is said once in the reasons, once in the advice prompt and once in what the next attempt is told', async () => {
+    // Both attempts are stuck: the second is told why the first ended, and the advice why the second did.
+    const w = await world([...malformedTimes(4, []), ...malformedTimes(4, []), text('not advice')], { maxAttempts: 2 });
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    await executorOf(w).start(id, 'the test');
+    await executorOf(w).idle();
+    const task = w.intents.runOrder(id)[0];
+    const count = (text: string): number => text.split(STUCK).length - 1;
+    const reasons = reasonsOf(w, task?.id ?? 0);
+    expect(reasons.filter((reason) => reason === STUCK)).toHaveLength(1);
+    // 14c's sentence for the same group is not said beside it.
+    expect(reasons.some((reason) => reason.startsWith('candidate.cycle was refused'))).toBe(false);
+    const all = w.fake.calls.map((call) => JSON.stringify(call));
+    const told = all.find((prompt) => prompt.includes('The last attempt ended with:'));
+    expect(told).toBeDefined();
+    const section = (told ?? '').slice((told ?? '').indexOf('The last attempt ended with:'));
+    expect(count(section.slice(0, section.indexOf('"}') < 0 ? undefined : section.indexOf('"}')))).toBe(1);
+    const advice = all.find((prompt) => prompt.includes('# Why it was not completed'));
+    expect(count(advice ?? '')).toBe(1);
+  }, 180_000);
+
+  // 9.
+  test('an interactive turn outside a backlog, refused six times, is not ended', async () => {
+    const w = await world([...malformedTimes(6, [text('I could not get the input right.')])]);
+    const result = await w.tab.ai.turn({ runId: 'chat-refused-six', message: 'add the examples' }, { answer: () => true });
+    expect(result.status).toBe('succeeded');
+    expect(result.events.filter((event) => event.type === 'tool-result' && event.tool === 'candidate.cycle')).toHaveLength(6);
+    expect(result.events.some((event) => event.type === 'done')).toBe(true);
+  }, 120_000);
+});

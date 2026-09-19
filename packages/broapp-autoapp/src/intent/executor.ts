@@ -80,6 +80,17 @@ export const TASK_MAX_TURNS = 4;
  * what it measures is the model holding the turn in silence.
  */
 export const TASK_IDLE_TIMEOUT_MS = 8 * 60_000;
+/**
+ * How many times a backlog turn may be refused for the same reason, with its
+ * workspace unchanged, before it is ended.
+ *
+ * A choice, not a measurement. The second identical refusal shows the builder
+ * a valid input; the third is its try at it; the fourth says it is not going to
+ * get there. The paper that prompted this used five and eight for its own loop
+ * detector and did not vary them, and nothing about Autoapp is known from that.
+ * Nobody has measured four.
+ */
+export const MAX_SAME_REFUSALS = 4;
 /** How many questions a builder may ask about one task. */
 export const MAX_QUESTIONS_PER_TASK = 2;
 
@@ -182,10 +193,17 @@ export interface TurnEnding {
   readonly idleMs?: number;
   /** The sentence a turn that could not start or failed on the provider gave. */
   readonly error?: string;
+  /** The refusal that ended the turn, and how many times it came, when {@link MAX_SAME_REFUSALS} did. */
+  readonly stuck?: { readonly group: Pick<RefusalGroup, 'route' | 'kind' | 'error'>; readonly count: number };
 }
 
 function plural(n: number, one: string, many: string): string {
   return `${String(n)} ${n === 1 ? one : many}`;
+}
+
+/** The sentence a turn ended for being refused the same way too often gets. */
+export function stuckSentence(count: number, group: Pick<RefusalGroup, 'route' | 'kind' | 'error'>): string {
+  return `The turn was refused ${String(count)} times for the same reason: ${group.route}: ${endSentence(refusalError(group, 160))}`;
 }
 
 /** The sentence a turn ended by the idle limit gets. */
@@ -264,10 +282,13 @@ export function verdictOf(
   current: Readonly<Record<string, string>> = {},
 ): Verdict {
   const reasons: string[] = [];
+  // The refusal that ended a stuck turn is said once, by its own sentence.
+  const stuck = ending.stuck;
+  const told = stuck === undefined ? refusals : refusals.filter((group) => group.route !== stuck.group.route || group.kind !== stuck.group.kind);
   if (revNow === revBefore) reasons.push('The workspace did not change.');
   // Nothing built is the one reason a refused build explains, so the refusals
   // follow it and nothing else: a verdict with a build has its own evidence.
-  if (status.releaseId === null && status.problems.length === 0) reasons.push(NOTHING_BUILT, ...refusalSentences(refusals));
+  if (status.releaseId === null && status.problems.length === 0) reasons.push(NOTHING_BUILT, ...refusalSentences(told));
   if (status.problems.length > 0) reasons.push(`The build has ${plural(status.problems.length, 'problem', 'problems')}.`);
   if (status.editsSinceBuild) reasons.push('The workspace changed after the last build.');
   if (!status.checksVerified) reasons.push('The checks did not run on the build the preview is running.');
@@ -292,6 +313,7 @@ export function verdictOf(
   if (reasons.length > 0) {
     if (ending.timedOut === true) reasons.push('The turn ran out of time.');
     if (ending.idleMs !== undefined) reasons.push(idleSentence(ending.idleMs));
+    if (stuck !== undefined) reasons.push(stuckSentence(stuck.count, stuck.group));
     if (ending.error !== undefined) reasons.push(`The turn ended with an error: ${ending.error}`);
   }
   return { completed: reasons.length === 0, reasons, passed };
@@ -517,6 +539,43 @@ interface Active {
   providerError: string | null;
   /** How many tool calls this turn made. */
   toolCalls: number;
+  /** This turn's refusals by route and kind: the first of each, how many, and the landed edits when it began. */
+  refusals: Map<string, { group: RefusalGroup; count: number; landedAt: number }>;
+  /** Edits of this turn that changed the workspace, as their results showed. */
+  landed: number;
+  /** The workspace revision when the turn began. */
+  turnRev: string;
+  /** Set when {@link MAX_SAME_REFUSALS} ended the turn. */
+  stuck: { group: RefusalGroup; count: number } | null;
+}
+
+/** The sentence the AI layer gives a tool that failed for no reason it can show; not a refusal. */
+const TOOL_FAILED = 'The tool failed.';
+
+/** Whether a tool result shows an edit that changed the workspace: what 15d counts as an edit. */
+function landedEdit(tool: string, output: unknown): boolean {
+  if (typeof output !== 'object' || output === null) return false;
+  const record = output as { error?: unknown; denied?: unknown; applied?: { changed?: unknown } };
+  if (tool === 'source.edit' || tool === 'source.change') return record.error === undefined && record.denied !== true;
+  if (tool !== 'candidate.cycle') return false;
+  return Array.isArray(record.applied?.changed) && record.applied.changed.length > 0;
+}
+
+/**
+ * The refusal a tool result carries, grouped as the verdict groups them, or
+ * `null` when it is not one.
+ *
+ * A refusal is a tool the gate let run that answered with an error of its
+ * own: a malformed input, a hunk that matched nothing, a path outside the
+ * workspace. A person's no carries `denied`; a build that failed or a check
+ * that did not pass is a result, not an error; a failure the AI layer reduced
+ * to its fixed sentence names nothing the builder could fix.
+ */
+function refusalOf(tool: string, output: unknown, denied: boolean): RefusalGroup | null {
+  if (denied || typeof output !== 'object' || output === null) return null;
+  const error = (output as { error?: unknown }).error;
+  if (typeof error !== 'string' || error === TOOL_FAILED) return null;
+  return refusalsOf([{ route: tool, decision: 'allowed', outcome: 'failed', error }])[0] ?? null;
 }
 
 /** A clock that ends a turn after a stretch with no tool call. */
@@ -707,6 +766,50 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     };
   }
 
+  /**
+   * Count a tool result against {@link MAX_SAME_REFUSALS}, and end the turn at
+   * the limit when nothing changed.
+   *
+   * The idle clock re-arms on every call and every result, so a refusal every
+   * few seconds is a busy turn to it, and the repair limit counts builds, which
+   * a refused input never reaches. A group's count starts again when an edit
+   * has landed since its first refusal: every landed edit is a commit, so that
+   * is the workspace revision moving, seen without asking git on every event.
+   * The revision is read once, at the limit, for the one move the results
+   * cannot show — a change no result reported, in a turn none reported one —
+   * and a turn whose workspace moved at all is never ended by this.
+   */
+  function countRefusal(active: Active, event: ChatEvent): void {
+    const tool = event.tool ?? '';
+    if (landedEdit(tool, event.output)) {
+      active.landed += 1;
+      return;
+    }
+    const group = refusalOf(tool, event.output, event.denied === true);
+    if (group === null || active.stuck !== null || active.ending !== null) return;
+    const key = `${group.route} ${group.kind}`;
+    const seen = active.refusals.get(key);
+    const entry = seen === undefined || active.landed > seen.landedAt ? { group, count: 0, landedAt: active.landed } : seen;
+    entry.count += 1;
+    active.refusals.set(key, entry);
+    if (entry.count < MAX_SAME_REFUSALS) return;
+    const rev = sourceRevision(layout.app(active.appId).source);
+    if (active.landed === 0 && rev !== active.turnRev) {
+      // Something moved the workspace that no result reported: not stuck.
+      active.turnRev = rev;
+      active.refusals.set(key, { group, count: 1, landedAt: active.landed });
+      return;
+    }
+    active.stuck = { group: entry.group, count: entry.count };
+    note(
+      `the turn was refused ${String(entry.count)} times for the same reason by ${group.route} and was ended`,
+      active.appId,
+      active.runId ?? undefined,
+      event.callId,
+    );
+    active.controller?.abort(new Error(stuckSentence(entry.count, entry.group)));
+  }
+
   /** Follow the turn: the last tool, the approvals, questions settling or expiring. */
   function followerFor(active: Active) {
     return (event: ChatEvent): void => {
@@ -732,6 +835,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       } else if (event.type === 'tool-result') {
         active.inFlight.delete(callId);
         active.clock?.arm();
+        countRefusal(active, event);
       }
       if (event.type === 'tool-result' && event.tool === 'intent.ask' && active.ending?.kind === 'asked') {
         // The question is in; the turn has nothing left to do.
@@ -876,6 +980,10 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       active.inFlight = new Set();
       active.providerError = null;
       active.toolCalls = 0;
+      active.refusals = new Map();
+      active.landed = 0;
+      active.turnRev = revBefore;
+      active.stuck = null;
       active.run = { taskId: task.id, attempt: turnNumber, startedAt: Date.now(), lastTool: null, lastToolAt: null, approvals: 0 };
 
       const limit = AbortSignal.timeout(turnTimeoutMs);
@@ -974,6 +1082,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         {
           timedOut: limit.aborted,
           ...(idle ? { idleMs: idleTimeoutMs } : {}),
+          ...(active.stuck === null ? {} : { stuck: active.stuck }),
           ...(error === undefined ? {} : { error }),
         },
         finishedExamples(active.appId),
@@ -1145,6 +1254,10 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         clock: null,
         providerError: null,
         toolCalls: 0,
+        refusals: new Map(),
+        landed: 0,
+        turnRev: 'no-git',
+        stuck: null,
       };
       current = active;
       loop = drive(active).finally(() => {

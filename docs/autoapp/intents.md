@@ -242,7 +242,11 @@ measured what a local model does with one long open-ended turn.
    makes no tool call for eight minutes is ended first (the clock holds while a
    tool runs and while a question waits for the person), and the verdict says
    so: "The turn made no tool call for 8 minutes." The twenty-minute limit
-   stays. A turn that ended on its own — not aborted by either limit or a
+   stays. A turn refused four times for the same reason (the same tool and the
+   same kind of refusal, as the verdict groups them) with no edit landing in
+   between is ended too, and says so: "The turn was refused 4 times for the same
+   reason: candidate.cycle: create: expected an array." Four is a choice, not a
+   measurement. Such a turn costs an attempt, as an idle ending does. A turn that ended on its own — not aborted by either limit or a
    Stop, not a provider ending, not a question — with edits nothing built is
    built once by the host first: one `candidate.cycle` with no hunks and no
    files, through the same gate, under the turn's run id, answered by the run's
