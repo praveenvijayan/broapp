@@ -1381,3 +1381,773 @@ code {
   background: var(--launcher-ground);
   color: var(--launcher-text);
 }
+
+/*
+ * The Overview: the screen the launcher opens on, beside the chat rather than
+ * over it. Laid out as `prompts/autoapp/mockups/overview.html` is — title, the
+ * summary strip, the attention band, Running now beside Applications, the
+ * footer strip — and drawn only in the `--launcher-*` variables above and the
+ * body's system font, so both schemes come from the variables and nothing
+ * here is written per scheme.
+ */
+
+/* Two views of one main area. The chat is hidden, never removed, while the
+   Overview shows: a turn may be streaming into it. */
+.launcher__chat[hidden] {
+  display: none;
+}
+
+.launcher__rail-view {
+  position: relative;
+}
+
+.launcher__rail-view[aria-current='page'] {
+  background: var(--launcher-selected);
+  color: var(--launcher-heading);
+}
+
+.launcher__rail-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.launcher__rail-button:disabled:hover {
+  background: transparent;
+  color: var(--launcher-muted);
+}
+
+/* How many things need the person, on the Overview's rail button. */
+.launcher__rail-count {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.35rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--launcher-warn-text);
+  color: var(--launcher-warn-surface);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.05rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.launcher__overview {
+  grid-area: chat;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.75rem 1rem 1.25rem;
+  background: var(--launcher-ground);
+  color: var(--launcher-text);
+  /* Its breakpoints are its own width's, not the window's: the conversations
+     column beside it takes a share of the window. */
+  container: overview / inline-size;
+}
+
+@media (min-width: 45rem) {
+  .launcher__overview {
+    padding: 2.25rem 2rem 1.5rem;
+  }
+}
+
+.launcher__overview > * {
+  max-width: 77.5rem;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.launcher__ov-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.launcher__ov-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: var(--launcher-heading);
+}
+
+.launcher__ov-lede {
+  margin: 0;
+  color: var(--launcher-muted);
+}
+
+.launcher__ov-alerts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  font-size: 0.85rem;
+}
+
+.launcher__ov-muted {
+  color: var(--launcher-muted);
+  font-size: 0.85rem;
+}
+
+.launcher__ov-switch {
+  display: inline-flex;
+  min-height: 1.5rem;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--launcher-text);
+  cursor: pointer;
+}
+
+.launcher__ov-switch input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--launcher-accent);
+}
+
+.launcher__ov-switch input:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 1px;
+}
+
+.launcher__ov-note {
+  margin-bottom: 0.75rem;
+  color: var(--launcher-muted);
+  font-size: 0.85rem;
+}
+
+.launcher__ov-card {
+  border: 1px solid var(--launcher-border);
+  border-radius: 10px;
+  background: var(--launcher-surface);
+}
+
+.launcher__ov-pad {
+  padding: 1.35rem 1.5rem;
+}
+
+.launcher__ov-tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The summary strip: four figures. */
+.launcher__ov-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 1.35rem 0;
+}
+
+.launcher__ov-tile {
+  min-width: 0;
+  padding: 0.25rem 2.25rem;
+  border-left: 1px solid var(--launcher-border);
+}
+
+.launcher__ov-tile:first-child {
+  border-left: 0;
+}
+
+.launcher__ov-k {
+  color: var(--launcher-muted);
+  font-size: 0.85rem;
+}
+
+.launcher__ov-num {
+  margin: 0.15rem 0;
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--launcher-heading);
+  overflow-wrap: anywhere;
+}
+
+.launcher__ov-tile--hot .launcher__ov-num {
+  color: var(--launcher-warn-text);
+}
+
+.launcher__ov-partial {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--launcher-muted);
+}
+
+.launcher__ov-s {
+  color: var(--launcher-muted);
+  font-size: 0.8rem;
+}
+
+.launcher__ov-warn {
+  color: var(--launcher-warn-text);
+}
+
+.launcher__ov-link {
+  min-height: 1.5rem;
+  padding: 0.15rem 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--launcher-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.launcher__ov-link:hover {
+  color: var(--launcher-heading);
+}
+
+.launcher__ov-link--plain {
+  text-decoration: none;
+}
+
+.launcher__ov-link:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 2px;
+}
+
+/* The attention band: one row per thing that needs the person. */
+.launcher__ov-attention {
+  margin-top: 1rem;
+  padding: 1rem 1.25rem 0.4rem;
+  border: 1px solid var(--launcher-warn-border);
+  border-radius: 10px;
+  background: var(--launcher-warn-surface);
+}
+
+.launcher__ov-attention--calm {
+  padding: 0.75rem 1.25rem;
+  border-color: var(--launcher-border);
+  background: var(--launcher-surface);
+}
+
+.launcher__ov-calm {
+  margin: 0;
+  color: var(--launcher-muted);
+}
+
+.launcher__ov-band-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  font-weight: 620;
+  color: var(--launcher-heading);
+}
+
+.launcher__ov-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.6rem;
+  height: 1.6rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--launcher-warn-text);
+  color: var(--launcher-warn-surface);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.launcher__ov-items {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(9rem, 1.1fr) minmax(0, 2.6fr) auto;
+  column-gap: 1.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One grid for every row, so a row's detail starts where the others' do. */
+.launcher__ov-item {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  row-gap: 0.75rem;
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--launcher-warn-border);
+}
+
+.launcher__ov-item:first-child {
+  border-top: 0;
+}
+
+.launcher__ov-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.launcher__ov-mark--warn {
+  background: var(--launcher-warn-text);
+  color: var(--launcher-warn-surface);
+}
+
+.launcher__ov-mark--error {
+  background: var(--launcher-error-surface);
+  color: var(--launcher-error-text);
+  box-shadow: inset 0 0 0 1px var(--launcher-error-text);
+}
+
+.launcher__ov-mark--good {
+  background: var(--launcher-good-surface);
+  color: var(--launcher-good-text);
+  box-shadow: inset 0 0 0 1px var(--launcher-good-text);
+}
+
+.launcher__ov-item-title {
+  font-weight: 600;
+  color: var(--launcher-heading);
+  overflow-wrap: anywhere;
+}
+
+.launcher__ov-item-detail {
+  display: -webkit-box;
+  overflow: hidden;
+  /* Text, not muted: muted on the band's warm ground is just under 4.5:1. */
+  color: var(--launcher-text);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+  /* Two lines: the whole of it is in the panel the action opens. */
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* The one filled button on the screen. */
+.launcher__button--primary {
+  border-color: var(--launcher-accent);
+  background: var(--launcher-accent);
+  color: var(--launcher-accent-contrast);
+}
+
+.launcher__button--primary:hover:not(:disabled) {
+  border-color: var(--launcher-accent);
+  background: var(--launcher-accent);
+  color: var(--launcher-accent-contrast);
+  opacity: 0.9;
+}
+
+.launcher__overview .launcher__button {
+  min-width: 6rem;
+  padding: 0.55rem 1.1rem;
+  background: var(--launcher-surface);
+}
+
+.launcher__overview .launcher__button:hover:not(:disabled) {
+  background: var(--launcher-hover);
+}
+
+.launcher__overview .launcher__button--primary,
+.launcher__overview .launcher__button--primary:hover:not(:disabled) {
+  background: var(--launcher-accent);
+}
+
+.launcher__overview .launcher__button--small {
+  min-width: 0;
+  padding: 0.2rem 0.5rem;
+}
+
+/* Running now beside Applications. */
+.launcher__ov-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.34fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.launcher__ov-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.launcher__ov-eyebrow {
+  color: var(--launcher-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.launcher__ov-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--launcher-muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.launcher__ov-dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--launcher-muted);
+}
+
+.launcher__ov-dot--good,
+.launcher__ov-dot--building,
+.launcher__ov-dot--serving {
+  background: var(--launcher-good-text);
+}
+
+.launcher__ov-dot--needs-review {
+  background: var(--launcher-error-text);
+  box-shadow: 0 0 0 3px var(--launcher-error-surface);
+}
+
+.launcher__ov-now-title {
+  margin: 0.5rem 0 0.15rem;
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: var(--launcher-heading);
+}
+
+.launcher__ov-where {
+  margin: 0;
+  color: var(--launcher-muted);
+}
+
+/* The stepper: Reading, Editing, Building, Checking. */
+.launcher__ov-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  column-gap: 0.4rem;
+  margin: 1.6rem 0 1.1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.launcher__ov-step {
+  position: relative;
+  padding-top: 1.9rem;
+  color: var(--launcher-muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.launcher__ov-step::before {
+  content: '';
+  position: absolute;
+  top: 0.62rem;
+  left: -50%;
+  width: 100%;
+  height: 1px;
+  background: var(--launcher-border);
+}
+
+.launcher__ov-step:first-child::before {
+  display: none;
+}
+
+.launcher__ov-step--done::before,
+.launcher__ov-step--on::before {
+  background: var(--launcher-accent);
+}
+
+.launcher__ov-step::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-left: -0.625rem;
+  border: 1.5px solid var(--launcher-muted);
+  border-radius: 50%;
+  background: var(--launcher-surface);
+}
+
+.launcher__ov-step--done::after {
+  border-color: var(--launcher-accent);
+  background: var(--launcher-accent);
+}
+
+.launcher__ov-step--done span::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  top: 0.32rem;
+  left: 50%;
+  width: 0.5rem;
+  height: 0.25rem;
+  margin-left: -0.3rem;
+  border-bottom: 1.5px solid var(--launcher-accent-contrast);
+  border-left: 1.5px solid var(--launcher-accent-contrast);
+  transform: rotate(-45deg);
+}
+
+.launcher__ov-step--on {
+  color: var(--launcher-heading);
+  font-weight: 600;
+}
+
+.launcher__ov-step--on::after {
+  border-color: var(--launcher-accent);
+  background: var(--launcher-accent);
+  box-shadow: inset 0 0 0 0.25rem var(--launcher-surface);
+}
+
+.launcher__ov-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 1.1rem 0 0.4rem;
+  border-top: 1px solid var(--launcher-border);
+  text-align: center;
+}
+
+.launcher__ov-facts > div {
+  padding: 0 0.75rem;
+  border-left: 1px solid var(--launcher-border);
+}
+
+.launcher__ov-facts > div:first-child {
+  border-left: 0;
+}
+
+.launcher__ov-fact {
+  white-space: nowrap;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--launcher-heading);
+}
+
+.launcher__ov-quiet {
+  margin: 0.6rem 0 0;
+  color: var(--launcher-muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.launcher__ov-quiet.launcher__ov-warn {
+  color: var(--launcher-warn-text);
+}
+
+.launcher__ov-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.1rem;
+}
+
+.launcher__ov-link--end {
+  margin-left: auto;
+}
+
+/* Applications. */
+.launcher__ov-apps-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 620;
+  color: var(--launcher-heading);
+}
+
+.launcher__ov-app-list {
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.launcher__ov-empty {
+  margin-top: 0.75rem;
+}
+
+.launcher__ov-app {
+  display: grid;
+  grid-template-columns: minmax(6rem, 1fr) auto auto;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  padding: 1.1rem 0;
+  border-top: 1px solid var(--launcher-border);
+}
+
+.launcher__ov-app-name {
+  font-weight: 600;
+  color: var(--launcher-heading);
+  overflow-wrap: break-word;
+}
+
+.launcher__ov-app-detail {
+  color: var(--launcher-muted);
+  font-size: 0.9rem;
+}
+
+.launcher__ov-meter {
+  grid-column: 1 / 3;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  color: var(--launcher-muted);
+  font-size: 0.85rem;
+}
+
+.launcher__ov-track {
+  flex: 1;
+  max-width: 19rem;
+  height: 0.32rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--launcher-border);
+  /* Outlined in muted: the divider colour alone is not 3:1 against the card. */
+  box-shadow: inset 0 0 0 1px var(--launcher-muted);
+}
+
+.launcher__ov-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--launcher-accent);
+}
+
+/* The footer strip, and the prices it opens. */
+.launcher__ov-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0;
+  margin-top: 1.4rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--launcher-border);
+  color: var(--launcher-muted);
+  font-size: 0.9rem;
+}
+
+.launcher__ov-foot > span {
+  padding: 0 1.1rem;
+  border-left: 1px solid var(--launcher-border);
+}
+
+.launcher__ov-foot > span:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.launcher__ov-foot b {
+  margin-left: 0.4rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--launcher-heading);
+}
+
+.launcher__ov-foot .launcher__ov-foot-end {
+  margin-left: auto;
+  border-left: 0;
+}
+
+.launcher__ov-prices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.launcher__ov-price {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.launcher__ov-price legend {
+  margin-bottom: 0.3rem;
+  padding: 0;
+  font-weight: 600;
+  color: var(--launcher-heading);
+}
+
+.launcher__ov-usage td:nth-child(n + 2) {
+  text-align: right;
+}
+
+@container overview (max-width: 56.25rem) {
+  .launcher__ov-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 1.25rem;
+  }
+
+  .launcher__ov-tile {
+    padding: 0.25rem 1.25rem;
+  }
+
+  .launcher__ov-tile:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .launcher__ov-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .launcher__ov-items {
+    grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+    column-gap: 0.9rem;
+  }
+
+  .launcher__ov-item-detail {
+    grid-row: 2;
+    grid-column: 2 / 4;
+  }
+}
+
+@container overview (max-width: 32.5rem) {
+  .launcher__ov-num {
+    font-size: 1.6rem;
+  }
+
+  .launcher__ov-fact {
+    font-size: 1.25rem;
+  }
+
+  .launcher__ov-items {
+    grid-template-columns: 1.5rem minmax(0, 1fr);
+  }
+
+  .launcher__ov-item .launcher__button {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .launcher__ov-item-detail {
+    grid-column: 2;
+  }
+
+  .launcher__ov-app {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .launcher__ov-app .launcher__ov-state {
+    grid-row: 2;
+    grid-column: 1;
+  }
+
+  .launcher__ov-foot > span {
+    padding: 0 1rem 0 0;
+    border-left: 0;
+  }
+
+  .launcher__ov-foot .launcher__ov-foot-end {
+    margin-left: 0;
+  }
+}
+
+.launcher__ov-nowrap {
+  white-space: nowrap;
+}
+
+.launcher__overview .launcher__button:focus-visible {
+  outline-offset: 2px;
+}

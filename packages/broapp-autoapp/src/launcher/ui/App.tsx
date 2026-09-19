@@ -30,8 +30,19 @@ import {
 } from 'broapp-ai-elements/ui';
 import type { BroappChatControls, BroappScheme } from 'broapp-ai-elements/ui';
 import { useConnection, useOperation } from 'broapp/react';
-import { announcePending, browserSurface } from 'broapp-autoapp/react';
-import { BookOpen, History, ListChecks, PanelRight, Plus, ScrollText, SlidersHorizontal } from 'lucide-react';
+import { announceOverview, announcePending, browserSurface, requestAlerts, titleWithPending } from 'broapp-autoapp/react';
+import type { OverviewAlerts } from 'broapp-autoapp/react';
+import {
+  BookOpen,
+  History,
+  LayoutDashboard,
+  ListChecks,
+  MessageSquare,
+  PanelRight,
+  Plus,
+  ScrollText,
+  SlidersHorizontal,
+} from 'lucide-react';
 
 import type { LauncherContract } from '../contract.ts';
 
@@ -40,6 +51,8 @@ import { CandidatePanel } from './CandidatePanel.tsx';
 import { IntentPanel } from './IntentPanel.tsx';
 import { KnowledgePanel } from './KnowledgePanel.tsx';
 import { LogsPanel } from './LogsPanel.tsx';
+import { startOverviewPoller, type LauncherView } from './overview-poll.ts';
+import { OverviewScreen, type NeedsYouTarget } from './OverviewScreen.tsx';
 import { LauncherStopped, QuitControl } from './QuitControl.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
 import { readScheme, applyScheme, SCHEME_KEY } from './scheme.ts';
@@ -49,6 +62,8 @@ import { firstSelection } from './selection.ts';
 const HISTORY_OPEN = 'broapp-autoapp:history-open';
 const APPS_OPEN = 'broapp-autoapp:apps-open';
 const ACTIVE_THREAD = 'broapp-autoapp:thread';
+/** Whether alerts may play a tone, remembered the way the scheme is. */
+export const SOUND_KEY = 'broapp-autoapp:sound';
 
 /**
  * Four things the engineer can actually do, offered before anything is said.
@@ -147,6 +162,14 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
   // the moment the window was resized.
   const [narrowPanel, setNarrowPanel] = useState<'history' | 'apps' | null>(null);
 
+  // Which screen the main area shows. The Overview first, every time the tab
+  // loads: what needs the person is the first thing they should see, and a
+  // choice remembered from last time would hide it behind a chat.
+  const [view, setView] = useState<LauncherView>('overview');
+  // The Backlog panel can be opened on one request, when the Overview sent the
+  // person there.
+  const [backlogFocus, setBacklogFocus] = useState<{ appId: string; intentId: number } | null>(null);
+
   // Bumped whenever something the engineer did may have changed what the
   // panels below show.
   const [changed, setChanged] = useState(0);
@@ -154,6 +177,8 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
   // renames itself while any are, because a question that arrives after ten
   // minutes of a model thinking arrives at a tab nobody is looking at.
   const waiting = useRef(0);
+  // What needs the person, by the last overview read, for the same title.
+  const needsYouRef = useRef(0);
   // The same count as state, for the strip above the conversation. A renamed
   // tab reaches somebody who is elsewhere; the strip reaches somebody who is
   // here and has scrolled away from the card. On 2026-09-12 a card waited the
@@ -165,6 +190,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
     if (surface === null) return;
     announcePending(surface, pending, waiting.current);
     waiting.current = pending;
+    surface.title = titleWithPending(surface.title, pending + needsYouRef.current);
   }, []);
   const showQuestion = useCallback((): void => {
     document.querySelector('.broapp-chat__confirm')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -187,6 +213,73 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
     const timer = setInterval(() => void readRunning(undefined), 2_000);
     return () => clearInterval(timer);
   }, [runGoing, readRunning]);
+
+  // The Overview's one read. App owns it rather than the screen, so the rail's
+  // count, the title and the alerts keep going while the chat is the view.
+  const overviewRead = useOperation<LauncherContract, 'launcher.overview'>('launcher.overview');
+  const previewOpen = useOperation<LauncherContract, 'launcher.previewOpen'>('launcher.previewOpen');
+  const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState === 'visible');
+  useEffect(() => {
+    const onChange = (): void => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, []);
+  const { run: readOverview } = overviewRead;
+  const poller = useRef<ReturnType<typeof startOverviewPoller> | null>(null);
+  const mode = useRef({ view, visible });
+  mode.current = { view, visible };
+  useEffect(() => {
+    if (connection.phase !== 'ready') return undefined;
+    const started = startOverviewPoller(() => readOverview(undefined), mode.current);
+    poller.current = started;
+    return () => {
+      started.stop();
+      poller.current = null;
+    };
+  }, [connection.phase, readOverview]);
+  useEffect(() => poller.current?.setMode(view, visible), [view, visible]);
+
+  // Alerts: permission is asked only by the Overview's button, sound is the
+  // person's switch, and each read is compared with the one before it.
+  const [permission, setPermission] = useState<string>(() => browserSurface()?.notify?.permission ?? 'unsupported');
+  const [soundOn, setSoundOn] = useState(() => remembered(SOUND_KEY, false));
+  useEffect(() => {
+    const sound = browserSurface()?.sound;
+    if (sound !== undefined) sound.enabled = soundOn;
+  }, [soundOn]);
+  const chooseSound = useCallback((on: boolean): void => {
+    setSoundOn(on);
+    remember(SOUND_KEY, String(on));
+  }, []);
+  const turnOnAlerts = useCallback((): void => {
+    const surface = browserSurface();
+    if (surface === null) return;
+    // The click is the gesture that lets the page start audio, so sound comes on with it.
+    chooseSound(true);
+    void requestAlerts(surface).then(setPermission);
+  }, [chooseSound]);
+  const testSound = useCallback((): void => {
+    const sound = browserSurface()?.sound;
+    if (sound === undefined) return;
+    void Promise.resolve(sound.unlock?.()).then(() => sound.play('attention'));
+  }, []);
+  const overview = overviewRead.data;
+  const previousOverview = useRef<OverviewAlerts | null>(null);
+  // When the figures on screen were read, for a refresh that fails.
+  const [readAt, setReadAt] = useState<number | null>(null);
+  const needsYouCount = overview?.needsYou.length ?? 0;
+  needsYouRef.current = needsYouCount;
+  useEffect(() => {
+    if (overview === null) return;
+    const surface = browserSurface();
+    if (surface !== null) {
+      announceOverview(surface, previousOverview.current, overview);
+      // The chat's own questions are not in the overview; the title counts both.
+      surface.title = titleWithPending(surface.title, overview.needsYou.length + waiting.current);
+    }
+    previousOverview.current = overview;
+    setReadAt(Date.now());
+  }, [overview]);
 
   const { run: refreshApps } = apps;
   const ready = connection.phase === 'ready';
@@ -286,9 +379,20 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
   );
 
   const newThread = useCallback(async (): Promise<void> => {
+    // A new conversation is a way into the engineer, so the chat is shown.
+    setView('chat');
     const thread = await threads.create('New conversation', null);
     if (thread !== null) chooseThread(thread.id);
   }, [threads, chooseThread]);
+
+  /** A conversation the person picked: shown in the chat. */
+  const pickThread = useCallback(
+    (id: string): void => {
+      setView('chat');
+      chooseThread(id);
+    },
+    [chooseThread],
+  );
 
   const deleteThread = useCallback(
     async (id: string): Promise<void> => {
@@ -316,6 +420,38 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
     },
     [toggle],
   );
+
+  /** The applications column beside the chat, open, and the chat shown. */
+  const showApplications = useCallback((): void => {
+    toggle(APPS_OPEN, setAppsOpen, true);
+    setNarrowPanel('apps');
+    setView('chat');
+  }, [toggle]);
+
+  /** Open the Backlog panel, on one request when the Overview names it. */
+  const openBacklogAt = useCallback((focus: { appId: string; intentId: number } | null): void => {
+    setBacklogFocus(focus);
+    setShowBacklog(true);
+  }, []);
+
+  /**
+   * Where an item on the Overview is decided. A question, an answer and a
+   * failed task are the Backlog panel's; a release ready to activate is the
+   * candidate panel's, beside the chat. The Overview itself decides nothing.
+   */
+  const openTarget = useCallback(
+    (target: NeedsYouTarget): void => {
+      if (target.panel === 'backlog') {
+        openBacklogAt(target.intentId === null ? null : { appId: target.appId, intentId: target.intentId });
+        return;
+      }
+      chooseApp(target.appId);
+      showApplications();
+    },
+    [openBacklogAt, chooseApp, showApplications],
+  );
+
+  const { run: openPreview } = previewOpen;
 
   const chooseScheme = useCallback((next: BroappScheme): void => {
     setScheme(next);
@@ -376,16 +512,47 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
   // told is that no browser could be opened.
   const notOpened = open.data?.opened === false;
 
+  // The Overview takes the chat's area and the applications column's: it has
+  // an Applications block of its own and the mockup's two columns need the room.
+  const appsShown = view === 'chat' && appsOpen;
   const shell = [
     'launcher',
     historyOpen ? '' : ' launcher--history-hidden',
-    appsOpen ? '' : ' launcher--apps-hidden',
+    appsShown ? '' : ' launcher--apps-hidden',
+    view === 'overview' ? ' launcher--overview' : '',
     narrowPanel === null ? '' : ` launcher--narrow-${narrowPanel}`,
   ].join('');
 
   return (
-    <div className={shell}>
+    // `data-view` and `data-turn` say which screen shows and whether a chat turn
+    // is running, where a person's browser, or a test driving one, can read them.
+    <div className={shell} data-turn={turnActive ? 'busy' : 'idle'} data-view={view}>
       <nav aria-label="Workspace" className="launcher__rail">
+        <button
+          aria-current={view === 'overview' ? 'page' : undefined}
+          aria-label={needsYouCount > 0 ? `Overview, ${String(needsYouCount)} need${needsYouCount === 1 ? 's' : ''} you` : 'Overview'}
+          className={`launcher__rail-button launcher__rail-view${runWaiting ? ' launcher__rail-button--waiting' : ''}`}
+          onClick={() => setView('overview')}
+          title={runWaiting ? 'Overview: a question is waiting for you' : 'Overview'}
+          type="button"
+        >
+          <LayoutDashboard aria-hidden="true" size={17} />
+          {needsYouCount > 0 ? (
+            <span aria-hidden="true" className="launcher__rail-count">
+              {needsYouCount}
+            </span>
+          ) : null}
+        </button>
+        <button
+          aria-current={view === 'chat' ? 'page' : undefined}
+          aria-label="Engineer"
+          className="launcher__rail-button launcher__rail-view"
+          onClick={() => setView('chat')}
+          title="Engineer"
+          type="button"
+        >
+          <MessageSquare aria-hidden="true" size={17} />
+        </button>
         <button
           aria-label="New conversation"
           className="launcher__rail-button"
@@ -406,11 +573,12 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
           <History aria-hidden="true" size={17} />
         </button>
         <button
-          aria-expanded={appsOpen}
+          aria-expanded={appsShown}
           aria-label="Applications"
           className="launcher__rail-button"
+          disabled={view === 'overview'}
           onClick={() => toggleColumn('apps', APPS_OPEN, setAppsOpen, !appsOpen)}
-          title="Applications"
+          title={view === 'overview' ? 'Applications: the Overview shows them in its own block' : 'Applications'}
           type="button"
         >
           <PanelRight aria-hidden="true" size={17} />
@@ -439,11 +607,29 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
           aria-expanded={showBacklog}
           aria-label={runWaiting ? 'Backlog, a question is waiting' : 'Backlog'}
           className={`launcher__rail-button${runWaiting ? ' launcher__rail-button--waiting' : ''}`}
-          onClick={() => setShowBacklog((open) => !open)}
+          onClick={() => {
+            setBacklogFocus(null);
+            setShowBacklog((open) => !open);
+          }}
           title={runWaiting ? 'Backlog: a question is waiting for you' : 'Backlog'}
           type="button"
         >
           <ListChecks aria-hidden="true" size={17} />
+        </button>
+        <button
+          aria-expanded={showSettings}
+          aria-label="Settings"
+          className="launcher__rail-button"
+          onClick={(event) => {
+            // On the rail as well as in the chat's bar: the Overview hides that
+            // bar, and Settings opens over either view.
+            settingsOpener.current = event.currentTarget;
+            setShowSettings((shown) => !shown);
+          }}
+          title="Settings"
+          type="button"
+        >
+          <SlidersHorizontal aria-hidden="true" size={17} />
         </button>
         <div className="launcher__rail-spacer" />
         {/*
@@ -470,7 +656,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
             onDelete={(id) => void deleteThread(id)}
             onNew={() => void newThread()}
             onRename={(id, title) => void threads.rename(id, title)}
-            onSelect={chooseThread}
+            onSelect={pickThread}
             threads={threadList}
           />
           {threads.error === null ? null : (
@@ -481,7 +667,27 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
         </aside>
       ) : null}
 
-      <section aria-label="Engineer" className="launcher__chat">
+      {view === 'overview' ? (
+        <OverviewScreen
+          alerts={{ permission, sound: soundOn, onTurnOn: turnOnAlerts, onSound: chooseSound, onTestSound: testSound }}
+          onOpenApp={(appId) => void openApp(appId)}
+          onOpenBacklog={openBacklogAt}
+          onOpenPreview={(appId) => void openPreview({ appId })}
+          onOpenTarget={openTarget}
+          onViewAll={showApplications}
+          overview={overview}
+          readAt={readAt}
+          previewError={previewOpen.error?.message ?? (previewOpen.data?.opened === false ? 'No browser could be opened; the preview’s address is in the launcher’s terminal.' : null)}
+          stale={overviewRead.error !== null}
+        />
+      ) : null}
+
+      {/*
+        Never unmounted: a turn may be streaming into it, and its controls,
+        its questions and its busy state have to keep working while the
+        Overview is the view. Hidden, not removed.
+      */}
+      <section aria-label="Engineer" className="launcher__chat" hidden={view !== 'chat'}>
         <BroappChat
           controlsRef={controls}
           statusLines={ENGINEER_STATUS_LINES}
@@ -569,7 +775,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
         />
       </section>
 
-      {appsOpen ? (
+      {appsShown ? (
         <section aria-label="Your applications" className="launcher__apps">
           <h1 className="launcher__title">Your applications</h1>
 
@@ -635,7 +841,12 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
             onClick={() => setShowBacklog(false)}
             type="button"
           />
-          <IntentPanel appId={selected} onClose={() => setShowBacklog(false)} turnActive={turnActive} />
+          <IntentPanel
+            appId={backlogFocus?.appId ?? selected}
+            onClose={() => setShowBacklog(false)}
+            openIntent={backlogFocus?.intentId ?? null}
+            turnActive={turnActive}
+          />
         </>
       ) : null}
 

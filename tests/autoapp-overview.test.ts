@@ -8,13 +8,17 @@
  * its task, `RunProgress` through a scripted builder, the overview with a run
  * going — are in `autoapp-intent-run.test.ts`, where that world is.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
 import { Database } from 'bun:sqlite';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { aiContract, AiProvider } from 'broapp/ai/react';
 import { createFakeAdapter, type FakeStep, type ProviderAdapter } from 'broapp/ai/host';
+import { BroappProvider } from 'broapp/react';
 import { createGate } from 'broapp/host';
 import type { Envelope, HostLogger } from 'broapp/host';
 import { fromTransportError } from 'broapp/shared';
@@ -57,7 +61,21 @@ import {
 } from 'broapp-autoapp/react';
 import { layout } from 'broapp-autoapp/spec';
 
+import { App } from '../packages/broapp-autoapp/src/launcher/ui/App.tsx';
+import { overviewInterval, startOverviewPoller } from '../packages/broapp-autoapp/src/launcher/ui/overview-poll.ts';
+import {
+  appAction,
+  OverviewScreen,
+  PRIMARY,
+  type OverviewData,
+  type OverviewScreenProps,
+} from '../packages/broapp-autoapp/src/launcher/ui/OverviewScreen.tsx';
+import { launcherContract } from '../packages/broapp-autoapp/src/launcher/contract.ts';
+import type { Browser, Page } from 'playwright';
+
+import { chromiumRuns } from '../scripts/theme-check.ts';
 import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
+import { harness } from './harness.ts';
 
 const quiet: HostLogger = { warn: () => undefined, error: () => undefined };
 
@@ -835,4 +853,685 @@ describe('17a: alerts', () => {
     expect(surface.raisedTitles).toEqual(['A task failed']);
     expect(surface.played).toEqual(['attention']);
   });
+});
+
+// ── 17b: the Overview screen ──────────────────────────────────────────────────
+
+const NOW = Date.UTC(2026, 8, 19, 12, 0, 0);
+
+/** A total with nothing in it. */
+const NOTHING = { inputTokens: 0, outputTokens: 0, cost: 0, atLeast: false, unpricedTokens: 0 };
+
+const EMPTY_OVERVIEW: OverviewData = {
+  needsYou: [],
+  running: null,
+  spend: { task: null, run: null, today: NOTHING, budgetDay: null, todayByModel: [] },
+  backlog: [],
+  apps: [],
+  recent: [],
+};
+
+const APP_ROW = { currentRelease: 'a'.repeat(32), serving: true, pid: 1, schemaVersion: 1, activationPending: false, checks: null };
+
+/** The mockup's data, as `launcher.overview` would give it. */
+const RUNNING: NonNullable<OverviewData['running']> = {
+  taskId: 4,
+  runId: 'intent-1-0004-filter-by-shelf-a1',
+  attempt: 1,
+  startedAt: NOW - 370_000,
+  lastTool: 'candidate.cycle',
+  lastToolAt: NOW - 38_000,
+  approvals: 3,
+  stage: 'building',
+  turn: 1,
+  maxTurns: 4,
+  maxAttempts: 2,
+  quietSince: NOW - 38_000,
+  idleLimitMs: 480_000,
+  turnLimitMs: 1_200_000,
+  filesChanged: 2,
+  criteria: { passed: 1, total: 3 },
+  lastRefusal: null,
+  tokens: { input: 30_000, output: 11_000 },
+  appId: 'reading-list',
+  appName: 'Reading list',
+  intentId: 1,
+  taskSlug: '0004-filter-by-shelf',
+  taskTitle: 'Filter by shelf',
+  taskIndex: 4,
+  taskCount: 6,
+  modelId: 'model-a',
+};
+
+const MOCKUP: OverviewData = {
+  needsYou: [
+    {
+      key: 'question:intent-1-0004-filter-by-shelf-a1:call-3',
+      kind: 'question',
+      appId: 'reading-list',
+      title: 'Keep the read date?',
+      detail: 'A backlog run on reading-list is waiting for you.',
+      at: NOW - 60_000,
+      expiresAt: NOW + 432_000,
+      target: { panel: 'backlog', appId: 'reading-list', intentId: 1, taskId: 4, releaseId: null },
+    },
+    {
+      key: 'advice:9:1',
+      kind: 'advice',
+      appId: 'notes',
+      title: 'Task failed twice',
+      detail: 'Record completion date',
+      at: NOW - 120_000,
+      expiresAt: null,
+      target: { panel: 'backlog', appId: 'notes', intentId: 2, taskId: 9, releaseId: null },
+    },
+  ],
+  running: RUNNING,
+  spend: {
+    task: { inputTokens: 30_000, outputTokens: 11_000, cost: 0.2, atLeast: true, unpricedTokens: 0 },
+    run: { inputTokens: 250_000, outputTokens: 62_000, cost: 1.1, atLeast: true, unpricedTokens: 0 },
+    today: { inputTokens: 1_100_000, outputTokens: 300_000, cost: 2.18, atLeast: false, unpricedTokens: 0 },
+    budgetDay: 10,
+    todayByModel: [{ modelId: 'model-a', inputTokens: 1_100_000, outputTokens: 300_000, cost: 2.18, atLeast: false }],
+  },
+  backlog: [
+    { appId: 'reading-list', appName: 'Reading list', intentIds: [1], done: 3, failed: 0, running: 1, queued: 2, blocked: 0, total: 6, estimate: { ms: 35 * 60_000, tokens: 400_000, estimate: true } },
+    { appId: 'notes', appName: 'Notes', intentIds: [2], done: 1, failed: 2, running: 0, queued: 0, blocked: 0, total: 3, estimate: null },
+  ],
+  apps: [
+    { ...APP_ROW, appId: 'reading-list', name: 'Reading list', state: 'building', changedAt: NOW - 3_600_000 },
+    { ...APP_ROW, appId: 'notes', name: 'Notes', state: 'needs-review', changedAt: NOW - 7_200_000 },
+    { ...APP_ROW, appId: 'invoices', name: 'Invoices', serving: false, pid: null, state: 'stopped', changedAt: NOW - 3 * 86_400_000 },
+  ],
+  recent: [],
+};
+
+const ALERTS = { permission: 'granted', sound: false, onTurnOn: () => undefined, onSound: () => undefined, onTestSound: () => undefined };
+
+function screen(overview: OverviewData | null, overrides: Partial<OverviewScreenProps> = {}): string {
+  return renderToString(
+    createElement(BroappProvider, {
+      contract: launcherContract,
+      children: createElement(OverviewScreen, {
+        overview,
+        stale: false,
+        alerts: ALERTS,
+        now: NOW,
+        onOpenTarget: () => undefined,
+        onOpenBacklog: () => undefined,
+        onOpenPreview: () => undefined,
+        onOpenApp: () => undefined,
+        onViewAll: () => undefined,
+        ...overrides,
+      }),
+    }),
+  ).replaceAll('<!-- -->', '');
+}
+
+/** The page's words, in order, markup gone. */
+function words(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#x27;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function inOrder(text: string, expected: readonly string[]): string[] {
+  const missing: string[] = [];
+  let at = 0;
+  for (const word of expected) {
+    const found = text.indexOf(word, at);
+    if (found < 0) missing.push(word);
+    else at = found + word.length;
+  }
+  return missing;
+}
+
+describe('17b: the Overview screen', () => {
+  // 1.
+  test('an empty overview: nothing needs you, nothing is running, and the five regions are there', () => {
+    const html = screen(EMPTY_OVERVIEW);
+    for (const region of ['aria-label="Summary"', 'aria-label="Needs your attention"', 'aria-label="Running now"', 'aria-label="Applications"', '<footer']) {
+      expect(html).toContain(region);
+    }
+    const text = words(html);
+    expect(text).toContain('Nothing needs you');
+    expect(text).toContain('Nothing is running');
+    expect(text).toContain('Open backlog');
+    expect(text).not.toContain('budget');
+    expect(text).not.toContain('remaining');
+  });
+
+  // 2.
+  test('the mockup’s data: every figure and word of the mockup, in its order', () => {
+    const text = words(screen(MOCKUP));
+    expect(
+      inOrder(text, [
+        'Overview',
+        'Everything you need to keep work moving.',
+        'Needs attention', '2', '1 question · 1 failed task',
+        'Running now', '1', 'Reading list',
+        'Queued tasks', '2', 'About 35 min remaining',
+        'Spent today', '$2.18', 'of $10.00 budget · 22%',
+        'Needs your attention', '2',
+        'Keep the read date?', 'Reading list · Answer within 7m 12s', 'Answer',
+        'Task failed twice', 'Notes · Record completion date', 'Review issue',
+        'Running now', 'Building', 'Filter by shelf', 'Reading list · Task 4 of 6',
+        'Reading', 'Editing', 'Building', 'Checking',
+        '2', 'Files changed', '1 / 3', 'Checks passing', '6m 10s', 'Turn time',
+        'Last activity 38 seconds ago · attempt 1 of 2 · stops if quiet for 8 minutes',
+        'Open preview', 'View details', 'Stop run',
+        'Applications', 'View all',
+        'Reading list', '3 of 6 tasks done', 'Building', 'Open', '50%',
+        'Notes', '1 of 3 tasks done', 'Needs review', 'Review', '33%',
+        'Invoices', 'Last changed 3 days ago', 'Stopped', 'Start',
+        'Tokens today', '1.4M', 'Current run', '≥312k', 'Current task', '≥41k', '· partial', 'View usage',
+      ]),
+    ).toEqual([]);
+  });
+
+  // 3.
+  test('spend: no cost shows tokens and no dollar; a floor is marked; unpriced tokens are said; the budget warns at 100%', () => {
+    const unpriced = screen({
+      ...EMPTY_OVERVIEW,
+      spend: { ...EMPTY_OVERVIEW.spend, today: { inputTokens: 1_000_000, outputTokens: 400_000, cost: null, atLeast: false, unpricedTokens: 1_400_000 }, budgetDay: 10 },
+    });
+    expect(words(unpriced)).toContain('1.4M tokens');
+    expect(words(unpriced)).toContain('No prices set');
+    expect(unpriced).not.toContain('$');
+    const floor = words(screen({ ...EMPTY_OVERVIEW, spend: { ...EMPTY_OVERVIEW.spend, today: { inputTokens: 900, outputTokens: 100, cost: 0.5, atLeast: true, unpricedTokens: 0 } } }));
+    expect(floor).toContain('≥$0.50 partial');
+    const some = words(screen({ ...EMPTY_OVERVIEW, spend: { ...EMPTY_OVERVIEW.spend, today: { inputTokens: 1_000_000, outputTokens: 0, cost: 3, atLeast: false, unpricedTokens: 45_000 } } }));
+    expect(some).toContain('45k tokens have no price');
+    const over = screen({ ...EMPTY_OVERVIEW, spend: { ...EMPTY_OVERVIEW.spend, today: { inputTokens: 1, outputTokens: 0, cost: 10, atLeast: false, unpricedTokens: 0 }, budgetDay: 10 } });
+    expect(over).toMatch(/class="launcher__ov-s launcher__ov-warn"[^>]*>of \$10\.00 budget <span class="launcher__ov-nowrap">· 100%/);
+    const under = screen({ ...EMPTY_OVERVIEW, spend: { ...EMPTY_OVERVIEW.spend, today: { inputTokens: 1, outputTokens: 0, cost: 2, atLeast: false, unpricedTokens: 0 }, budgetDay: null } });
+    expect(words(under)).not.toContain('budget');
+    // Something that ran is never $0.00 by default: with nothing priced it is tokens.
+    expect(words(screen({ ...EMPTY_OVERVIEW, spend: { ...EMPTY_OVERVIEW.spend, today: { inputTokens: 5, outputTokens: 0, cost: null, atLeast: true, unpricedTokens: 5 } } }))).not.toContain('$0.00');
+  });
+
+  // 4.
+  test('the stepper marks the stage, the ones before it done, and moves back', () => {
+    const at = (stage: NonNullable<OverviewData['running']>['stage']): string[] => {
+      const html = screen({ ...MOCKUP, running: { ...RUNNING, stage } });
+      const steps = /<ol aria-label="Stage"[^>]*>(.*?)<\/ol>/.exec(html)?.[1] ?? '';
+      return [...steps.matchAll(/<li([^>]*)>/g)].map((match) => {
+        const attributes = match[1] ?? '';
+        return attributes.includes('aria-current="step"') ? 'current' : attributes.includes('--done') ? 'done' : 'ahead';
+      });
+    };
+    expect(at('building')).toEqual(['done', 'done', 'current', 'ahead']);
+    // A failed build then an edit: the next read is back at editing.
+    expect(at('editing')).toEqual(['done', 'current', 'ahead', 'ahead']);
+    expect(at('reading')).toEqual(['current', 'ahead', 'ahead', 'ahead']);
+  });
+
+  // 5.
+  test('under a minute of quiet left, the activity line warns', () => {
+    const calm = screen({ ...MOCKUP, running: { ...RUNNING, quietSince: NOW - 38_000 } });
+    expect(calm).toMatch(/class="launcher__ov-quiet"[^>]*>Last activity/);
+    const late = screen({ ...MOCKUP, running: { ...RUNNING, quietSince: NOW - 430_000 } });
+    expect(late).toMatch(/class="launcher__ov-quiet launcher__ov-warn"[^>]*>Last activity/);
+  });
+
+  // 6.
+  test('exactly one filled button: two attention items, none with a run going, none with nothing running', () => {
+    const filled = (html: string): number => html.split(PRIMARY).length - 1;
+    expect(filled(screen(MOCKUP))).toBe(1);
+    expect(screen(MOCKUP)).toMatch(new RegExp(`class="launcher__button ${PRIMARY}"[^>]*>Answer<`));
+    expect(filled(screen({ ...MOCKUP, needsYou: [] }))).toBe(1);
+    expect(screen({ ...MOCKUP, needsYou: [] })).toMatch(new RegExp(`class="launcher__button ${PRIMARY}"[^>]*>Open preview<`));
+    expect(filled(screen(EMPTY_OVERVIEW))).toBe(1);
+    expect(screen(EMPTY_OVERVIEW)).toMatch(new RegExp(`class="launcher__button ${PRIMARY}"[^>]*>Open backlog<`));
+  });
+
+  // 7, the half without a browser.
+  test('nothing on this screen, or the App around it, activates anything', async () => {
+    const source = await Bun.file(join(import.meta.dir, '..', 'packages', 'broapp-autoapp', 'src', 'launcher', 'ui', 'OverviewScreen.tsx')).text();
+    expect(source).not.toContain('launcher.activate');
+    expect(source).not.toContain('launcher.intentStop');
+    expect(source).not.toContain('launcher.intentAnswer');
+  });
+
+  // 8.
+  test('application rows: Open, Review and Start by state, and a progress bar only with an open intent', () => {
+    expect(appAction({ state: 'serving' })).toBe('Open');
+    expect(appAction({ state: 'building' })).toBe('Open');
+    expect(appAction({ state: 'needs-review' })).toBe('Review');
+    expect(appAction({ state: 'stopped' })).toBe('Start');
+    const html = screen(MOCKUP);
+    // Two open intents, two bars; Invoices has none.
+    expect(html.split('launcher__ov-fill').length - 1).toBe(2);
+    expect(screen({ ...MOCKUP, backlog: [] }).split('launcher__ov-fill').length - 1).toBe(0);
+  });
+
+  // 9, the half without a browser.
+  test('"Turn on alerts" shows only for default permission; blocked says so; requestAlerts is called from one place', async () => {
+    expect(words(screen(EMPTY_OVERVIEW, { alerts: { ...ALERTS, permission: 'default' } }))).toContain('Turn on alerts');
+    for (const permission of ['granted', 'denied', 'unsupported']) {
+      expect(words(screen(EMPTY_OVERVIEW, { alerts: { ...ALERTS, permission } }))).not.toContain('Turn on alerts');
+    }
+    expect(words(screen(EMPTY_OVERVIEW, { alerts: { ...ALERTS, permission: 'denied' } }))).toContain('Notifications are blocked');
+    const ui = join(import.meta.dir, '..', 'packages', 'broapp-autoapp', 'src', 'launcher', 'ui');
+    const callers: string[] = [];
+    for (const name of readdirSync(ui)) {
+      const text = await Bun.file(join(ui, name)).text();
+      for (const line of text.split('\n')) if (line.includes('requestAlerts(')) callers.push(`${name}: ${line.trim()}`);
+    }
+    expect(callers).toEqual(['App.tsx: void requestAlerts(surface).then(setPermission);']);
+    expect(words(screen(EMPTY_OVERVIEW, { alerts: { ...ALERTS, sound: true } }))).toContain('Test sound');
+    expect(screen(EMPTY_OVERVIEW, { alerts: { ...ALERTS, sound: true } })).toContain('checked=""');
+  });
+
+  // 10.
+  test('reading: 2 s on the Overview while visible, 10 s otherwise, one read in flight, a failed read goes on', async () => {
+    expect(overviewInterval('overview', true)).toBe(2_000);
+    expect(overviewInterval('overview', false)).toBe(10_000);
+    expect(overviewInterval('chat', true)).toBe(10_000);
+    // A clock the test moves; timers fire when it passes them.
+    let clock = 0;
+    const timers: { at: number; run: () => void; id: number }[] = [];
+    let ids = 0;
+    const fake = {
+      now: () => clock,
+      set: (run: () => void, ms: number) => {
+        ids += 1;
+        timers.push({ at: clock + ms, run, id: ids });
+        return ids;
+      },
+      clear: (id: unknown) => {
+        const index = timers.findIndex((timer) => timer.id === id);
+        if (index >= 0) timers.splice(index, 1);
+      },
+    };
+    const advance = async (ms: number): Promise<void> => {
+      const until = clock + ms;
+      for (;;) {
+        // Let a read that settled schedule the next one first.
+        await Bun.sleep(0);
+        await Bun.sleep(0);
+        timers.sort((a, b) => a.at - b.at);
+        const next = timers[0];
+        if (next === undefined || next.at > until) break;
+        timers.shift();
+        clock = next.at;
+        next.run();
+        await Bun.sleep(0);
+        await Bun.sleep(0);
+      }
+      clock = until;
+    };
+    const reads: number[] = [];
+    let release: (() => void) | null = null;
+    let slow = false;
+    let fail = false;
+    const poller = startOverviewPoller(
+      () => {
+        reads.push(clock);
+        if (fail) return Promise.reject(new Error('no'));
+        if (!slow) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+      { view: 'overview', visible: true },
+      fake,
+    );
+    await advance(0);
+    expect(reads).toEqual([0]);
+    await advance(6_000);
+    expect(reads).toEqual([0, 2_000, 4_000, 6_000]);
+    // The chat is the view: every ten seconds from the last read.
+    poller.setMode('chat', true);
+    await advance(9_000);
+    expect(reads).toEqual([0, 2_000, 4_000, 6_000]);
+    await advance(1_000);
+    expect(reads.at(-1)).toBe(16_000);
+    // Back on the Overview but hidden: still ten.
+    poller.setMode('overview', false);
+    await advance(10_000);
+    expect(reads.at(-1)).toBe(26_000);
+    // Visible again: the next read comes two seconds after the last.
+    poller.setMode('overview', true);
+    await advance(2_000);
+    expect(reads.at(-1)).toBe(28_000);
+    // A slow read: nothing else is sent while it is out.
+    slow = true;
+    await advance(2_000);
+    const before = reads.length;
+    await advance(20_000);
+    expect(reads.length).toBe(before);
+    slow = false;
+    (release as (() => void) | null)?.();
+    await advance(0);
+    await advance(2_000);
+    expect(reads.length).toBe(before + 1);
+    // A failed read is followed by the next one at the same pace.
+    fail = true;
+    await advance(2_000);
+    await advance(2_000);
+    expect(reads.length).toBe(before + 3);
+    poller.stop();
+    await advance(20_000);
+    expect(reads.length).toBe(before + 3);
+  });
+
+  test('a failed read keeps the last data and says it could not refresh', () => {
+    const text = words(screen(MOCKUP, { stale: true }));
+    expect(text).toContain('Could not refresh');
+    expect(text).toContain('Filter by shelf');
+    expect(words(screen(null, { stale: true }))).toContain('Could not refresh');
+  });
+
+  // 11.
+  test('the stylesheet: the screen’s colours are launcher variables, no new variable, no font', async () => {
+    const css = await Bun.file(join(import.meta.dir, '..', 'packages', 'broapp-autoapp', 'src', 'launcher', 'ui', 'launcher.css')).text();
+    const start = css.indexOf(' * The Overview: the screen the launcher opens on');
+    expect(start).toBeGreaterThan(0);
+    const screenCss = css.slice(start);
+    const colour = /^\s*(color|background(-color)?|border(-(top|right|bottom|left))?(-color)?|box-shadow|outline(-color)?|accent-color|fill|stroke|text-decoration-color|caret-color)\s*:\s*([^;]+);/gm;
+    const bad: string[] = [];
+    for (const match of screenCss.matchAll(colour)) {
+      const value = match[7] ?? '';
+      const colours = value.replace(/var\(--launcher-[a-z-]+\)/g, '').replace(/\b(none|transparent|0|solid|inset|[0-9.]+(px|rem|em)?)\b/g, '');
+      if (/[a-z]/i.test(colours.replace(/[\s,()-]/g, ''))) bad.push(match[0].trim());
+    }
+    expect(bad).toEqual([]);
+    expect(screenCss).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(screenCss).not.toMatch(/\brgba?\(|\bhsla?\(|light-dark\(|@font-face|font-family/);
+    const declared = new Set([...css.matchAll(/(--launcher-[a-z-]+)\s*:/g)].map((match) => match[1]));
+    expect([...declared].sort()).toEqual(
+      [
+        '--launcher-accent', '--launcher-accent-contrast', '--launcher-border', '--launcher-error-surface', '--launcher-error-text',
+        '--launcher-good-surface', '--launcher-good-text', '--launcher-ground', '--launcher-heading', '--launcher-hover', '--launcher-muted',
+        '--launcher-pending', '--launcher-quiet', '--launcher-selected', '--launcher-surface', '--launcher-text', '--launcher-warn-border',
+        '--launcher-warn-surface', '--launcher-warn-text',
+      ].sort(),
+    );
+    // Every variable the screen reads is one of them.
+    const used = new Set([...screenCss.matchAll(/var\((--launcher-[a-z-]+)\)/g)].map((match) => match[1]));
+    for (const name of used) expect(declared.has(name)).toBe(true);
+  });
+
+  // 12, the half without a browser.
+  test('the first render is the Overview: first on the rail, marked current; the chat is mounted and hidden; the applications column is not drawn', () => {
+    const html = renderToString(
+      createElement(BroappProvider, {
+        contract: launcherContract,
+        extensions: [aiContract],
+        children: createElement(AiProvider, { children: createElement(App) }),
+      }),
+    );
+    const rail = /<nav aria-label="Workspace"[^>]*>(.*?)<\/nav>/s.exec(html)?.[1] ?? '';
+    const first = /<button([^>]*)>/.exec(rail)?.[1] ?? '';
+    expect(first).toContain('aria-label="Overview"');
+    expect(first).toContain('aria-current="page"');
+    expect(html).toContain('data-view="overview"');
+    // The chat is there, once, hidden rather than removed.
+    expect(html.match(/aria-label="Engineer" class="launcher__chat"/g)?.length).toBe(1);
+    expect(html).toMatch(/aria-label="Engineer" class="launcher__chat" hidden=""/);
+    // The applications column is not in the document, and its toggle says why.
+    expect(html).not.toContain('aria-label="Your applications"');
+    expect(html).toMatch(/aria-label="Applications" class="launcher__rail-button" disabled=""/);
+  });
+});
+
+// ── 17b in a browser: the views, the chat that survives them, the actions ─────
+//
+// A real launcher tab on a real bridge, its page built as the launcher builds
+// it, driven in Chromium. Where Chromium cannot be launched the block is
+// skipped, as `autoapp-theme-browser.test.ts` is; CI's `theme` job installs it
+// and runs this file there too.
+
+const browserAvailable = await chromiumRuns();
+let pageDir: string | null = null;
+let launcherPage = '';
+
+/** Build the launcher's page into a temporary file, in a child: `Bun.build` under `bun test` cannot resolve every nested package. */
+async function buildLauncherPage(): Promise<string> {
+  pageDir = mkdtempSync(join(tmpdir(), 'autoapp-'));
+  const out = join(pageDir, 'launcher-page.html');
+  const root = join(import.meta.dir, '..', 'packages', 'broapp-autoapp');
+  const code = `import { buildPage } from 'broapp/build'; await buildPage({ root: ${JSON.stringify(root)}, entry: 'src/launcher/ui/main.tsx', template: 'src/launcher/ui/index.html', outFile: ${JSON.stringify(out)} });`;
+  const child = Bun.spawn({ cmd: [process.execPath, '-e', code], cwd: root, stdout: 'pipe', stderr: 'pipe' });
+  const [status, errors] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+  if (status !== 0) throw new Error(`the launcher page did not build: ${errors}`);
+  return await Bun.file(out).text();
+}
+
+/** A text turn slow enough to switch views while it streams: about six seconds. */
+const SLOW_WORDS: readonly FakeStep[] = [{ kind: 'text', chunks: Array.from({ length: 30 }, (_, index) => `word${String(index)} `) }];
+
+interface InBrowser {
+  readonly world: Tab;
+  readonly page: Page;
+}
+
+let browser: Browser | null = null;
+
+async function openInBrowser(options: { script?: readonly FakeStep[]; seed?: (world: Tab) => void; init?: string } = {}): Promise<InBrowser> {
+  const world = tabOver({ ...(options.script === undefined ? {} : { script: options.script }), chunkDelayMs: 200 });
+  mkdirSync(join(world.root, 'apps'), { recursive: true });
+  options.seed?.(world);
+  await world.tab.ai.registry.update({ provider: 'fake', modelId: 'fake-1' });
+  const live = await harness((bridge) => world.tab.mount(bridge), { page: launcherPage });
+  closers.push(() => live.stop());
+  if (browser === null) {
+    const { chromium } = await import('playwright');
+    browser = await chromium.launch();
+  }
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  closers.push(() => context.close());
+  if (options.init !== undefined) await context.addInitScript(options.init);
+  const page = await context.newPage();
+  await page.goto(live.url);
+  await page.waitForSelector('[data-view="overview"]', { timeout: 20_000 });
+  return { world, page };
+}
+
+const view = async (page: Page): Promise<string | null> => await page.getAttribute('.launcher', 'data-view');
+const turn = async (page: Page): Promise<string | null> => await page.getAttribute('.launcher', 'data-turn');
+
+describe.skipIf(!browserAvailable)('17b: the Overview in a browser', () => {
+  beforeAll(async () => {
+    launcherPage = await buildLauncherPage();
+  }, 180_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    browser = null;
+    if (pageDir !== null) rmSync(pageDir, { recursive: true, force: true });
+  });
+
+  // 13.
+  test('a turn started in the chat is still running, still busy and still showing its words after the Overview and back; the chat is mounted once', async () => {
+    const { page } = await openInBrowser({ script: SLOW_WORDS });
+    await page.getByRole('button', { name: 'Engineer', exact: true }).click();
+    expect(await view(page)).toBe('chat');
+    await page.waitForSelector('.broapp-chat textarea');
+    // Mark the chat's element: a remount would make a new one without it.
+    await page.evaluate(() => {
+      const chat = document.querySelector<HTMLElement>('.broapp-chat');
+      if (chat !== null) chat.dataset['probe'] = 'kept';
+    });
+    await page.fill('.broapp-chat textarea', 'Say thirty words, slowly.');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('[data-turn="busy"]', { timeout: 10_000 });
+    await page.waitForFunction(() => document.querySelector('.broapp-chat')?.textContent?.includes('word2') === true, undefined, { timeout: 10_000 });
+
+    await page.getByRole('button', { name: /^Overview/ }).click();
+    expect(await view(page)).toBe('overview');
+    expect(await turn(page)).toBe('busy');
+    expect(await page.locator('.broapp-chat').count()).toBe(1);
+    expect(await page.locator('.launcher__chat').isHidden()).toBe(true);
+    await page.waitForTimeout(1_000);
+    expect(await turn(page)).toBe('busy');
+
+    await page.getByRole('button', { name: 'Engineer', exact: true }).click();
+    expect(await view(page)).toBe('chat');
+    expect(await page.getAttribute('.broapp-chat', 'data-probe')).toBe('kept');
+    expect(await page.locator('.broapp-chat').count()).toBe(1);
+    // Still streaming, and it goes on to the end.
+    expect(await turn(page)).toBe('busy');
+    await page.waitForFunction(() => document.querySelector('.broapp-chat')?.textContent?.includes('word29') === true, undefined, { timeout: 20_000 });
+    await page.waitForSelector('[data-turn="idle"]', { timeout: 10_000 });
+    expect(await page.getAttribute('.broapp-chat', 'data-probe')).toBe('kept');
+  }, 90_000);
+
+  // 12, the half a first render cannot show.
+  test('views: New conversation and a picked conversation show the chat, the rail marks the view, and a reload opens on the Overview', async () => {
+    const { page } = await openInBrowser();
+    const overviewButton = page.getByRole('button', { name: /^Overview/ });
+    const engineer = page.getByRole('button', { name: 'Engineer', exact: true });
+    expect(await overviewButton.getAttribute('aria-current')).toBe('page');
+    expect(await page.locator('[aria-label="Your applications"]').count()).toBe(0);
+    expect(await page.getByRole('button', { name: 'Applications', exact: true }).isDisabled()).toBe(true);
+
+    await page.locator('.launcher__rail').getByRole('button', { name: 'New conversation' }).click();
+    expect(await view(page)).toBe('chat');
+    expect(await engineer.getAttribute('aria-current')).toBe('page');
+    expect(await overviewButton.getAttribute('aria-current')).toBeNull();
+    expect(await page.getByRole('button', { name: 'Applications', exact: true }).isDisabled()).toBe(false);
+
+    await overviewButton.click();
+    expect(await view(page)).toBe('overview');
+    // Picking a conversation from the list shows the chat.
+    await page.locator('.launcher__history').getByText('New conversation').first().click();
+    expect(await view(page)).toBe('chat');
+
+    await page.reload();
+    await page.waitForSelector('[data-view="overview"]', { timeout: 20_000 });
+    expect(await view(page)).toBe('overview');
+  }, 90_000);
+
+  // 14.
+  test('Log, Knowledge, Backlog and Settings open over the Overview and close back to it', async () => {
+    const { page } = await openInBrowser();
+    const rail = page.locator('.launcher__rail');
+    for (const [open, panel, close] of [
+      ['Log', '.launcher__logs', 'Close log'],
+      ['Knowledge', '.launcher__k', 'Close knowledge'],
+      ['Backlog', '.launcher__intent', 'Close backlog'],
+      ['Settings', '.launcher__settings', 'Close settings'],
+    ] as const) {
+      await rail.getByRole('button', { name: open, exact: true }).click();
+      await page.waitForSelector(panel);
+      expect(await view(page)).toBe('overview');
+      // The Backlog panel is wider than this window, so its scrim is under it:
+      // it closes the way a person closes it there, with Escape.
+      if (open === 'Backlog') await page.keyboard.press('Escape');
+      else await page.getByRole('button', { name: close, exact: true }).click({ force: true, position: { x: 5, y: 5 } });
+      await page.waitForSelector(panel, { state: 'detached' });
+      expect(await view(page)).toBe('overview');
+      expect(await page.locator('.launcher__overview').isVisible()).toBe(true);
+    }
+  }, 90_000);
+
+  // 7.
+  test('each attention row opens the panel where it is decided, on its record', async () => {
+    const { page } = await openInBrowser({
+      seed: (world) => {
+        // A failed task with advice nobody has answered.
+        const { id, taskIds } = intentWith(world.intents, ['fails-part']);
+        const failed = taskIds[0] ?? 0;
+        world.intents.moveTask(failed, 'in-queue', 'queued');
+        world.intents.moveTask(failed, 'in-progress', 'started', 'run-failed');
+        world.intents.moveTask(failed, 'failed', 'two attempts');
+        world.intents.setAdvice(failed, { diagnosis: 'x', advice: 'retry', note: 'Run it again.', at: Date.now() - 1_000 });
+        world.intents.setRun(id, 'running');
+        world.intents.setRun(id, 'stopped', 'Build the fails part failed after 2 attempts.');
+        // A candidate whose checks all passed on its own build, and nothing serving.
+        const appDir = layout(world.root).app('shelf').dir;
+        mkdirSync(appDir, { recursive: true });
+        const releaseId = 'c'.repeat(32);
+        writeFileSync(
+          join(appDir, 'candidate.json'),
+          JSON.stringify({
+            releaseId,
+            builtFromRev: null,
+            builtAt: Date.now() - 5_000,
+            problems: [],
+            stagesRun: [],
+            checks: { releaseId, previewId: `${releaseId}:1`, examples: [], results: [{ id: 'e1', title: 'e1', passed: true }], at: Date.now() },
+            previewWasRunning: false,
+            changed: [],
+            capabilityDiff: null,
+            cycle: null,
+          }),
+        );
+      },
+    });
+    const band = page.locator('[aria-label="Needs your attention"]');
+    await band.getByText('ready to activate').waitFor({ timeout: 20_000 });
+    // The failed task: the Backlog panel, open on its request.
+    await band.getByRole('button', { name: 'Review issue' }).click();
+    await page.waitForSelector('.launcher__intent');
+    await page.locator('.launcher__intent').getByText('Build the fails part part').first().waitFor({ timeout: 10_000 });
+    expect(await page.locator('.launcher__intent').getByText('Do these things.').count()).toBeGreaterThan(0);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.launcher__intent', { state: 'detached' });
+    // The release ready to activate: the candidate panel, beside the chat, on its application.
+    await band.getByRole('button', { name: 'Review', exact: true }).click();
+    expect(await view(page)).toBe('chat');
+    await page.waitForSelector('[aria-label="Your applications"]');
+    await page.locator('[aria-label="Your applications"]').getByText(/Built c{8}|cccccccc/).first().waitFor({ timeout: 10_000 });
+  }, 90_000);
+
+  // 9, the half a render cannot show.
+  test('Turn on alerts asks once, on its click; the Sound switch follows it, survives a reload, is off when storage refuses; Test sound plays once', async () => {
+    const stubs = `
+      window.__asked = 0;
+      window.__notes = 0;
+      window.Notification = class {
+        static permission = localStorage.getItem('test-permission') ?? 'default';
+        static requestPermission() {
+          window.__asked += 1;
+          localStorage.setItem('test-permission', 'granted');
+          window.Notification.permission = 'granted';
+          return Promise.resolve('granted');
+        }
+      };
+      window.AudioContext = class {
+        state = 'running';
+        currentTime = 0;
+        destination = {};
+        resume() { return Promise.resolve(); }
+        createOscillator() {
+          return { type: 'sine', frequency: { setValueAtTime() {} }, connect() {}, start() { window.__notes += 1; }, stop() {} };
+        }
+        createGain() {
+          return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} };
+        }
+      };
+    `;
+    const { page } = await openInBrowser({ init: stubs });
+    const sound = page.getByRole('checkbox', { name: 'Sound' });
+    expect(await sound.isChecked()).toBe(false);
+    // Two reads go by; nothing asks.
+    await page.waitForTimeout(4_500);
+    expect(await page.evaluate(() => (window as unknown as { __asked: number }).__asked)).toBe(0);
+    await page.getByRole('button', { name: 'Turn on alerts' }).click();
+    await page.waitForFunction(() => (window as unknown as { __asked: number }).__asked === 1);
+    expect(await sound.isChecked()).toBe(true);
+    expect(await page.getByRole('button', { name: 'Turn on alerts' }).count()).toBe(0);
+    await page.getByRole('button', { name: 'Test sound' }).click();
+    // The attention tone is two notes, played once.
+    await page.waitForFunction(() => (window as unknown as { __notes: number }).__notes === 2);
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => (window as unknown as { __notes: number }).__notes)).toBe(2);
+
+    await page.reload();
+    await page.waitForSelector('[data-view="overview"]', { timeout: 20_000 });
+    expect(await page.getByRole('checkbox', { name: 'Sound' }).isChecked()).toBe(true);
+    expect(await page.evaluate(() => (window as unknown as { __asked: number }).__asked)).toBe(0);
+
+    // Storage that refuses: the switch is off.
+    const refusing = await openInBrowser({
+      init: `${stubs}; Storage.prototype.getItem = function () { throw new Error('refused'); };`,
+    });
+    expect(await refusing.page.getByRole('checkbox', { name: 'Sound' }).isChecked()).toBe(false);
+  }, 120_000);
 });

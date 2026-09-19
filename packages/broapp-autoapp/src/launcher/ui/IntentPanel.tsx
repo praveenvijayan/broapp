@@ -827,9 +827,11 @@ export interface IntentPanelProps {
   readonly error?: string;
   /** Draw these rows rather than reading them. The tab passes nothing. */
   readonly snapshot?: BacklogSnapshot;
+  /** The request to open when the panel opens: the Overview sends a person to one. */
+  readonly openIntent?: number | null;
 }
 
-export function IntentPanel({ appId, onClose, error, snapshot, turnActive = false }: IntentPanelProps): React.ReactElement {
+export function IntentPanel({ appId, onClose, error, snapshot, turnActive = false, openIntent = null }: IntentPanelProps): React.ReactElement {
   if (error !== undefined) {
     return (
       <Frame onClose={onClose}>
@@ -875,7 +877,7 @@ export function IntentPanel({ appId, onClose, error, snapshot, turnActive = fals
       </Frame>
     );
   }
-  return <LiveIntentPanel appId={appId} onClose={onClose} turnActive={turnActive} />;
+  return <LiveIntentPanel appId={appId} onClose={onClose} openIntent={openIntent} turnActive={turnActive} />;
 }
 
 /**
@@ -918,7 +920,17 @@ function usePolling(moving: boolean, tick: () => void): void {
 
 // ── Reading: the live panel ─────────────────────────────────────────────────
 
-function LiveIntentPanel({ appId, onClose, turnActive }: { appId: string; onClose(): void; turnActive: boolean }): React.ReactElement {
+function LiveIntentPanel({
+  appId,
+  onClose,
+  turnActive,
+  openIntent,
+}: {
+  appId: string;
+  onClose(): void;
+  turnActive: boolean;
+  openIntent: number | null;
+}): React.ReactElement {
   const list = useOperation<LauncherContract, 'launcher.intentsList'>('launcher.intentsList');
   const tierGet = useOperation<LauncherContract, 'launcher.intentModelsGet'>('launcher.intentModelsGet');
   const tierSet = useOperation<LauncherContract, 'launcher.intentModelsSet'>('launcher.intentModelsSet');
@@ -933,8 +945,9 @@ function LiveIntentPanel({ appId, onClose, turnActive }: { appId: string; onClos
     void run({ appId, limit: 100 });
     void readTiers(undefined);
   }, [run, readTiers, appId, reload]);
-  // Another application's backlog has nothing open.
-  useEffect(() => setOpened(null), [appId]);
+  // Another application's backlog has nothing open, unless the person was
+  // sent to one of its requests.
+  useEffect(() => setOpened(openIntent), [appId, openIntent]);
 
   const refresh = useCallback(() => setReload((n) => n + 1), []);
   const intents = list.data?.intents ?? [];
