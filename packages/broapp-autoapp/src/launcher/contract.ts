@@ -268,6 +268,12 @@ const taskRecord = s.object({
   waitingOn: texts(80, 20),
   /** What the task will run on: its override, its tier's model, or `null` for Settings. */
   model: s.nullable(s.string({ max: 200 })),
+  /**
+   * The runbook lines, by index, that name an `external` route: only the
+   * activated application runs one. Absent from a launcher that does not work
+   * it out.
+   */
+  afterActivating: s.optional(s.array(count, { max: 20 })),
   attempts: count,
   revBefore: s.nullable(s.string({ max: 80 })),
   revAfter: s.nullable(s.string({ max: 80 })),

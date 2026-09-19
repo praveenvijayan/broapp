@@ -21,6 +21,7 @@ import { mergeContracts } from 'broapp/shared';
 import { createRunStore } from 'broapp-autoapp/host';
 import {
   ENGINEER_INSTRUCTIONS,
+  EXTERNAL_IN_PREVIEW,
   INSTRUCTION_SECTIONS,
   PLANNING_REFUSAL,
   QUESTIONS_REFUSAL,
@@ -627,4 +628,55 @@ describe('what the engineer is told', () => {
     for (const label of LABELS) expect(topic).toContain(`\`${label}\``);
     expect(topic).toMatch(/^# intents /);
   });
+});
+
+// ── 16a. What a preview refuses, in the plan ────────────────────────────────
+
+describe('a runbook and an external route', () => {
+  test('the contract topic and intent.task’s description say the same sentence', () => {
+    const where = direct();
+    const description = where.planning.tools['intent.task']?.description ?? '';
+    expect(specReference('contract')).toContain(EXTERNAL_IN_PREVIEW);
+    expect(description).toContain(EXTERNAL_IN_PREVIEW);
+    expect(specReference('intents')).toContain(EXTERNAL_IN_PREVIEW);
+    // And what follows from it for a runbook, in both places the planner reads.
+    for (const text of [description, specReference('intents')]) {
+      expect(text).toContain('says "after activating"');
+      expect(text).toContain('never says "in the preview"');
+    }
+  });
+
+  test('a line sending the person to the preview for an external route is refused, naming the line', async () => {
+    const where = direct();
+    const opened = await call(where, 'intent.open', analysis());
+    const intentId = opened['intentId'];
+
+    const refused = await call(
+      where,
+      'intent.task',
+      task(intentId, { runbook: ['Open the table.', 'In the preview, press Ping and see items.ping answer ok.'] }),
+    );
+    expect(refused['ok']).toBe(false);
+    const problems = refused['problems'] as { field: string; message: string }[];
+    expect(problems).toHaveLength(1);
+    expect(problems[0]?.field).toBe('runbook');
+    expect(problems[0]?.message).toContain('runbook line 2');
+    expect(problems[0]?.message).toContain('items.ping');
+    expect(problems[0]?.message).toContain('"after activating"');
+
+    const afterActivating = await call(
+      where,
+      'intent.task',
+      task(intentId, { runbook: ['After activating, allow the network capability, press Ping and see items.ping answer ok.'] }),
+    );
+    expect(afterActivating['ok']).toBe(true);
+
+    // items.add is a write: a preview runs it for the person, so the line stands.
+    const write = await call(
+      where,
+      'intent.task',
+      task(intentId, { words: 'add-in-preview', runbook: ['In the preview, add an item with items.add and see it listed.'] }),
+    );
+    expect(write['ok']).toBe(true);
+  }, 60_000);
 });

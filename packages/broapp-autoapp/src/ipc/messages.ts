@@ -180,6 +180,13 @@ export const IPC_TIMEOUT_MS = 5_000;
 export const CHECKING_PAUSE_REASON = 'the application is being checked';
 
 /**
+ * How a child's `fatal` begins when the release it was given did not load or
+ * start. The supervisor says the same thing in its own words and drops this,
+ * so the reason is not said twice.
+ */
+export const NOT_STARTED = 'the release could not be started: ';
+
+/**
  * The most a single message may weigh.
  *
  * A lifecycle message is a handful of short fields. A bound is here so that a

@@ -25,6 +25,17 @@ import { designTopic } from './design.ts';
 export const REFERENCE_TOPICS = ['contract', 'views', 'acceptance', 'workspace', 'theme', 'design', 'intents'] as const;
 export type ReferenceTopic = (typeof REFERENCE_TOPICS)[number];
 
+/**
+ * What a preview does with an `external` route, said once.
+ *
+ * The `contract` topic carries it for the builder and `SPLIT_RULES` for the
+ * planner. A plan on 2026-09-18 knew automated checks could not call such a
+ * route and still told its person to click it in the preview, where the gate
+ * refused them.
+ */
+export const EXTERNAL_IN_PREVIEW =
+  'An `external` route is refused in a preview for everyone, the person’s own click included, so it can be tried only in the activated application.';
+
 const CONTRACT = `# contract — src/shared/contract.ts
 
 Exports \`contract\`, built with \`defineContract\`. Every operation and stream is
@@ -33,7 +44,7 @@ a route named \`group.member\`, with:
   data directory; \`external\` reaches outside it (network, other files, spawned
   processes). Required. The gate decides from it: a person's own click runs any
   effect; the engineer, an MCP client and a workflow are asked before \`write\` and
-  \`external\`, and \`external\` is refused in a preview.
+  \`external\`. ${EXTERNAL_IN_PREVIEW}
 - \`summary\`: one sentence, required. Shown to the person when the gate asks.
 - \`input\` and \`output\`: schemas from \`s\`. Input is validated before the handler
   runs; a bad input reaches the caller as \`invalid_input\` with the field's path.
@@ -276,7 +287,10 @@ export const SPLIT_RULES = `- One task is one change a person could accept or re
 - A criterion about a value nobody can know in advance, such as a time or an id, says what
   kind of value it is, not what it equals.
 - A task that ships less than a working path is \`stub: true\` and names in \`repaidBy\`
-  the task that finishes it.`;
+  the task that finishes it.
+- ${EXTERNAL_IN_PREVIEW} A \`runbook\` line that exercises one says "after activating", names
+  the capability the person will be asked to allow, and never says "in the preview"; what a
+  preview can show of such a task is the page, the form and the failure path.`;
 
 const INTENTS = `# intents — planning a request as a backlog
 

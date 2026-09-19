@@ -27,7 +27,7 @@ export type {
   Supervisor,
   SupervisorOptions,
 } from './supervisor.ts';
-export { NO_PANEL_REASON, refusedByRoute, routeRefusal } from './supervisor.ts';
+export { NO_PANEL_REASON, START_FAILED, refusedByRoute, routeRefusal, startFailed, startFailedWith, startFailure } from './supervisor.ts';
 export { addServing, readServing, removeServing, servingPath } from './serving.ts';
 
 export { connectToChild } from './client.ts';

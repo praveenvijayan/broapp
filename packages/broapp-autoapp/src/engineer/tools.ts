@@ -35,7 +35,7 @@ import { buildCandidate, SOURCE, type BuildProblem } from '../launcher/candidate
 import { createApplication } from '../launcher/create.ts';
 import type { Journal } from '../launcher/journal.ts';
 import { TEMPLATE_NAMES, type Templates } from '../launcher/starter.ts';
-import type { Supervisor } from '../launcher/supervisor.ts';
+import { startFailure, type Supervisor } from '../launcher/supervisor.ts';
 import type { PrepareOptions } from '../launcher/workspace.ts';
 import {
   diffCapabilities,
@@ -59,7 +59,7 @@ import {
   viewStepFailure,
 } from './check.ts';
 import { REFERENCE_TOPICS, specReference } from './reference.ts';
-import { startPreview } from './preview.ts';
+import { forTheBuilder, startPreview } from './preview.ts';
 import { MAX_REPAIR_ATTEMPTS, previewIdOf, type CandidateStates, type CheckResult, type CycleProgress } from './state.ts';
 import {
   applyChange,
@@ -1148,12 +1148,16 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       const replaced = before.preview === null ? null : previewIdOf(before.preview);
       const invalidated = (before.checks?.results ?? []).map((result) => result.id);
       // The same function the person's Start preview reaches after a restart.
+      // A release that does not load is the builder's to fix, and the builder
+      // is the one reading this: it is told why, and what to do next.
       const child = await startPreview(
         { layout: root, supervisor, states, ...(knowledge === undefined ? {} : { log: knowledge.log }) },
         appId,
         releaseId,
         knowledge === undefined ? {} : identity(envelope, appId, releaseId),
-      );
+      ).catch((cause: unknown) => {
+        throw forTheBuilder(cause);
+      });
       // Deliberately not the URL. The person opens the preview from the tab.
       return {
         ok: true,
@@ -1515,8 +1519,29 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         next: 'candidate.cycle with no hunks, to preview and check this build',
       });
 
-      // 3. The preview, on a fresh copy of the data.
-      const previewed = await run('candidate.preview', 'preview', { appId, releaseId: build.releaseId });
+      // 3. The preview, on a fresh copy of the data. A release that built and
+      //    then does not load is a failure of this cycle like a build problem,
+      //    with the build reported as passed: the builder must not go looking
+      //    for a build fault that is not there.
+      let previewed: Awaited<ReturnType<typeof run>>;
+      try {
+        previewed = await run('candidate.preview', 'preview', { appId, releaseId: build.releaseId });
+      } catch (cause) {
+        const failure = startFailure(cause);
+        if (failure === null) throw cause;
+        const failures = [{ signature: problemSignature('preview', failure), summary: summaryOf(`preview: ${failure}`) }];
+        const attempts = attemptsFor(failures);
+        const { stalled, next } = afterFailure(attempts, 'Fix what the preview’s error names with another candidate.cycle.');
+        progress({ step: 'preview-failed', releaseId: build.releaseId, failures, attempts, next });
+        return {
+          applied,
+          build: { ok: true, releaseId: build.releaseId, schemaVersion: build.schemaVersion },
+          preview: { started: false, error: failure },
+          attempt: { n: attempts, of: MAX_REPAIR_ATTEMPTS },
+          stalled,
+          next,
+        };
+      }
       if ('declined' in previewed) {
         const next = notAllowed('preview', previewed, 'The build passed and the person declined the preview. Ask them before trying again.');
         progress({ step: 'preview-declined', releaseId: build.releaseId, failures: [], attempts: 0, next });

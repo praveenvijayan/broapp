@@ -21,7 +21,7 @@ import type { PublicErrorCode } from 'broapp/shared';
 
 import { LAUNCHER_PID_ENV } from '../child/watch.ts';
 import { parseMessage } from '../ipc/codec.ts';
-import { IPC_TIMEOUT_MS, IPC_VERSION, type Answer, type Ask, type Message } from '../ipc/messages.ts';
+import { IPC_TIMEOUT_MS, IPC_VERSION, NOT_STARTED, type Answer, type Ask, type Message } from '../ipc/messages.ts';
 
 /** How a child reports itself when asked. */
 export interface HealthReport {
@@ -183,6 +183,44 @@ export function refusedByRoute(code: PublicErrorCode, message: string): PublicEr
 export function routeRefusal(cause: unknown): { code: string; message: string } | null {
   if (!isPublicError(cause) || (cause as { [ROUTE_ANSWERED]?: unknown })[ROUTE_ANSWERED] !== true) return null;
   return { code: cause.code, message: cause.message };
+}
+
+/** How the sentence about a child that did not start begins. */
+export const START_FAILED = 'The release could not be started: ';
+/** The longest start failure a person or a builder is shown. */
+const START_FAILED_CHARS = 400;
+/** Marks the error {@link startFailed} makes, for a caller that treats it differently. */
+const DID_NOT_START = 'releaseDidNotStart';
+
+/**
+ * The error `start` throws for a child that did not reach `ready`.
+ *
+ * `unavailable`, the code the supervisor already gives a child that died:
+ * the release is not there to answer. Not `rejected`, which the AI layer
+ * reads as a person saying no, and not `invalid_input`, since whoever asked
+ * for the start asked correctly. One line, because a stack or a bundler's
+ * multi-line message would otherwise arrive as a wall in a banner, and cut,
+ * because a reason can quote a whole line of generated source.
+ */
+export function startFailed(reason: string): PublicError {
+  const bare = reason.startsWith(NOT_STARTED) ? reason.slice(NOT_STARTED.length) : reason;
+  const flat = `${START_FAILED}${bare.replace(/\s+/g, ' ').trim()}`;
+  const message = flat.length <= START_FAILED_CHARS ? flat : `${flat.slice(0, START_FAILED_CHARS - 1)}…`;
+  return Object.assign(new PublicError('unavailable', message), { [DID_NOT_START]: true });
+}
+
+/**
+ * A start failure with a sentence after it, for a reader who can act on it.
+ * Still a start failure to {@link startFailure}.
+ */
+export function startFailedWith(sentence: string, advice: string): PublicError {
+  return Object.assign(new PublicError('unavailable', `${sentence} ${advice}`), { [DID_NOT_START]: true });
+}
+
+/** The sentence of a start failure from {@link startFailed}, or `null` for any other error. */
+export function startFailure(cause: unknown): string | null {
+  if (!isPublicError(cause) || (cause as { [DID_NOT_START]?: unknown })[DID_NOT_START] !== true) return null;
+  return cause.message;
 }
 
 /** A promise that rejects when the deadline passes, without holding the process open. */
@@ -451,18 +489,29 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
     return { process: child, channel, spawnedAt };
   }
 
-  /** Whatever the child said before it died, or a sentence about the exit code. */
+  /**
+   * Whatever the child said before it died, or a sentence about the exit code,
+   * or the deadline it missed — as a public error.
+   *
+   * Public because of who reads it. A child that does not reach `ready` is
+   * almost always the release's own bundle failing to load in the release's
+   * own process, and the reason is what the builder needs to fix it and what
+   * the application's owner needs to know it is not their data. As a plain
+   * `Error` it crossed every route and tool as the internal-error mask: on
+   * 2026-09-18 a builder was told "could not complete that operation" four
+   * times for an undefined identifier the child had named exactly.
+   */
   async function startupFailure(
     child: Subprocess,
     channel: Channel,
     cause: unknown,
-  ): Promise<Error> {
+  ): Promise<PublicError> {
     const fatal = channel.inbox.find((message) => message.type === 'fatal');
-    if (fatal !== undefined && fatal.type === 'fatal') return new Error(fatal.reason);
+    if (fatal !== undefined && fatal.type === 'fatal') return startFailed(fatal.reason);
     if (child.exitCode !== null) {
-      return new Error(`the child exited with code ${String(child.exitCode)} before it was ready`);
+      return startFailed(`the child exited with code ${String(child.exitCode)} before it was ready`);
     }
-    return cause instanceof Error ? cause : new Error(String(cause));
+    return startFailed(cause instanceof Error ? cause.message : String(cause));
   }
 
   const supervisor: Supervisor = {
@@ -490,7 +539,7 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
         await child.exited.catch(() => null);
         throw failure;
       }
-      if (ready.type !== 'ready') throw new Error('the child did not report itself ready');
+      if (ready.type !== 'ready') throw startFailed('the child did not report itself ready');
 
       /** Send a request and wait for the reply that names it. */
       async function request(message: Message, ms: number, label: string): Promise<Message> {

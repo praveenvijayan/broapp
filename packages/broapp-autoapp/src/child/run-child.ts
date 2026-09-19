@@ -22,7 +22,7 @@ import type { Approver, Gate, HostLogger, RunningApp } from 'broapp/host';
 import { fromTransportError } from 'broapp/shared';
 
 import { parseMessage } from '../ipc/codec.ts';
-import { CHECKING_PAUSE_REASON, IPC_TIMEOUT_MS, IPC_VERSION, type Answer, type Message } from '../ipc/messages.ts';
+import { CHECKING_PAUSE_REASON, IPC_TIMEOUT_MS, IPC_VERSION, NOT_STARTED, type Answer, type Message } from '../ipc/messages.ts';
 import { layout, readRelease } from '../spec/index.ts';
 import { createRunStore, type RunStore } from '../host/run-store.ts';
 
@@ -340,7 +340,7 @@ export async function runChild(argv: readonly string[]): Promise<number> {
       v: IPC_VERSION,
       id: nextId(),
       type: 'fatal',
-      reason: `the release could not be started: ${String(cause instanceof Error ? cause.message : cause)}`,
+      reason: `${NOT_STARTED}${String(cause instanceof Error ? cause.message : cause)}`,
     });
     process.disconnect?.();
     return EXIT.failedToStart;

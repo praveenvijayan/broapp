@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 
 import type { EventLog, Origin } from '../knowledge/log.ts';
 import { snapshotDirectory } from '../launcher/snapshot.ts';
-import type { ChildHandle, Supervisor } from '../launcher/supervisor.ts';
+import { startFailedWith, startFailure, type ChildHandle, type Supervisor } from '../launcher/supervisor.ts';
 import type { Layout } from '../spec/index.ts';
 
 import type { CandidateStates } from './state.ts';
@@ -22,6 +22,25 @@ export interface PreviewDeps {
   readonly states: CandidateStates;
   /** Where the start is written down, when anywhere. */
   readonly log?: EventLog;
+}
+
+/**
+ * What a builder is told after the reason a preview did not start.
+ *
+ * The build passed, so the fault is not one the build can see: the release's
+ * own code failed when its process loaded it. `candidate.preview` and the
+ * cycle's preview stage both say it, in these words.
+ */
+export const DOES_NOT_LOAD =
+  'The release built but does not load: this is a fault in the workspace’s source, not in the data. Fix it, then run candidate.cycle again.';
+
+/**
+ * A preview's start failure with {@link DOES_NOT_LOAD} after it, for the
+ * builder; anything else as it was.
+ */
+export function forTheBuilder(cause: unknown): unknown {
+  const sentence = startFailure(cause);
+  return sentence === null ? cause : startFailedWith(sentence, DOES_NOT_LOAD);
 }
 
 /** How long the previous preview gets to stop. */
@@ -39,7 +58,12 @@ export async function startPreview(
 ): Promise<ChildHandle> {
   const app = deps.layout.app(appId);
   const previous = deps.states.get(appId).preview;
-  if (previous !== null) await previous.shutdown(STOP_DEADLINE_MS);
+  if (previous !== null) {
+    await previous.shutdown(STOP_DEADLINE_MS);
+    // Forgotten now rather than on success: if the new child does not start,
+    // the one just stopped must not read as a preview that is running.
+    deps.states.update(appId, { preview: null });
+  }
 
   const directory = app.preview(releaseId);
   // A fresh copy every time. A preview that reused the last one would show

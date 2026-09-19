@@ -28,7 +28,7 @@ import { createFakeAdapter } from 'broapp/ai/host';
 import type { FakeStep } from 'broapp/ai/host';
 import { createGate, createPendingApprovals } from 'broapp/host';
 import type { Envelope, Gate } from 'broapp/host';
-import { mergeContracts } from 'broapp/shared';
+import { INTERNAL_ERROR_MESSAGE, isPublicError, mergeContracts } from 'broapp/shared';
 import { aiContract } from 'broapp/ai';
 import { createRunStore, type RunStore } from 'broapp-autoapp/host';
 import {
@@ -37,6 +37,7 @@ import {
   createSupervisor,
   launcherContract,
   openJournal,
+  START_FAILED,
   type Journal,
   type LauncherTab,
   type Supervisor,
@@ -59,13 +60,14 @@ import {
   INPUT_EXAMPLES,
   INPUT_SCHEMAS,
   INTENT_TASK_INPUT,
+  DOES_NOT_LOAD,
 } from 'broapp-autoapp/engineer';
 import { validateTask, type TaskInput } from 'broapp-autoapp/intent';
 import { sourceRevision } from 'broapp-autoapp/knowledge';
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
 import { STARTER_VERSIONS, TEMPLATES } from './autoapp-template.ts';
 import { harness, type Harness } from './harness.ts';
-import { pageCost } from '../packages/broapp-autoapp/src/launcher/ui/CandidatePanel.tsx';
+import { aboutCandidate, pageCost, startFailureShown } from '../packages/broapp-autoapp/src/launcher/ui/CandidatePanel.tsx';
 
 /** The compiled binary every child in this file is started from. */
 const launcher = LAUNCHER;
@@ -928,6 +930,24 @@ describe.skipIf(!available)('the tools', () => {
     expect(pageCost(300_000, null)).toBeNull();
   });
 
+  test('a start failure is drawn only over the candidate it is about', () => {
+    const failed = { message: `${START_FAILED}useBroapp is not defined` };
+    const release = '17470f1f00000000000000000000000a';
+    // The click was for this release and nothing has answered it since.
+    expect(startFailureShown(failed, release, { releaseId: release, previewRunning: false })).toBe(failed.message);
+    // A preview is running now: whatever failed before is not the state of things.
+    expect(startFailureShown(failed, release, { releaseId: release, previewRunning: true })).toBeNull();
+    // A newer build is another candidate.
+    expect(startFailureShown(failed, release, { releaseId: 'b'.repeat(32), previewRunning: false })).toBeNull();
+    // No failure, or a click nobody made.
+    expect(startFailureShown(null, release, { releaseId: release, previewRunning: false })).toBeNull();
+    expect(startFailureShown(failed, null, { releaseId: release, previewRunning: false })).toBeNull();
+    // The grants and activation answers follow the release alone.
+    expect(aboutCandidate(release, release)).toBe(true);
+    expect(aboutCandidate(release, 'b'.repeat(32))).toBe(false);
+    expect(aboutCandidate(null, null)).toBe(false);
+  });
+
   test('activating is refused in a preview and confirmed in a live launcher', async () => {
     // A launcher whose own gate is in preview mode: an `external` tool is
     // refused for every channel, without anybody being asked.
@@ -1264,6 +1284,34 @@ describe.skipIf(!available)('the launcher tab', () => {
     expect(await client.call('ai.settingsGet', undefined)).toMatchObject({ configured: false });
     await client.close();
   }, 60_000);
+
+  test('Start preview on a release that does not load records the reason, not the mask', async () => {
+    const { harness: test, where } = await start();
+    const host = join(where.root.app('items').source, 'src', 'host', 'app.ts');
+    const anchor = "import { latestSchemaVersion, openStore, readSchemaVersion } from './db.ts';";
+    writeFileSync(host, readFileSync(host, 'utf8').replace(anchor, `${anchor}\n\nconsole.debug([useBroapp].length);`));
+    const built = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!built.ok) throw new Error(JSON.stringify(built.problems));
+    openTab?.states.update('items', { releaseId: built.releaseId });
+
+    const client = await test.connect(merged);
+    const refused = await client.call('launcher.previewStart', { appId: 'items' }).then(
+      () => null,
+      (cause: unknown) => cause,
+    );
+    expect((refused as Error).message).toStartWith(START_FAILED);
+    expect((refused as Error).message).toContain('useBroapp is not defined');
+
+    // The person's click is its own run in the launcher's runs.sqlite, and
+    // its step carries the reason.
+    const steps = where.store.listRuns().flatMap((run) => where.store.getRun(run.id)?.steps ?? []);
+    const step = steps.find((candidate) => candidate.route === 'launcher.previewStart');
+    expect(step?.outcome).toBe('failed');
+    expect(step?.error).toStartWith(START_FAILED);
+    expect(step?.error).toContain('useBroapp is not defined');
+    expect(step?.error).not.toBe(INTERNAL_ERROR_MESSAGE);
+    await client.close();
+  }, 120_000);
 });
 
 describe('the engineer’s instructions', () => {
@@ -1615,4 +1663,93 @@ describe('the valid inputs a repeated refusal shows', () => {
     };
     expect(validateTask(plan, [])).toEqual([]);
   });
+});
+
+describe.skipIf(!available)('a release that builds and does not load', () => {
+  /**
+   * The fixture with the fault of 2026-09-18 in its host module: a name that
+   * is not there, at module scope. The build bundles it without complaint; the
+   * child's `import` of the bundle throws.
+   */
+  function breakHost(where: World): void {
+    const host = join(where.root.app('items').source, 'src', 'host', 'app.ts');
+    const before = readFileSync(host, 'utf8');
+    const anchor = "import { latestSchemaVersion, openStore, readSchemaVersion } from './db.ts';";
+    if (!before.includes(anchor)) throw new Error('the fixture moved');
+    writeFileSync(host, before.replace(anchor, `${anchor}\n\nconsole.debug([useBroapp].length);`));
+  }
+
+  /** Call a tool and answer yes to every question it asks, however many. */
+  async function callApproving(where: World, name: string, input: unknown, requestId: string): Promise<unknown> {
+    const approvals = createPendingApprovals(quiet);
+    const tool = where.tools[name];
+    if (tool === undefined) throw new Error(`no tool named ${name}`);
+    let finished = false;
+    const running = tool.execute(input, asEngineer(approvals, requestId), new AbortController().signal).finally(() => {
+      finished = true;
+    });
+    running.catch(() => undefined);
+    while (!finished) {
+      const question = approvals.pending[0];
+      if (question !== undefined) {
+        approvals.answer({
+          requestId: question.requestId,
+          approved: true,
+          releaseId: question.releaseId,
+          argumentsHash: question.argumentsHash,
+        });
+      }
+      await Bun.sleep(5);
+    }
+    return await running;
+  }
+
+  test('candidate.preview says why, and what to do, not the mask', async () => {
+    const where = makeWorld();
+    breakHost(where);
+    const built = (await callTool(where, 'candidate.build', { appId: 'items' }, { approve: true })) as {
+      ok: boolean;
+      releaseId: string;
+    };
+    expect(built.ok).toBe(true);
+
+    const refused = await callTool(where, 'candidate.preview', { appId: 'items', releaseId: built.releaseId }, { approve: true }).then(
+      () => null,
+      (cause: unknown) => cause,
+    );
+    // A public error keeps its words through the AI layer; anything else
+    // becomes "The tool failed." there and the mask in the gate's record.
+    expect(isPublicError(refused)).toBe(true);
+    const message = (refused as Error).message;
+    expect(message).toStartWith(START_FAILED);
+    expect(message).toContain('useBroapp is not defined');
+    expect(message.endsWith(DOES_NOT_LOAD)).toBe(true);
+    expect(message).not.toContain(INTERNAL_ERROR_MESSAGE);
+    expect(where.states.status('items').previewRunning).toBe(false);
+
+    // The gate's record of the call says the same, not the fixed sentence.
+    const steps = where.store.listRuns().flatMap((run) => where.store.getRun(run.id)?.steps ?? []);
+    const step = steps.find((candidate) => candidate.route === 'candidate.preview');
+    expect(step?.outcome).toBe('failed');
+    expect(step?.error).toBe(message);
+  }, 120_000);
+
+  test('candidate.cycle says the same at its preview stage, with the build passed', async () => {
+    const where = makeWorld();
+    breakHost(where);
+    const output = (await callApproving(where, 'candidate.cycle', { appId: 'items', message: 'Verify', hunks: [] }, 'run-c:call-1')) as {
+      build: { ok: boolean; releaseId?: string };
+      preview: { started: boolean; error: string };
+      check?: unknown;
+      next: string;
+    };
+    expect(output.build.ok).toBe(true);
+    expect(output.preview.started).toBe(false);
+    expect(output.preview.error).toStartWith(START_FAILED);
+    expect(output.preview.error).toContain('useBroapp is not defined');
+    expect(output.preview.error.endsWith(DOES_NOT_LOAD)).toBe(true);
+    expect(output.check).toBeUndefined();
+    expect(output.next).toContain('candidate.cycle');
+    expect(where.states.get('items').cycle?.step).toBe('preview-failed');
+  }, 120_000);
 });

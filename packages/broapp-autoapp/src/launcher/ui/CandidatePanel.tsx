@@ -6,7 +6,7 @@
  * agreeing to before they agree to it: the capability list carries the release
  * it was read from, and the host refuses an answer about a different one.
  */
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 
 import { useOperation } from 'broapp/react';
@@ -39,6 +39,32 @@ export function pageCost(bytes: number | null, before: number | null): string | 
   return `page ${formatBytes(bytes)} (${percent > 0 ? '+' : ''}${String(percent)}%)`;
 }
 
+/**
+ * Whether what a click answered is about the candidate on screen: the click
+ * was for this release. A failure kept by its hook outlives the candidate it
+ * was about, and a red banner about a release nobody is looking at any more
+ * reads as a fault in the one they are.
+ */
+export function aboutCandidate(clickedFor: string | null, releaseId: string | null): boolean {
+  return clickedFor !== null && clickedFor === releaseId;
+}
+
+/**
+ * The start failure to draw, or `null`.
+ *
+ * Only while it is about the candidate on screen and nothing has superseded
+ * it: a preview running now answers it, and a newer build is another
+ * candidate. Pressing the button again clears it in the hook itself.
+ */
+export function startFailureShown(
+  error: { readonly message: string } | null,
+  clickedFor: string | null,
+  status: { readonly releaseId: string | null; readonly previewRunning: boolean },
+): string | null {
+  if (error === null || status.previewRunning || !aboutCandidate(clickedFor, status.releaseId)) return null;
+  return error.message;
+}
+
 export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): ReactElement | null {
   const status = useOperation<LauncherContract, 'launcher.candidateStatus'>(
     'launcher.candidateStatus',
@@ -48,6 +74,11 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
   const preview = useOperation<LauncherContract, 'launcher.previewOpen'>('launcher.previewOpen');
   const startPreview = useOperation<LauncherContract, 'launcher.previewStart'>('launcher.previewStart');
   const activate = useOperation<LauncherContract, 'launcher.activate'>('launcher.activate');
+  // The release each click was for, so what it answered is shown only while
+  // that release is still the candidate.
+  const [startedFor, setStartedFor] = useState<string | null>(null);
+  const [grantedFor, setGrantedFor] = useState<string | null>(null);
+  const [activatedFor, setActivatedFor] = useState<string | null>(null);
 
   const { run: refresh } = status;
   const { run: refreshGrants } = grants;
@@ -75,6 +106,10 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
 
   const added = current.addedCapabilities;
   const cost = pageCost(current.pageBytes, current.pageBytesBefore);
+  const startError = startFailureShown(startPreview.error, startedFor, current);
+  const grantsError = aboutCandidate(grantedFor, current.releaseId) ? setGrants.error : null;
+  const activated = aboutCandidate(activatedFor, current.releaseId) ? activate.data : null;
+  const activateError = aboutCandidate(activatedFor, current.releaseId) ? activate.error : null;
 
   return (
     <section className="launcher__card" aria-labelledby="candidate-heading">
@@ -148,6 +183,7 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
             disabled={current.releaseId === null || setGrants.pending}
             onClick={() => {
               // The release the list was read from travels with the answer.
+              setGrantedFor(current.releaseId);
               void setGrants
                 .run({
                   appId,
@@ -159,9 +195,9 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
           >
             Allow these
           </button>
-          {setGrants.error !== null && (
+          {grantsError !== null && (
             <p className="launcher__message launcher__message--error" role="alert">
-              {setGrants.error.message}
+              {grantsError.message}
             </p>
           )}
         </div>
@@ -177,6 +213,7 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
             type="button"
             disabled={current.releaseId === null || startPreview.pending}
             onClick={() => {
+              setStartedFor(current.releaseId);
               void startPreview
                 .run({ appId })
                 .then(() => preview.run({ appId }))
@@ -195,9 +232,9 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
             Open preview
           </button>
         )}
-        {startPreview.error !== null && (
+        {startError !== null && (
           <p className="launcher__message launcher__message--error" role="alert">
-            {startPreview.error.message}
+            {startError}
           </p>
         )}
         {previewNotOpened && (
@@ -212,6 +249,7 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
           disabled={current.releaseId === null || added.length > 0 || activate.pending}
           title={added.length > 0 ? 'Allow what it asks for first' : undefined}
           onClick={() => {
+            setActivatedFor(current.releaseId);
             void activate
               .run({ appId, releaseId: current.releaseId ?? '' })
               .then(() => {
@@ -224,18 +262,18 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
         </button>
       </div>
 
-      {activate.data !== null && (
-        <p className={activate.data.ok ? 'launcher__lede' : 'launcher__message launcher__message--error'}>
-          {activate.data.ok
-            ? activate.data.opened === true
+      {activated !== null && (
+        <p className={activated.ok ? 'launcher__lede' : 'launcher__message launcher__message--error'}>
+          {activated.ok
+            ? activated.opened === true
               ? 'Activated and opened in a new tab. The tab that showed the previous release no longer answers; close it.'
               : 'Activated. Click Open to see it; the tab that showed the previous release no longer answers.'
-            : `Not activated at ${activate.data.phase ?? 'an early step'}: ${activate.data.reason ?? ''}`}
+            : `Not activated at ${activated.phase ?? 'an early step'}: ${activated.reason ?? ''}`}
         </p>
       )}
-      {activate.error !== null && (
+      {activateError !== null && (
         <p className="launcher__message launcher__message--error" role="alert">
-          {activate.error.message}
+          {activateError.message}
         </p>
       )}
     </section>

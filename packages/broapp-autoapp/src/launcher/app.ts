@@ -18,9 +18,11 @@ import { startPreview } from '../engineer/preview.ts';
 import type { CandidateStates } from '../engineer/state.ts';
 import type { RunStore } from '../host/run-store.ts';
 import {
+  externalRoutes,
   modelFor,
   readTierModels,
   renderPlan,
+  routesNamedIn,
   writeTierModels,
   type Executor,
   type IntentStore,
@@ -426,6 +428,28 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       answers: task.answers.map((answer) => ({ ...answer })),
     });
     const progress = options.executor?.progress(id) ?? { run: null, question: null };
+    // Which of a task's runbook lines name a route a preview refuses, by the
+    // release the task completed at, else the serving one. Read once per
+    // release: an intent's tasks mostly share one.
+    const external = new Map<string, string[]>();
+    const externalIn = (releaseId: string | null): string[] => {
+      const id = releaseId ?? readCurrent(root, found.intent.appId);
+      if (id === null) return [];
+      let routes = external.get(id);
+      if (routes === undefined) {
+        try {
+          routes = externalRoutes(readRelease(root, found.intent.appId, id).contract);
+        } catch {
+          routes = [];
+        }
+        external.set(id, routes);
+      }
+      return routes;
+    };
+    const afterActivating = (task: TaskRecord): number[] => {
+      const routes = externalIn(task.releaseId);
+      return task.runbook.flatMap((line, index) => (routesNamedIn(line, routes).length > 0 ? [index] : []));
+    };
     return {
       run:
         progress.run === null
@@ -441,6 +465,7 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       tasks: found.tasks.map((task) => ({
         ...copy(task),
         model: modelFor(task, mapping),
+        afterActivating: afterActivating(task),
         events: task.events.map((event) => ({ ...event })),
       })),
     };

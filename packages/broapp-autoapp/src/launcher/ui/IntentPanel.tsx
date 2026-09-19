@@ -61,6 +61,12 @@ export const RUN_DONE =
 export const FAILED_NEXT = 'Run again to retry, or ask the engineer to revise this task.';
 /** The heading over the runbook lines of a finished backlog. */
 export const BY_HAND = 'For you to check by hand';
+/**
+ * Under {@link RUN_DONE} when a line below names a route that reaches outside
+ * the machine: a preview refuses one for everyone, the person included.
+ */
+export const AFTER_ACTIVATING =
+  'Lines marked “after activating” name a route that reaches outside this machine. A preview refuses it, even for you, so try those only once the release is activated.';
 /** Over a question the run brought to the person. */
 export const RUN_ASKS = 'The run needs your answer before it goes on';
 
@@ -648,12 +654,19 @@ export function IntentDetailView({
         {intent.status === 'done' ? (
           <section aria-label="Finished" className="launcher__intent-done">
             <p className="launcher__lede">{RUN_DONE}</p>
+            {byHand.some((task) => (task.afterActivating ?? []).length > 0) ? (
+              <p className="launcher__lede">{AFTER_ACTIVATING}</p>
+            ) : null}
             {byHand.length === 0 ? null : (
               <>
                 <h3 className="launcher__k-heading">{BY_HAND}</h3>
                 <ul className="launcher__list">
                   {byHand.flatMap((task) =>
-                    task.runbook.map((line, index) => <li key={`${task.slug}-${String(index)}`}>{`${task.slug}: ${line}`}</li>),
+                    task.runbook.map((line, index) => (
+                      <li key={`${task.slug}-${String(index)}`}>
+                        {`${task.slug}: ${line}${(task.afterActivating ?? []).includes(index) ? ' (after activating)' : ''}`}
+                      </li>
+                    )),
                   )}
                 </ul>
               </>

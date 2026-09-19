@@ -26,8 +26,10 @@ import { s } from 'broapp/shared';
 
 import {
   exampleIdFor,
+  externalRoutes,
   modelFor,
   readTierModels,
+  runbookProblems,
   type IntentRecord,
   type IntentStore,
   type Label,
@@ -271,6 +273,20 @@ export function intentTools(options: IntentToolsOptions): IntentTools {
     if (intent.questions.length > 0) throw publicError.conflict(QUESTIONS_REFUSAL);
   };
 
+  /**
+   * The routes of the serving release that reach outside the machine: the
+   * contract as it stands, which is what the analysis was grounded in. A route
+   * a task is about to add is not known here, and nothing guesses at it.
+   */
+  const knownExternal = (appId: string): string[] => {
+    try {
+      const releaseId = readCurrent(root, appId);
+      return releaseId === null ? [] : externalRoutes(readRelease(root, appId, releaseId).contract);
+    } catch {
+      return [];
+    }
+  };
+
   /** The model a task runs on, in words: an id, or the Settings model. */
   const modelOf = (task: TaskRecord): string => modelFor(task, readTierModels(store.dataDir)) ?? 'the model chosen in Settings';
 
@@ -411,7 +427,10 @@ ${SPLIT_RULES}`,
         }
       }
 
-      const problems = store.planProblems(intent.id, plan, replacing?.id);
+      const problems = [
+        ...store.planProblems(intent.id, plan, replacing?.id),
+        ...runbookProblems(plan.runbook, knownExternal(intent.appId)),
+      ];
       if (problems.length > 0) {
         return Promise.resolve({ ok: false, problems: problems.map(asInput), next: FIX_FIELDS });
       }

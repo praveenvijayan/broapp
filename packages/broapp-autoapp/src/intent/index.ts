@@ -40,6 +40,7 @@ export type {
 export {
   ambiguousReference,
   exampleIdFor,
+  externalRoutes,
   FAILURE_MARK,
   LAST_CRITERION,
   makeSlug,
@@ -47,6 +48,8 @@ export {
   referenceProblems,
   renderPlan,
   resolveReference,
+  routesNamedIn,
+  runbookProblems,
   SLUG_PATTERN,
   slugWords,
   validateGraph,

@@ -36,7 +36,7 @@ export type { CycleProgress } from './state.ts';
 export { locateProblem } from './tools.ts';
 export type { ProblemLocation } from './tools.ts';
 
-export { startPreview } from './preview.ts';
+export { DOES_NOT_LOAD, forTheBuilder, startPreview } from './preview.ts';
 export type { PreviewDeps } from './preview.ts';
 
 export {
@@ -64,7 +64,7 @@ export {
 } from './intent-tools.ts';
 export type { IntentTools, IntentToolsOptions } from './intent-tools.ts';
 export type { EngineerKnowledge, EngineerToolsOptions, InputMemory, TurnRecord } from './tools.ts';
-export { REFERENCE_TOPICS, specReference, SPLIT_RULES } from './reference.ts';
+export { EXTERNAL_IN_PREVIEW, REFERENCE_TOPICS, specReference, SPLIT_RULES } from './reference.ts';
 export type { ReferenceTopic } from './reference.ts';
 export { DESIGN_CHECK, DESIGN_RULES, designTopic } from './design.ts';
 export type { DesignRule, DesignSection, DesignSubject } from './design.ts';

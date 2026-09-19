@@ -167,7 +167,12 @@ so, and the `intents` topic of `spec.reference` has the details.
 4. `intent.task` adds one task at a time. A plan problem comes back as
    `ok: false` with each field named, and nothing is stored, so the model repairs
    the plan as it repairs a failed build. `replaces` rewrites a task that is
-   still `proposed` and keeps its slug.
+   still `proposed` and keeps its slug. A `runbook` line that names an
+   `external` route of the serving release and the word "preview" is one such
+   problem: the gate refuses `external` in a preview for everyone, the person's
+   own click included, so the line has to say "after activating". A route the
+   task has yet to add is not known then, and a line that describes a button
+   in words is not guessed at.
 5. `intent.submit` checks the whole plan and stamps `submitted_at`. Until then
    the panel shows the draft as **Being written**. The engineer tells the person,
    in a sentence or two, that the plan is in the Backlog panel, and stops.
@@ -261,7 +266,9 @@ measured what a local model does with one long open-ended turn.
    is the ceiling, however much each improves.
 8. Every task completed: the intent is `done`. Nothing is activated. The panel
    says to open the preview, look, and activate from the Candidate panel, and
-   lists every task's runbook lines under "For you to check by hand".
+   lists every task's runbook lines under "For you to check by hand". A line
+   naming an `external` route of the release its task completed at is marked
+   "(after activating)", and a sentence above the list says why.
 
 A task is **completed** only when all of these hold after its turn: the
 workspace revision moved since before the task's first turn (so an attempt that

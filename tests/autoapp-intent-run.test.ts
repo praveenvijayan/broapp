@@ -84,6 +84,7 @@ import {
 import { layout, readCurrent, setCurrent, type Layout } from 'broapp-autoapp/spec';
 
 import {
+  AFTER_ACTIVATING,
   BY_HAND,
   FAILED_NEXT,
   IntentPanel,
@@ -1636,6 +1637,40 @@ describe('the Backlog panel', () => {
     expect(done).toContain(BY_HAND);
     expect(done).toContain('Open the list and read it aloud.');
     expect(done).toContain('Estimated 20 lines, changed 12.');
+  }, 60_000);
+
+  test('16a: a finished backlog says which runbook lines wait for activation', async () => {
+    const w = await world([]);
+    // Written through the store, not the tool: what the host knows about the
+    // routes is read when the backlog is shown, from the task's release.
+    const { id } = submitted(w.intents, [
+      plan('ping-it', { runbook: ['After activating, allow it, press Ping and see items.ping answer ok.', 'Open the list.'] }),
+      plan('list-it', { runbook: ['Open the list and read items.list aloud.'] }),
+    ]);
+    const client = await connect(w.tab);
+    const { intents } = await client.call('launcher.intentsList', { appId: 'items' });
+    const opened = await client.call('launcher.intentGet', { id });
+    const [first, second] = opened.tasks;
+    if (first === undefined || second === undefined) throw new Error('two tasks');
+    // items.ping is the fixture's external route; items.list is a read.
+    expect(first.afterActivating).toEqual([0]);
+    expect(second.afterActivating).toEqual([]);
+
+    const draw = (tasks: typeof opened.tasks): string =>
+      renderToString(
+        createElement(IntentPanel, {
+          appId: 'items',
+          onClose: () => undefined,
+          snapshot: { intents, opened: { ...opened, intent: { ...opened.intent, status: 'done' }, tasks } },
+        }),
+      );
+    const finished = (task: (typeof opened.tasks)[number]) => ({ ...task, stored: 'completed' as const, status: 'completed' as const });
+    const both = draw([finished(first), finished(second)]);
+    expect(both).toContain(AFTER_ACTIVATING);
+    expect(both).toContain('items.ping answer ok. (after activating)');
+    expect(both).not.toContain('Open the list. (after activating)');
+    // Nothing that waits on activation: the lede says nothing about it.
+    expect(draw([finished(second)])).not.toContain(AFTER_ACTIVATING);
   }, 60_000);
 });
 

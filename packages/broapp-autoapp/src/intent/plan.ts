@@ -193,6 +193,60 @@ export function validateTask(
   return problems;
 }
 
+/**
+ * The routes of a contract whose effect is `external`: the ones a preview
+ * refuses for everyone, the person's own click included.
+ */
+export function externalRoutes(contract: {
+  readonly operations: Readonly<Record<string, { readonly effect: string }>>;
+  readonly streams: Readonly<Record<string, { readonly effect: string }>>;
+}): string[] {
+  return [...Object.entries(contract.operations), ...Object.entries(contract.streams)]
+    .filter(([, route]) => route.effect === 'external')
+    .map(([name]) => name)
+    .sort();
+}
+
+/**
+ * The routes of `routes` that `line` names, each as a whole word.
+ *
+ * The same boundary `groundedIn` draws: a route carries a dot, so `image.remove`
+ * is found before a full stop and not inside `image.removeAll`.
+ */
+export function routesNamedIn(line: string, routes: readonly string[]): string[] {
+  return routes.filter((route) => {
+    const escaped = route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?<![A-Za-z0-9_.-])${escaped}(?![A-Za-z0-9_-]|\\.[A-Za-z0-9_])`).test(line);
+  });
+}
+
+const PREVIEW_WORD = /\bpreview/i;
+
+/**
+ * A runbook line that sends a person to a preview to try an `external` route.
+ *
+ * The gate refuses `external` in a preview for every channel, so such a line
+ * is an instruction that cannot be followed; `background-remove`'s plan on
+ * 2026-09-18 had one, and its person was refused. Only what can be checked
+ * without guessing: the line must name a route known to be `external` — a
+ * route in the contract as it stands — and the word "preview". A line that
+ * describes the button in words and not the route is not refused; the
+ * planner's rules are what cover it.
+ */
+export function runbookProblems(runbook: readonly string[] | undefined, external: readonly string[]): PlanProblem[] {
+  const problems: PlanProblem[] = [];
+  (runbook ?? []).forEach((line, index) => {
+    if (!PREVIEW_WORD.test(line)) return;
+    for (const route of routesNamedIn(line, external)) {
+      problems.push({
+        field: 'runbook',
+        message: `runbook line ${String(index + 1)} sends the person to the preview to try ${route}, an external route, which a preview refuses for everyone. Say "after activating" instead, and name the capability the person will be asked to allow.`,
+      });
+    }
+  });
+  return problems;
+}
+
 /** A task as the reference check needs to see it. */
 export interface ReferencingTask {
   readonly slug: string;

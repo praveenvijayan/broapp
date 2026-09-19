@@ -57,7 +57,16 @@ export interface StoredChecks {
 export const MAX_REPAIR_ATTEMPTS = 3;
 
 /** The steps a change cycle can have reached. */
-export const CYCLE_STEPS = ['patched', 'build-declined', 'build-failed', 'built', 'preview-declined', 'previewed', 'checked'] as const;
+export const CYCLE_STEPS = [
+  'patched',
+  'build-declined',
+  'build-failed',
+  'built',
+  'preview-declined',
+  'preview-failed',
+  'previewed',
+  'checked',
+] as const;
 
 /**
  * Where the last change cycle got to, written at every step.
