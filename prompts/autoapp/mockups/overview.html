@@ -1,0 +1,247 @@
+<!doctype html>
+<!--
+  Layout mockup for prompt 17b. Sample data.
+  Take from this file: layout, placement, hierarchy, words.
+  Do NOT take: its fonts, its colours, its dark palette. They are the mockup's
+  own. The launcher's screen is drawn in the existing --launcher-* variables
+  and the launcher's system font, in both schemes, with no new token.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autoapp overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #f3f2ef;
+  --card: #ffffff;
+  --ink: #1b2333;
+  --ink-2: #566074;
+  --ink-3: #8a92a3;
+  --line: #e7e5e0;
+  --line-strong: #cfd3da;
+  --attention: #e8590c;
+  --attention-bg: #fdf0e6;
+  --attention-line: #f6dcc8;
+  --danger: #d92d20;
+  --ok: #1fa45a;
+  --idle: #9aa1ae;
+  --track: #e4e6ea;
+  --primary: #2b3648;
+  --on-primary: #ffffff;
+  --serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #12151b; --card: #1a1e26; --ink: #eef0f4; --ink-2: #a9b0bd; --ink-3: #7b8392;
+    --line: #2a2f3a; --line-strong: #3a4150; --attention: #ff7a33; --attention-bg: #2a1d14;
+    --attention-line: #4a2f1d; --danger: #f0574b; --ok: #3ccf7f; --idle: #6d7584;
+    --track: #2c323e; --primary: #e9ecf2; --on-primary: #161a21;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #12151b; --card: #1a1e26; --ink: #eef0f4; --ink-2: #a9b0bd; --ink-3: #7b8392;
+  --line: #2a2f3a; --line-strong: #3a4150; --attention: #ff7a33; --attention-bg: #2a1d14;
+  --attention-line: #4a2f1d; --danger: #f0574b; --ok: #3ccf7f; --idle: #6d7584;
+  --track: #2c323e; --primary: #e9ecf2; --on-primary: #161a21;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 400 15px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 28px 16px 20px; }
+@media (min-width: 720px) { .wrap { padding: 36px 32px 24px; } }
+h1 { font: 400 56px/1 var(--serif); letter-spacing: -0.01em; margin: 0 0 10px; }
+.lede { color: var(--ink-2); margin: 0 0 24px; font-size: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; }
+.num, .serif { font-family: var(--serif); font-weight: 400; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* summary strip */
+.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 22px 0; }
+.summary > div { padding: 4px 36px; border-left: 1px solid var(--line); min-width: 0; }
+.summary > div:first-child { border-left: 0; }
+.summary .k { color: var(--ink-2); font-size: 14px; }
+.summary .num { font-size: 46px; line-height: 1.15; margin: 2px 0; }
+.summary .s { color: var(--ink-2); font-size: 13px; }
+.summary .hot .num { color: var(--attention); }
+
+/* attention band */
+.attention { background: var(--attention-bg); border: 1px solid var(--attention-line); border-radius: 6px; padding: 16px 20px 6px; margin-top: 16px; }
+.attention h2 { font: 500 17px/1.3 var(--sans); margin: 0 0 6px; display: flex; align-items: center; gap: 12px; }
+.count { background: var(--attention); color: #fff; font-size: 13px; min-width: 26px; height: 26px; border-radius: 13px; display: inline-grid; place-items: center; }
+.item { display: grid; grid-template-columns: 24px minmax(140px, 1.1fr) minmax(0, 2.6fr) auto; align-items: center; gap: 22px; padding: 14px 0; border-top: 1px solid var(--attention-line); }
+.item:first-of-type { border-top: 0; }
+.mark { width: 24px; height: 24px; border-radius: 50%; color: #fff; font: 600 14px/24px var(--sans); text-align: center; }
+.mark.q { background: var(--attention); } .mark.x { background: var(--danger); }
+.item .t { font-weight: 500; }
+.item .d { color: var(--ink-2); font-size: 14px; }
+
+/* buttons */
+.btn { font: 500 14px/1 var(--sans); padding: 11px 20px; border-radius: 4px; border: 1px solid var(--line-strong); background: var(--card); color: var(--ink); cursor: pointer; min-width: 96px; }
+.btn:hover { border-color: var(--ink-2); }
+.btn.hot { background: var(--attention); border-color: var(--attention); color: #fff; }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.link { background: none; border: 0; padding: 0; color: var(--ink-2); font: 400 14px var(--sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+:is(.btn, .link):focus-visible { outline: 2px solid var(--attention); outline-offset: 2px; }
+
+/* main grid */
+.main { display: grid; grid-template-columns: minmax(0, 1.34fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
+.pad { padding: 22px 24px; }
+.eyebrow { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+.state { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 14px; white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); flex: none; }
+.dot.ok { background: var(--ok); } .dot.hot { background: var(--attention); }
+.between { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.now h2 { font: 400 36px/1.1 var(--serif); margin: 8px 0 2px; }
+.now .where { color: var(--ink-2); margin: 0; }
+
+/* stepper */
+.steps { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); margin: 26px 0 18px; padding: 0; }
+.steps li { position: relative; text-align: center; font-size: 13px; color: var(--ink-2); padding-top: 30px; }
+.steps li::before { content: ""; position: absolute; top: 10px; left: -50%; width: 100%; height: 1px; background: var(--line-strong); }
+.steps li:first-child::before { display: none; }
+.steps li.done::before, .steps li.on::before { background: var(--primary); }
+.steps li::after { content: ""; position: absolute; top: 0; left: 50%; width: 20px; height: 20px; margin-left: -10px; border-radius: 50%; border: 1.5px solid var(--line-strong); background: var(--card); }
+.steps li.done::after { background: var(--primary); border-color: var(--primary); }
+.steps li.done span::before { content: ""; position: absolute; z-index: 1; top: 5px; left: 50%; width: 8px; height: 4px; margin-left: -5px; border-left: 1.5px solid var(--on-primary); border-bottom: 1.5px solid var(--on-primary); transform: rotate(-45deg); }
+.steps li.on { color: var(--ink); font-weight: 500; }
+.steps li.on::after { border-color: var(--primary); box-shadow: inset 0 0 0 4px var(--card); background: var(--primary); }
+
+.facts { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); padding: 18px 0 6px; text-align: center; }
+.facts > div { border-left: 1px solid var(--line); } .facts > div:first-child { border-left: 0; }
+.facts .num { font-size: 32px; line-height: 1.1; }
+.facts .k { color: var(--ink-2); font-size: 13px; }
+.quiet { color: var(--ink-2); font-size: 13px; margin: 10px 0 18px; }
+.actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.actions .link { margin-left: auto; }
+
+/* applications */
+.apps h2 { font: 400 28px/1.1 var(--serif); margin: 0; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px 24px; align-items: center; padding: 18px 0; border-top: 1px solid var(--line); }
+.app:first-of-type { margin-top: 16px; }
+.app .n { font-weight: 500; font-size: 18px; }
+.app .d { color: var(--ink-2); font-size: 14px; }
+.meter { grid-column: 1 / 3; display: flex; align-items: center; gap: 14px; color: var(--ink-2); font-size: 13px; }
+.meter i { flex: 1; max-width: 300px; height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.meter i b { display: block; height: 100%; background: var(--primary); border-radius: 3px; }
+
+/* footer strip */
+.foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 0; margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 14px; }
+.foot > span { padding: 0 18px; border-left: 1px solid var(--line-strong); }
+.foot > span:first-child { padding-left: 0; border-left: 0; }
+.foot b { color: var(--ink); font-weight: 500; font-size: 17px; margin-left: 6px; }
+.foot .right { margin-left: auto; }
+
+@media (max-width: 900px) {
+  h1 { font-size: 44px; }
+  .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 20px; }
+  .summary > div { padding: 4px 20px; }
+  .summary > div:nth-child(odd) { border-left: 0; }
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .item { grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px 14px; }
+  .item .d { grid-column: 2 / 4; grid-row: 2; }
+}
+@media (max-width: 520px) {
+  .summary .num { font-size: 38px; }
+  .item { grid-template-columns: 24px minmax(0, 1fr); }
+  .item .btn { grid-column: 2; justify-self: start; }
+  .item .d { grid-column: 2; }
+  .app { grid-template-columns: minmax(0, 1fr) auto; }
+  .app .state { grid-column: 1; grid-row: 2; }
+  .meter { grid-column: 1 / 3; }
+  .foot > span { border-left: 0; padding: 0 16px 0 0; }
+  .foot .right { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>Overview</h1>
+  <p class="lede">Everything you need to keep work moving.</p>
+
+  <section class="card summary" aria-label="Summary">
+    <div class="hot"><div class="k">Needs attention</div><div class="num tnum">2</div><div class="s">1 question · 1 failed task</div></div>
+    <div><div class="k">Running now</div><div class="num tnum">1</div><div class="s">Reading list</div></div>
+    <div><div class="k">Queued tasks</div><div class="num tnum">2</div><div class="s">About 35 min remaining</div></div>
+    <div><div class="k">Spent today</div><div class="num tnum">$2.18</div><div class="s">of $10.00 budget · 22%</div></div>
+  </section>
+
+  <section class="attention" aria-label="Needs your attention">
+    <h2>Needs your attention <span class="count tnum">2</span></h2>
+    <div class="item">
+      <span class="mark q" aria-hidden="true">?</span>
+      <span class="t">Keep the read date?</span>
+      <span class="d">Reading list · Answer within 7m 12s</span>
+      <button class="btn hot" type="button">Answer</button>
+    </div>
+    <div class="item">
+      <span class="mark x" aria-hidden="true">!</span>
+      <span class="t">Task failed twice</span>
+      <span class="d">Notes · Record completion date</span>
+      <button class="btn" type="button">Review issue</button>
+    </div>
+  </section>
+
+  <div class="main">
+    <section class="card pad now" aria-label="Running now">
+      <div class="between"><span class="eyebrow">Running now</span><span class="state"><span class="dot ok"></span>Building</span></div>
+      <h2>Filter by shelf</h2>
+      <p class="where">Reading list · Task 4 of 6</p>
+
+      <ol class="steps" aria-label="Stage">
+        <li class="done"><span>Reading</span></li>
+        <li class="done"><span>Editing</span></li>
+        <li class="on" aria-current="step"><span>Building</span></li>
+        <li><span>Checking</span></li>
+      </ol>
+
+      <div class="facts">
+        <div><div class="num tnum">2</div><div class="k">Files changed</div></div>
+        <div><div class="num tnum">1 / 3</div><div class="k">Checks passing</div></div>
+        <div><div class="num tnum">6m 10s</div><div class="k">Turn time</div></div>
+      </div>
+      <p class="quiet">Last activity 38 seconds ago · attempt 1 of 2 · stops if quiet for 8 minutes</p>
+
+      <div class="actions">
+        <button class="btn primary" type="button">Open preview</button>
+        <button class="btn" type="button">View details</button>
+        <button class="link" type="button">Stop run</button>
+      </div>
+    </section>
+
+    <section class="card pad apps" aria-label="Applications">
+      <div class="between"><h2>Applications</h2><button class="link" type="button" style="text-decoration:none">View all</button></div>
+
+      <div class="app">
+        <div><div class="n">Reading list</div><div class="d">3 of 6 tasks done</div></div>
+        <span class="state"><span class="dot ok"></span>Building</span>
+        <button class="btn" type="button">Open</button>
+        <div class="meter"><i><b style="width:50%"></b></i><span class="tnum">50%</span></div>
+      </div>
+      <div class="app">
+        <div><div class="n">Notes</div><div class="d">1 of 3 tasks done</div></div>
+        <span class="state"><span class="dot hot"></span>Needs review</span>
+        <button class="btn" type="button">Review</button>
+        <div class="meter"><i><b style="width:33%"></b></i><span class="tnum">33%</span></div>
+      </div>
+      <div class="app">
+        <div><div class="n">Invoices</div><div class="d">Last changed 3 days ago</div></div>
+        <span class="state"><span class="dot"></span>Stopped</span>
+        <button class="btn" type="button">Start</button>
+      </div>
+    </section>
+  </div>
+
+  <footer class="foot">
+    <span>Tokens today<b class="tnum">1.4M</b></span>
+    <span>Current run<b class="tnum">312k</b></span>
+    <span>Current task<b class="tnum">≥41k</b> · partial</span>
+    <span class="right"><button class="link" type="button">View usage</button></span>
+    <span>Sample data</span>
+  </footer>
+</main>
+</body>
+</html>
