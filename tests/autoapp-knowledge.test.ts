@@ -1763,6 +1763,27 @@ const MISSING = {
 };
 
 describe('12c: distillation', () => {
+  test('17a: each question says what it used, so the launcher can keep a row for it', async () => {
+    const where = makeWorld();
+    const id = resolvedCase(where);
+    const { model } = answering([MISSING]);
+    const used: { caseId: number; appId: string; usage?: { inputTokens: number; outputTokens: number } }[] = [];
+    const distiller = createDistiller({
+      knowledge: where.knowledge,
+      log: where.log,
+      model,
+      instructions: ENGINEER_INSTRUCTIONS,
+      autoappVersion: AUTOAPP_VERSION,
+      onUsage: (entry) => used.push(entry),
+    });
+    closers.push(() => distiller.close());
+    distiller.enqueue([id]);
+    await distiller.idle();
+    expect(used).toHaveLength(1);
+    expect(used[0]).toMatchObject({ caseId: id, appId: 'items' });
+    expect(used[0]?.usage?.inputTokens).toBeGreaterThan(0);
+  });
+
   test('knowledge_missing becomes a provisional lesson with its provenance, from what was recorded', async () => {
     const where = makeWorld();
     const id = resolvedCase(where);

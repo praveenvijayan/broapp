@@ -11,7 +11,15 @@ export type { CreateLauncherAppOptions, LauncherApp } from './app.ts';
 export { appIds, listApps, serving } from './apps.ts';
 export type { AppRow } from './apps.ts';
 
-export { INTENT_STATUS_NAMES, launcherContract, STAGE_NAMES, TASK_STATUS_NAMES } from './contract.ts';
+export {
+  INTENT_STATUS_NAMES,
+  launcherContract,
+  NEEDS_YOU_KINDS,
+  RUN_EVENT_KINDS,
+  RUN_STAGE_NAMES,
+  STAGE_NAMES,
+  TASK_STATUS_NAMES,
+} from './contract.ts';
 export type { LauncherContract } from './contract.ts';
 
 export { createLauncherTab } from './tab.ts';
@@ -68,3 +76,18 @@ export type { ActivateParams, ActivateResult } from './activate.ts';
 
 export { recover, restoreServing } from './recover.ts';
 export type { Recovered, RecoverParams, RestoreParams } from './recover.ts';
+
+export { needsYouOf, readOverview, readyToActivate, TITLE_CHARS } from './overview.ts';
+export type {
+  AppBlock,
+  BacklogBlock,
+  CandidateView,
+  LiveUsage,
+  ModelSpend,
+  NeedsYouItem,
+  NeedsYouKind,
+  NeedsYouTarget,
+  Overview,
+  OverviewSources,
+  RunningBlock,
+} from './overview.ts';

@@ -39,6 +39,8 @@ export interface RunEndDetail {
   /** Tool round trips the turn made. */
   readonly steps: number;
   readonly ms: number;
+  /** The model the turn was sent to; absent when the turn ended before one was resolved. */
+  readonly modelId?: string;
 }
 
 /**
@@ -165,6 +167,13 @@ export interface CreateAiOptions {
    * reason to fail it.
    */
   readonly onContext?: (runId: string, delivered: DeliveredContext) => void;
+  /**
+   * Called after each completed model step of a turn, with the tokens its
+   * completed steps have used so far: what a running turn has cost, before
+   * `onRunEnd` says what it cost in all. A hook that throws is logged and
+   * ignored, like the others.
+   */
+  readonly onUsageSoFar?: (runId: string, soFar: { inputTokens: number; outputTokens: number }) => void;
 }
 
 /**
@@ -334,6 +343,7 @@ export function createAi(options: CreateAiOptions): Ai {
     approvals,
     ...(options.onRunEnd === undefined ? {} : { onRunEnd: options.onRunEnd }),
     ...(options.onContext === undefined ? {} : { onContext: options.onContext }),
+    ...(options.onUsageSoFar === undefined ? {} : { onUsageSoFar: options.onUsageSoFar }),
     transcripts: {
       save: (runId, messages) => {
         threadStore().saveTranscript(runId, messages);

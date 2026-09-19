@@ -76,6 +76,13 @@ export interface RunDeps {
   /** Called once per turn with what the model is about to be given. */
   readonly onContext?: (runId: string, delivered: DeliveredContext) => void;
   /**
+   * Called after each model step completes, with what the turn's completed
+   * steps have used so far. Not the SDK's `onStepEnd`, which this layer
+   * already hands to `streamText`: this is the turn's running subtotal, for
+   * somebody who wants to say what a turn has cost before it ends.
+   */
+  readonly onUsageSoFar?: (runId: string, soFar: { inputTokens: number; outputTokens: number }) => void;
+  /**
    * The turn transcripts. Absent, every history turn is text and nothing is
    * written, which is exactly the layer before transcripts existed.
    */
@@ -95,6 +102,8 @@ interface TurnTally {
   stepsEnded: number;
   stepInput: number;
   stepOutput: number;
+  /** The model the turn was sent to, once it is resolved. */
+  modelId?: string;
 }
 
 /**
@@ -798,6 +807,7 @@ export async function runChat(
       steps: tally.steps,
       ms: Date.now() - started,
       ...(tally.usage === undefined ? {} : { usage: tally.usage }),
+      ...(tally.modelId === undefined ? {} : { modelId: tally.modelId }),
     };
     safely(deps.logger, 'onRunEnd', () =>
       onRunEnd(params.runId, status, params.message.slice(0, SUMMARY_CHARS), detail),
@@ -860,6 +870,9 @@ async function runTurn(
   // after the provider and key checks, so the vision check below and the model
   // instance built later both follow it without a second code path.
   const resolved = await deps.registry.resolve({ modelId: params.modelId });
+  // Known here and nowhere later: a listener writing down what the turn used
+  // is told which model used it, not left to guess from settings since changed.
+  tally.modelId = resolved.modelId;
 
   // Both checks come before anything is emitted, so a turn that cannot carry
   // its images fails as a whole rather than half-answering.
@@ -930,6 +943,11 @@ async function runTurn(
       tally.stepsEnded += 1;
       tally.stepInput += step.usage.inputTokens ?? 0;
       tally.stepOutput += step.usage.outputTokens ?? 0;
+      const onUsageSoFar = deps.onUsageSoFar;
+      if (onUsageSoFar !== undefined) {
+        const soFar = { inputTokens: tally.stepInput, outputTokens: tally.stepOutput };
+        safely(deps.logger, 'onUsageSoFar', () => onUsageSoFar(params.runId, soFar));
+      }
     },
   });
 

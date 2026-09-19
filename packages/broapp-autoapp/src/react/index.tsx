@@ -22,8 +22,18 @@ export type { PageProps } from './Page.tsx';
 export { buildHash, parseHash, PageProvider, usePage } from './context.tsx';
 export type { PageContextValue, SourceState } from './context.tsx';
 
-export { announcePending, browserSurface, titleWithPending } from './pending.ts';
-export type { PendingSurface } from './pending.ts';
+export {
+  ALERT_TONES,
+  alertsBetween,
+  announce,
+  announceOverview,
+  announcePending,
+  browserSurface,
+  requestAlerts,
+  titleWithPending,
+  webAudioSound,
+} from './pending.ts';
+export type { AlertEvent, AlertKind, OverviewAlerts, PendingSurface, SoundSurface, ToneKind } from './pending.ts';
 
 export {
   APPLICATION_VARIABLES,

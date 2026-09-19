@@ -20,8 +20,8 @@ import { createCandidateStates, type CandidateStates } from '../engineer/state.t
 import { intentTools, type IntentTools } from '../engineer/intent-tools.ts';
 import { createInputMemory, engineerTools, type TurnRecord } from '../engineer/tools.ts';
 import type { RunStore } from '../host/run-store.ts';
-import { createExecutor, refusalsOf, type Executor, type IntentStore } from '../intent/index.ts';
-import { sourceReads } from '../knowledge/attempts.ts';
+import { createExecutor, recordUsage, refusalsOf, usageRowOf, type Executor, type IntentStore } from '../intent/index.ts';
+import { runRecord, sourceReads } from '../knowledge/attempts.ts';
 import { readTaskContext } from '../knowledge/task-context.ts';
 import { createDistiller, pendingCases, type Distiller } from '../knowledge/distil.ts';
 import { recordContext, type Evidence } from '../knowledge/evidence.ts';
@@ -36,6 +36,7 @@ import { AUTOAPP_VERSION } from '../knowledge/version.ts';
 import type { Layout } from '../spec/index.ts';
 
 import { createLauncherApp, LAUNCHER_CONFIRM_TIMEOUT_MS, LAUNCHER_MAX_STEPS, type LauncherApp } from './app.ts';
+import type { LiveUsage } from './overview.ts';
 import { appIds, listApps } from './apps.ts';
 import type { Journal } from './journal.ts';
 import type { Templates } from './starter.ts';
@@ -171,6 +172,23 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
    */
   const turns = new Map<string, TurnRecord>();
 
+  /**
+   * What each live turn has used so far, and which model and application it
+   * is for. The AI layer's `onUsageSoFar` fills it as each step ends; the
+   * turn's `onRunEnd` replaces it with a row in the usage table. Memory only:
+   * a subtotal is a floor that changes every step, and the table holds what a
+   * turn used once it has ended.
+   */
+  const live = new Map<string, LiveUsage>();
+  const liveEntry = (runId: string): LiveUsage => {
+    let entry = live.get(runId);
+    if (entry === undefined) {
+      entry = { runId, inputTokens: 0, outputTokens: 0, modelId: null, appId: null, taskId: null };
+      live.set(runId, entry);
+    }
+    return entry;
+  };
+
   const session = options.session ?? openSession(options.dataDir, logger);
   /**
    * The engineer's context: an orientation, the task evidence and matching
@@ -226,7 +244,37 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           model: () => ai.model(),
           instructions: ENGINEER_INSTRUCTIONS,
           autoappVersion: AUTOAPP_VERSION,
+          onUsage: (used) => {
+            const intents = options.intents;
+            if (intents === undefined) return;
+            void ai.registry.settings().then(
+              (settings) => {
+                keepUsage(intents, {
+                  runId: `distil-${String(used.caseId)}-${String(used.startedAt)}`,
+                  appId: used.appId,
+                  taskId: null,
+                  modelId: settings.modelId,
+                  usage: used.usage,
+                  steps: 0,
+                  ms: used.ms,
+                  endedAt: Date.now(),
+                });
+              },
+              (cause: unknown) => {
+                logger.error(`[autoapp] could not keep what a distillation used: ${String(cause instanceof Error ? cause.message : cause)}`);
+              },
+            );
+          },
         });
+
+  /** Write one turn's usage row; a store that cannot is logged, never the turn's failure. */
+  function keepUsage(intents: IntentStore, input: Parameters<typeof usageRowOf>[0]): void {
+    try {
+      recordUsage(intents, usageRowOf(input));
+    } catch (cause) {
+      logger.error(`[autoapp] could not keep what turn ${input.runId} used: ${String(cause instanceof Error ? cause.message : cause)}`);
+    }
+  }
 
   /**
    * The backlog's executor: runs a reviewed backlog task by task, each a turn
@@ -256,6 +304,12 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
           ...(options.run?.maxAttempts === undefined ? {} : { maxAttempts: options.run.maxAttempts }),
           ...(options.run?.maxTurns === undefined ? {} : { maxTurns: options.run.maxTurns }),
           ...(options.run?.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.run.idleTimeoutMs }),
+          usageSoFar: (runId: string) => live.get(runId) ?? null,
+          ...(knowledge === undefined
+            ? {}
+            : {
+                editedPaths: (runIds: readonly string[]) => runIds.flatMap((runId) => runRecord(knowledge.store, runId).edited),
+              }),
           // The relationship index is derived from what an attempt left; the
           // moment a task's attempt ends is when that record is whole.
           ...(knowledge === undefined
@@ -306,6 +360,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ...(options.install === undefined ? {} : { install: options.install }),
     ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
     ...(options.quit === undefined ? {} : { quit: options.quit }),
+    live: () => [...live.values()],
   });
 
   /** What the tools remember of each turn's refusals; a turn is dropped when it ends. */
@@ -360,41 +415,70 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ...(serve === null ? {} : { context: serve }),
     ...(options.contextBudgetChars === undefined ? {} : { contextBudgetChars: options.contextBudgetChars }),
     tools,
-    ...(knowledge === undefined
-      ? {}
-      : {
-          onContext: (runId: string, delivered: DeliveredContext) => {
-            // Servings first, from the same delivered documents the context row
-            // is written from, so the two agree about what reached the model.
-            let served: ServedTurn = { appId: null, requested: [], resolved: [] };
-            try {
-              if (serve !== null) served = serve.delivered(runId, delivered);
-            } catch (cause) {
-              logger.error(
-                `[autoapp] could not record what a turn was served: ${String(cause instanceof Error ? cause.message : cause)}`,
-              );
-            }
-            // The turn is remembered even when its context cannot be written,
-            // so a case opened during it still carries what was asked.
-            let contextId: number | null = null;
-            try {
-              contextId = recordContext(knowledge.store, {
-                runId,
-                appId: served.appId,
-                instructions: ENGINEER_INSTRUCTIONS,
-                delivered,
-                requested: served.requested,
-                resolved: served.resolved,
-              });
-            } catch (cause) {
-              logger.error(
-                `[autoapp] could not record what a turn was given: ${String(cause instanceof Error ? cause.message : cause)}`,
-              );
-            }
-            turns.set(runId, { message: delivered.message, contextId, model: delivered.model });
-          },
-        }),
+    onContext: (runId: string, delivered: DeliveredContext) => {
+      // Which model the turn went to, for a running turn's cost; its end says
+      // it again, from the AI layer itself.
+      liveEntry(runId).modelId = delivered.model.id;
+      if (knowledge === undefined) return;
+      // Servings first, from the same delivered documents the context row
+      // is written from, so the two agree about what reached the model.
+      let served: ServedTurn = { appId: null, requested: [], resolved: [] };
+      try {
+        if (serve !== null) served = serve.delivered(runId, delivered);
+      } catch (cause) {
+        logger.error(
+          `[autoapp] could not record what a turn was served: ${String(cause instanceof Error ? cause.message : cause)}`,
+        );
+      }
+      liveEntry(runId).appId = served.appId;
+      // The turn is remembered even when its context cannot be written,
+      // so a case opened during it still carries what was asked.
+      let contextId: number | null = null;
+      try {
+        contextId = recordContext(knowledge.store, {
+          runId,
+          appId: served.appId,
+          instructions: ENGINEER_INSTRUCTIONS,
+          delivered,
+          requested: served.requested,
+          resolved: served.resolved,
+        });
+      } catch (cause) {
+        logger.error(
+          `[autoapp] could not record what a turn was given: ${String(cause instanceof Error ? cause.message : cause)}`,
+        );
+      }
+      turns.set(runId, { message: delivered.message, contextId, model: delivered.model });
+    },
+    onUsageSoFar: (runId, soFar) => {
+      const entry = liveEntry(runId);
+      entry.inputTokens = soFar.inputTokens;
+      entry.outputTokens = soFar.outputTokens;
+    },
     onRunEnd: (runId, status, summary, detail) => {
+      const soFar = live.get(runId);
+      live.delete(runId);
+      // Every turn leaves a row, whatever it was: chat, planning, a builder's.
+      // A builder's is found by its run id; any other turn has no task.
+      const intents = options.intents;
+      if (intents !== undefined) {
+        let task: { readonly id: number; readonly appId: string } | null = null;
+        try {
+          task = intents.taskForRun(runId);
+        } catch (cause) {
+          logger.error(`[autoapp] could not find the task of turn ${runId}: ${String(cause instanceof Error ? cause.message : cause)}`);
+        }
+        keepUsage(intents, {
+          runId,
+          appId: task?.appId ?? soFar?.appId ?? null,
+          taskId: task?.id ?? null,
+          modelId: detail?.modelId ?? soFar?.modelId ?? null,
+          usage: detail?.usage,
+          steps: detail?.steps ?? 0,
+          ms: detail?.ms ?? 0,
+          endedAt: Date.now(),
+        });
+      }
       turns.delete(runId);
       planning?.ended(runId);
       inputs.ended(runId);

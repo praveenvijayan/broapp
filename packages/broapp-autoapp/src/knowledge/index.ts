@@ -97,6 +97,7 @@ export { SEED_LESSONS, seedLessons } from './seed.ts';
 export type { LessonApplies, SeedLesson } from './seed.ts';
 
 export { DIAGNOSES, DIAGNOSIS, DISTILLER_SYSTEM, createDistiller, distillerPrompt, pendingCases } from './distil.ts';
+export type { DistilUsage } from './distil.ts';
 export type { CreateDistillerInput, Diagnosis, Distiller } from './distil.ts';
 
 export { REVIEW_REASONS, instructionsHash, reviewFlags } from './freshness.ts';

@@ -374,6 +374,43 @@ commands open it without, because a launcher beside them may be running), any
 intent becomes `stopped`, "The launcher stopped." An interrupted turn may have
 left half a change, and a person decides what happens to an outcome nobody saw.
 
+## What a run costs, and where it is
+
+Every turn the launcher runs leaves one row in `intents.sqlite`'s `usage`
+table when it ends: a chat turn, a planning turn, a builder's turn, the advice
+question about a failed task, and each distillation question. A builder's row
+carries its task, found by its run id in `task_runs`. A turn cut short writes
+what its completed steps used and is marked partial; a turn whose provider
+never reported anything writes zeros, also partial, because its cost is
+unknown rather than nothing. While a turn runs, what its completed steps have
+used so far is held in memory from the AI layer's `onUsageSoFar` hook, and the
+row replaces it when the turn ends.
+
+Prices are the person's. `prices.json` in the launcher's data directory, beside
+`intent-models.json`, says what a model costs in US dollars per million tokens,
+and optionally a daily budget:
+
+```json
+{ "z-ai/glm-5.3": { "input": 0.6, "output": 2.2 }, "budget": { "day": 10 } }
+```
+
+Nothing ships with a price and nothing fetches one. A model the file does not
+name has no cost, only tokens; a missing or unreadable file prices nothing.
+Cost is worked out when read, so correcting a price corrects every earlier day
+too. A total that includes a partial row or a running turn is a floor
+(`atLeast`), a total that includes an unpriced model says how many tokens it
+left out (`unpricedTokens`), and a total in which nothing is priced has no cost
+(`null`), never `0`. The budget is shown and never enforced.
+
+`launcher.overview` answers in one read what needs the person (a question a
+run is waiting on, a task that asked, a failed task whose advice is unanswered,
+a candidate whose own checks all passed and is not serving), the task in hand
+with its stage (`reading`, `editing`, `building`, `checking`), its limits, its
+criteria passing and its last refusal, spend for the task, the run and today,
+what is left per application with an estimate once two of its tasks have
+completed with whole rows, each application's state, and the run events a page
+raises alerts from. It starts nothing and writes nothing.
+
 ## Routes and the panel
 
 The reads are `launcher.intentsList`, `intentGet`, `intentPlan` and

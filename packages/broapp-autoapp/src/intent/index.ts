@@ -90,7 +90,9 @@ export {
   QUESTION_EXPIRED,
   reasonsFromNote,
   refusalSentences,
+  RECENT_RUN_EVENTS,
   RUN_FINISHED,
+  stageOf,
   standingAnswer,
   stuckSentence,
   TASK_IDLE_TIMEOUT_MS,
@@ -104,10 +106,32 @@ export type {
   AdviceRefusals,
   CreateExecutorOptions,
   Executor,
+  RunEvent,
+  RunEventKind,
   RunProgress,
+  RunStage,
   RequiredExample,
   RunQuestion,
+  StageEvent,
   StandingAnswer,
   TurnEnding,
   Verdict,
 } from './executor.ts';
+
+export { MAX_PRICED_MODELS, NO_PRICES, PRICES_FILE, readPrices, writePrices } from './prices.ts';
+export type { ModelPrice, PriceEntry, Prices } from './prices.ts';
+
+export {
+  costOf,
+  ESTIMATE_MIN_TASKS,
+  estimateFor,
+  mergeParts,
+  recordUsage,
+  spendOf,
+  startOfToday,
+  usageOfRun,
+  usageOfTask,
+  usageRowOf,
+  usageToday,
+} from './usage.ts';
+export type { Estimate, SpendTotal, UsagePart, UsageRow } from './usage.ts';

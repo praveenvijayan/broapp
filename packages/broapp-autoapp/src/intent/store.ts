@@ -121,6 +121,20 @@ const MIGRATIONS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS task_criteria (
      task_id INTEGER NOT NULL REFERENCES tasks(id), criterion_id TEXT NOT NULL,
      example_hash TEXT, PRIMARY KEY (task_id, criterion_id));`,
+  // 17a: one row per turn the launcher ran — chat, planning, builder, advice,
+  // distillation — with what it used. `task_id` is the task a builder's turn
+  // built, found in `task_runs`; every other turn has none. A row is written
+  // when a turn ends, never while it runs: a running turn's subtotal lives in
+  // memory. `partial` says the numbers are what is known, not the whole.
+  // `IF NOT EXISTS` for 15b's reason: a store taken back to an earlier version
+  // by hand still has it, and a migration that only adds a table has nothing
+  // to redo.
+  `CREATE TABLE IF NOT EXISTS usage (
+     run_id TEXT PRIMARY KEY, app_id TEXT, task_id INTEGER, model_id TEXT,
+     input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, partial INTEGER NOT NULL,
+     steps INTEGER NOT NULL, ms INTEGER NOT NULL, ended_at INTEGER NOT NULL);
+   CREATE INDEX IF NOT EXISTS usage_ended ON usage(ended_at);
+   CREATE INDEX IF NOT EXISTS usage_task ON usage(task_id);`,
 ];
 
 /** An intent as the list shows it. */
@@ -219,6 +233,8 @@ export interface IntentStore {
   runOrder(intentId: number): TaskRecord[];
   /** The task a run built, found by its exact run id; `null` for any other run. */
   taskForRun(runId: string): TaskRecord | null;
+  /** Every task, of any application, whose stored status is one of these. */
+  tasksIn(statuses: readonly StoredTaskStatus[]): TaskRecord[];
   /** A task's runs, oldest first. */
   runsOf(taskId: number): TaskRun[];
   /**
@@ -1109,6 +1125,22 @@ export function openIntents(dataDir: string, options: OpenIntentsOptions = {}): 
         .query<TaskRow, [string]>('SELECT t.* FROM task_runs r JOIN tasks t ON t.id = r.task_id WHERE r.run_id = ?')
         .get(runId);
       return row === null ? null : toTask(row, statuses(row.app_id));
+    },
+
+    tasksIn(wanted) {
+      if (wanted.length === 0) return [];
+      const rows = db
+        .query<TaskRow, string[]>(`SELECT * FROM tasks WHERE status IN (${wanted.map(() => '?').join(', ')}) ORDER BY id`)
+        .all(...wanted);
+      const byApp = new Map<string, Map<string, StoredTaskStatus>>();
+      return rows.map((row) => {
+        let statusOf = byApp.get(row.app_id);
+        if (statusOf === undefined) {
+          statusOf = statuses(row.app_id);
+          byApp.set(row.app_id, statusOf);
+        }
+        return toTask(row, statusOf);
+      });
     },
 
     runsOf(taskId) {

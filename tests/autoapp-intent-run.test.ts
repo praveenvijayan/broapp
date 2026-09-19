@@ -1601,7 +1601,27 @@ describe('the Backlog panel', () => {
     const running = draw({
       ...opened,
       intent: { ...opened.intent, status: 'running' },
-      run: { taskId: first.id, attempt: 1, startedAt: Date.now(), lastTool: 'candidate.cycle', lastToolAt: Date.now(), approvals: 3, question: null },
+      run: {
+        taskId: first.id,
+        runId: `intent-${String(id)}-${first.slug}-a1`,
+        attempt: 1,
+        startedAt: Date.now(),
+        lastTool: 'candidate.cycle',
+        lastToolAt: Date.now(),
+        approvals: 3,
+        stage: 'building',
+        turn: 1,
+        maxTurns: 4,
+        maxAttempts: 2,
+        quietSince: Date.now(),
+        idleLimitMs: 480_000,
+        turnLimitMs: 1_200_000,
+        filesChanged: 1,
+        criteria: { passed: 0, total: 2 },
+        lastRefusal: null,
+        tokens: { input: 0, output: 0 },
+        question: null,
+      },
       tasks: [{ ...first, stored: 'in-progress', status: 'in-progress' }, second],
     });
     expect(running).toContain('candidate.cycle');
@@ -2057,4 +2077,124 @@ describe('15f: a backlog turn refused the same way four times is ended', () => {
     expect(result.events.filter((event) => event.type === 'tool-result' && event.tool === 'candidate.cycle')).toHaveLength(6);
     expect(result.events.some((event) => event.type === 'done')).toBe(true);
   }, 120_000);
+});
+
+describe('17a: where a run is, and what it used', () => {
+  // 2 (a builder's row), 9 and 12 (a run going).
+  test('a builder turn’s progress, the overview while it waits, and the row it leaves', async () => {
+    const slug = '0001-only-part';
+    const badEdit = (then: readonly FakeStep[]): FakeStep =>
+      tool(
+        'source.edit',
+        { appId: 'items', message: 'a hunk that matches nothing', hunks: [{ path: 'autoapp.json', find: 'nothing like this', replace: 'x' }] },
+        then,
+      );
+    const w = await world([badEdit([editOnly(slug, ['c1', 'c2'], [editEmpty('Empty one', [editEmpty('Empty two', [verify()])])])])]);
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    const task = w.intents.runOrder(id)[0];
+    if (task === undefined) throw new Error('one task');
+    const client = await connect(w.tab);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+
+    // Waiting on the first question: the edit landed after a refused one.
+    const first = await until(async () => (await client.call('launcher.intentGet', { id })).run?.question ?? null);
+    const a = (await client.call('launcher.intentGet', { id })).run;
+    if (a === null) throw new Error('a run');
+    expect(a.runId).toBe(`intent-${String(id)}-${slug}-a1`);
+    expect(a.stage).toBe('editing');
+    expect(a.turn).toBe(1);
+    expect(a.maxTurns).toBe(4);
+    expect(a.maxAttempts).toBe(2);
+    expect(a.idleLimitMs).toBe(8 * 60_000);
+    expect(a.turnLimitMs).toBe(120_000);
+    expect(a.filesChanged).toBe(1);
+    expect(a.criteria).toEqual({ passed: 0, total: 2 });
+    expect(a.lastRefusal?.tool).toBe('source.edit');
+    expect(a.lastRefusal?.reason).toMatch(/^not found in autoapp\.json/);
+    // Two completed steps of 11 in and 7 out, the third in flight.
+    expect(a.tokens).toEqual({ input: 22, output: 14 });
+    expect(a.quietSince).toBeGreaterThanOrEqual(a.startedAt);
+
+    // The overview, with the run going: all five blocks.
+    const overview = await client.call('launcher.overview', undefined);
+    expect(overview.needsYou.map((item) => item.kind)).toEqual(['question']);
+    expect(overview.needsYou[0]?.target).toEqual({ panel: 'backlog', appId: 'items', intentId: id, taskId: task.id, releaseId: null });
+    expect(overview.running).toMatchObject({
+      appId: 'items',
+      intentId: id,
+      taskSlug: slug,
+      taskTitle: task.title,
+      taskIndex: 1,
+      taskCount: 1,
+      modelId: 'fake-1',
+      stage: 'editing',
+    });
+    expect(overview.spend.task).toMatchObject({ inputTokens: 22, outputTokens: 14, atLeast: true, cost: null, unpricedTokens: 36 });
+    expect(overview.spend.run?.atLeast).toBe(true);
+    expect(overview.spend.today.inputTokens).toBeGreaterThanOrEqual(22);
+    expect(overview.backlog).toEqual([
+      expect.objectContaining({ appId: 'items', intentIds: [id], running: 1, done: 0, total: 1, estimate: null }),
+    ]);
+    expect(overview.apps.find((app) => app.appId === 'items')?.state).toBe('building');
+    expect(overview.recent).toEqual([]);
+
+    // quietSince moves on a tool result: the first question's answer is one.
+    await Bun.sleep(30);
+    await client.call('ai.chatConfirm', { runId: first.runId, callId: first.callId, approve: true });
+    const second = await until(async () => {
+      const question = (await client.call('launcher.intentGet', { id })).run?.question ?? null;
+      return question !== null && question.callId !== first.callId ? question : null;
+    });
+    const b = (await client.call('launcher.intentGet', { id })).run;
+    expect(b?.quietSince ?? 0).toBeGreaterThanOrEqual(a.quietSince + 30);
+    expect(b?.tokens.input).toBe(33);
+    await client.call('ai.chatConfirm', { runId: second.runId, callId: second.callId, approve: true });
+    await executor.idle();
+
+    expect(w.intents.task(task.id)?.stored).toBe('completed');
+    // The builder's turn left one row, with its task, and it is not partial:
+    // six steps of 11 in each.
+    const rows = w.intents.db
+      .query<{ run_id: string; task_id: number | null; app_id: string | null; model_id: string | null; partial: number; input_tokens: number }, []>(
+        'SELECT run_id, task_id, app_id, model_id, partial, input_tokens FROM usage',
+      )
+      .all();
+    expect(rows).toEqual([
+      { run_id: `intent-${String(id)}-${slug}-a1`, task_id: task.id, app_id: 'items', model_id: 'fake-1', partial: 0, input_tokens: 66 },
+    ]);
+    const after = await client.call('launcher.overview', undefined);
+    expect(after.running).toBeNull();
+    expect(after.spend.task).toBeNull();
+    expect(after.recent.map((event) => event.kind)).toEqual(['run-ended', 'task-completed']);
+    expect(after.needsYou.map((item) => item.kind)).toEqual(['activate']);
+    expect(after.apps.find((app) => app.appId === 'items')).toMatchObject({ state: 'needs-review', checks: { passed: 3, total: 3 } });
+  }, 240_000);
+
+  test('criteria follow the check, and a limit-ended turn and a failed task are remembered for alerts', async () => {
+    const slug = '0001-only-part';
+    // The one attempt checks one of two examples, then writes slowly enough
+    // that the idle limit ends it.
+    const slow: FakeStep = { kind: 'text', chunks: Array.from({ length: 30 }, () => 'thinking ') };
+    const w = await world([cycle(slug, ['c1'], [slow])], { maxAttempts: 1, idleTimeoutMs: 2_000, chunkDelayMs: 200 });
+    const { id } = submitted(w.intents, [plan('only-part')]);
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    const seen = await until(() => {
+      const run = executor.progress(id).run;
+      return run !== null && run.stage === 'checking' && run.criteria.passed === 1 ? run : null;
+    });
+    expect(seen.criteria).toEqual({ passed: 1, total: 2 });
+    await executor.idle();
+    const kinds = executor.recent().map((event) => event.kind);
+    expect(kinds).toEqual(['run-ended', 'task-failed', 'turn-limit']);
+    expect(executor.recent().find((event) => event.kind === 'turn-limit')?.text).toContain('no tool call');
+    // The advice question is a turn a person would not think of, and it is counted too.
+    const task = w.intents.runOrder(id)[0];
+    const rows = w.intents.db
+      .query<{ run_id: string; task_id: number | null; app_id: string | null }, []>('SELECT run_id, task_id, app_id FROM usage ORDER BY ended_at')
+      .all();
+    expect(rows.map((row) => row.run_id.replace(/-\d+$/, ''))).toEqual([`intent-${String(id)}-${slug}-a1`, `advice-${String(task?.id)}`]);
+    expect(rows.every((row) => row.task_id === task?.id && row.app_id === 'items')).toBe(true);
+  }, 240_000);
 });

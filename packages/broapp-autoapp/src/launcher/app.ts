@@ -28,6 +28,7 @@ import {
   type IntentStore,
   type TaskRecord,
 } from '../intent/index.ts';
+import { readPrices, writePrices } from '../intent/prices.ts';
 import type { EventLog } from '../knowledge/log.ts';
 import { confirmLesson, retireLesson, writeLesson } from '../knowledge/review.ts';
 import type { Session } from '../knowledge/session.ts';
@@ -54,6 +55,7 @@ import { activate } from './activate.ts';
 import { appIds, listApps, serving as servingChild } from './apps.ts';
 import { launcherContract, type LauncherContract } from './contract.ts';
 import { createApplication } from './create.ts';
+import { readOverview, type LiveUsage } from './overview.ts';
 import type { Journal } from './journal.ts';
 import { removeApplication } from './remove.ts';
 import { addServing, removeServing } from './serving.ts';
@@ -109,6 +111,11 @@ export interface CreateLauncherAppOptions {
    * calls it after its reply has gone. Absent, the route answers `unavailable`.
    */
   readonly quit?: () => void;
+  /**
+   * What each live turn has used so far, for `launcher.overview`. Absent, a
+   * running turn's tokens are not in any total.
+   */
+  readonly live?: () => readonly LiveUsage[];
 }
 
 /** How long `launcher.quit` waits after answering before the launcher begins to stop. */
@@ -521,6 +528,75 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   }));
 
   host.operation('launcher.intentWithdraw', ({ id }, context) => ({ status: byPerson(context).withdraw(id).status }));
+
+  /**
+   * One read for the person who has just come back: what needs them, the run
+   * and its stage, spend, what is left, the applications. It starts nothing
+   * and writes nothing.
+   */
+  host.operation('launcher.overview', () => {
+    const overview = readOverview({
+      layout: root,
+      supervisor,
+      journal,
+      states,
+      ...(options.intents === undefined ? {} : { intents: options.intents }),
+      ...(options.executor === undefined ? {} : { executor: options.executor }),
+      ...(options.live === undefined ? {} : { live: options.live }),
+      ...(options.intents === undefined
+        ? {}
+        : { modelOf: (task: TaskRecord) => modelFor(task, readTierModels((options.intents as IntentStore).dataDir)) }),
+    });
+    // Every array and record copied: the route's output type is mutable.
+    return {
+      needsYou: overview.needsYou.map((item) => ({ ...item, target: { ...item.target } })),
+      running:
+        overview.running === null
+          ? null
+          : {
+              ...overview.running,
+              criteria: { ...overview.running.criteria },
+              lastRefusal: overview.running.lastRefusal === null ? null : { ...overview.running.lastRefusal },
+              tokens: { ...overview.running.tokens },
+            },
+      spend: {
+        task: overview.spend.task === null ? null : { ...overview.spend.task },
+        run: overview.spend.run === null ? null : { ...overview.spend.run },
+        today: { ...overview.spend.today },
+        budgetDay: overview.spend.budgetDay,
+        todayByModel: overview.spend.todayByModel.map((part) => ({ ...part })),
+      },
+      backlog: overview.backlog.map((block) => ({
+        ...block,
+        intentIds: [...block.intentIds],
+        estimate: block.estimate === null ? null : { ...block.estimate },
+      })),
+      apps: overview.apps.map((app) => ({ ...app, checks: app.checks === null ? null : { ...app.checks } })),
+      recent: overview.recent.map((event) => ({ ...event })),
+    };
+  });
+
+  /** What each model costs, as the person wrote it, and the day's budget. */
+  host.operation('launcher.pricesGet', () => {
+    const prices = readPrices(intents().dataDir);
+    return {
+      models: Object.entries(prices.models).map(([modelId, price]) => ({ modelId, input: price.input, output: price.output })),
+      budgetDay: prices.budgetDay,
+    };
+  });
+
+  // A person's prices and nobody else's: a model has no business saying what
+  // it costs, and the route refuses every channel but `user` as the backlog's do.
+  host.operation('launcher.pricesSet', ({ models, budgetDay }, context) => {
+    const store = intents();
+    if (context.channel !== 'user') throw publicError.rejected('Only a person sets prices, from the launcher.');
+    const prices = writePrices(store.dataDir, models, budgetDay);
+    options.log?.event('log', `prices set for ${String(Object.keys(prices.models).length)} model(s) by the person`);
+    return {
+      models: Object.entries(prices.models).map(([modelId, price]) => ({ modelId, input: price.input, output: price.output })),
+      budgetDay: prices.budgetDay,
+    };
+  });
 
   host.operation('launcher.intentModelsSet', (models, context) => {
     const store = byPerson(context);

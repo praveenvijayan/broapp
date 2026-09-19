@@ -100,6 +100,22 @@ export interface CreateDistillerInput {
   /** The engineer's instructions, whose hash a lesson records as what it was written against. */
   readonly instructions: string;
   readonly autoappVersion: string;
+  /**
+   * Told once per question what it used, when the question ends, however it
+   * ends: `usage` is absent when the provider never said. The launcher keeps a
+   * usage row for it, because a question nobody sees is still one somebody
+   * pays for.
+   */
+  readonly onUsage?: (used: DistilUsage) => void;
+}
+
+/** What one distillation question used. */
+export interface DistilUsage {
+  readonly caseId: number;
+  readonly appId: string;
+  readonly startedAt: number;
+  readonly ms: number;
+  readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
 }
 
 interface EpisodeRow {
@@ -341,8 +357,13 @@ function assemble(knowledge: Knowledge, episode: EpisodeRow, prior: Prior | null
   return parts.join('\n');
 }
 
-/** Ask the model, and validate what it says. */
-async function ask(model: LanguageModel, prompt: string, signal: AbortSignal): Promise<Diagnosis> {
+/** Ask the model, and validate what it says; `used` hears what it used before the answer is judged. */
+async function ask(
+  model: LanguageModel,
+  prompt: string,
+  signal: AbortSignal,
+  used: (usage: { inputTokens: number; outputTokens: number }) => void = () => undefined,
+): Promise<Diagnosis> {
   const result = streamObject({
     model,
     // Without `validate`, `jsonSchema` validates nothing: it tells the model the
@@ -358,6 +379,8 @@ async function ask(model: LanguageModel, prompt: string, signal: AbortSignal): P
   // drains it on its own, and awaiting `object` alone waits for ever. The
   // partial objects are unvalidated and are not used.
   for await (const partial of result.partialObjectStream) void partial;
+  const usage = await result.usage;
+  used({ inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0 });
   return DIAGNOSIS.parse(await result.object);
 }
 
@@ -536,11 +559,20 @@ export function createDistiller(input: CreateDistillerInput): Distiller {
     const controller = new AbortController();
     inflight = controller;
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(DISTILL_TIMEOUT_MS)]);
+    const startedAt = Date.now();
+    let used: { inputTokens: number; outputTokens: number } | undefined;
+    let asked = false;
     try {
       const prior = priorLesson(knowledge, episode);
       const prompt = assemble(knowledge, episode, prior);
       const model = await input.model();
-      const answer = await abortable(ask(model, prompt, signal), signal);
+      asked = true;
+      const answer = await abortable(
+        ask(model, prompt, signal, (usage) => {
+          used = usage;
+        }),
+        signal,
+      );
       record(episode, answer, prior);
     } catch (cause) {
       if (controller.signal.aborted && closed) {
@@ -563,6 +595,21 @@ export function createDistiller(input: CreateDistillerInput): Distiller {
       );
     } finally {
       inflight = null;
+      // Only a question that reached the model: one that could not get a model
+      // asked nobody and used nothing.
+      if (asked) {
+        try {
+          input.onUsage?.({
+            caseId: id,
+            appId: episode.app_id,
+            startedAt,
+            ms: Date.now() - startedAt,
+            ...(used === undefined ? {} : { usage: used }),
+          });
+        } catch (cause) {
+          log.error(`[autoapp] could not keep what distilling case ${String(id)} used: ${sanitise(String(cause instanceof Error ? cause.message : cause))}`);
+        }
+      }
     }
   }
 

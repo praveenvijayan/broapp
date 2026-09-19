@@ -41,6 +41,7 @@ import { exampleIdFor, FAILURE_MARK, renderPlan, validateGraph } from './plan.ts
 import { refusalError, refusalLine, refusalsOf, type RefusalGroup } from './refusals.ts';
 import type { IntentStore } from './store.ts';
 import { NOT_AN_ATTEMPT, type StoredTaskStatus, type TaskRecord } from './types.ts';
+import { recordUsage } from './usage.ts';
 
 /**
  * The run's standing answer: the tools a builder's turn is approved for
@@ -404,8 +405,19 @@ export function advicePrompt(
   ].join('\n');
 }
 
-/** Ask for advice and validate it, exactly as the distiller asks its question. */
-async function askAdvice(model: LanguageModel, prompt: string, signal: AbortSignal): Promise<Advice> {
+/**
+ * Ask for advice and validate it, exactly as the distiller asks its question.
+ *
+ * `used` is told what the question used as soon as the provider says, before
+ * the answer is validated: a question whose answer is refused still cost what
+ * it cost.
+ */
+async function askAdvice(
+  model: LanguageModel,
+  prompt: string,
+  signal: AbortSignal,
+  used: (usage: { inputTokens: number; outputTokens: number }) => void,
+): Promise<Advice> {
   const result = streamObject({
     model,
     schema: jsonSchema(ADVICE.toJsonSchema()),
@@ -416,6 +428,8 @@ async function askAdvice(model: LanguageModel, prompt: string, signal: AbortSign
   });
   // `object` settles only once the stream has been read to its end.
   for await (const partial of result.partialObjectStream) void partial;
+  const usage = await result.usage;
+  used({ inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0 });
   return ADVICE.parse(await result.object);
 }
 
@@ -429,15 +443,120 @@ function changedLines(sourceDir: string, from: string, to: string): number | nul
   return count(/(\d+) insertions?\(\+\)/) + count(/(\d+) deletions?\(-\)/);
 }
 
-/** Where the run is, for the panel. */
+/** Which part of the work a builder's turn is in. */
+export type RunStage = 'reading' | 'editing' | 'building' | 'checking';
+
+/** What {@link stageOf} reads of a turn's events: the AI layer's `tool-call`, `tool-result` and `confirm`. */
+export interface StageEvent {
+  readonly type: string;
+  readonly tool?: string;
+  readonly output?: unknown;
+  readonly denied?: boolean;
+}
+
+/** The tools whose start is a build. */
+const BUILD_TOOLS: readonly string[] = ['candidate.cycle', 'candidate.build'];
+/** The tools whose start, or whose step's question, is a check. */
+const CHECK_TOOLS: readonly string[] = ['candidate.preview', 'candidate.check', 'preview.try'];
+
+/** Whether a result reports a build that did not end in a checked preview. */
+function stoppedShort(tool: string, output: unknown): boolean {
+  if (typeof output !== 'object' || output === null) return true;
+  const record = output as { error?: unknown; ok?: unknown; build?: { ok?: unknown; declined?: unknown }; preview?: { started?: unknown; declined?: unknown } };
+  if (record.error !== undefined) return true;
+  if (tool === 'candidate.build') return record.ok !== true;
+  const build = record.build;
+  if (build === undefined || build.declined === true || build.ok === false) return true;
+  const preview = record.preview;
+  return preview !== undefined && (preview.declined === true || preview.started === false);
+}
+
+/**
+ * Which stage a builder's turn is in, from its tool events, in order.
+ *
+ * `reading` until an edit lands — a `source.edit` or `source.change` that
+ * succeeded, or a cycle whose patch changed a file; `editing` after it.
+ * `building` from the start of a cycle or a `candidate.build`; `checking` from
+ * a preview or a check, whether called alone or asked as a cycle's step. It
+ * moves back as the turn does: a build that failed, was declined, or whose
+ * preview would not start returns the turn to `editing` — or to `reading` when
+ * nothing has landed — so a failed build followed by an edit is `editing`
+ * again. A refused edit changes nothing, and a turn that has called nothing is
+ * `reading`. Pure: the same events give the same stage.
+ */
+export function stageOf(events: readonly StageEvent[]): RunStage {
+  let stage: RunStage = 'reading';
+  let landed = false;
+  for (const event of events) {
+    const tool = event.tool ?? '';
+    if (event.type === 'tool-call') {
+      if (BUILD_TOOLS.includes(tool)) stage = 'building';
+      else if (CHECK_TOOLS.includes(tool)) stage = 'checking';
+    } else if (event.type === 'confirm') {
+      if (tool === 'candidate.build') stage = 'building';
+      else if (CHECK_TOOLS.includes(tool)) stage = 'checking';
+    } else if (event.type === 'tool-result') {
+      if (event.denied !== true && landedEdit(tool, event.output)) landed = true;
+      if (tool === 'source.edit' || tool === 'source.change') {
+        if (event.denied !== true && landedEdit(tool, event.output)) stage = 'editing';
+      } else if (BUILD_TOOLS.includes(tool) && (event.denied === true || stoppedShort(tool, event.output))) {
+        stage = landed ? 'editing' : 'reading';
+      }
+    }
+  }
+  return stage;
+}
+
+/** Where the run is, for the panel and the overview. */
 export interface RunProgress {
   readonly taskId: number;
+  /** The turn's run id: what an alert about it is keyed by. */
+  readonly runId: string;
+  /** The task's turns so far, across runs: the number in the run id. */
   readonly attempt: number;
   readonly startedAt: number;
   readonly lastTool: string | null;
   readonly lastToolAt: number | null;
   readonly approvals: number;
+  readonly stage: RunStage;
+  /** This task's turns in this run, and the most it may take. */
+  readonly turn: number;
+  readonly maxTurns: number;
+  /** The attempts that count against a task in one run. */
+  readonly maxAttempts: number;
+  /** The last tool call or result, or the turn's start: what the idle limit counts from. */
+  readonly quietSince: number;
+  readonly idleLimitMs: number;
+  readonly turnLimitMs: number;
+  /** Distinct paths this task's turns have edited. */
+  readonly filesChanged: number;
+  /** The task's criteria whose example passed, by the last check or the last verdict; zero before either. */
+  readonly criteria: { readonly passed: number; readonly total: number };
+  /** The newest refusal of this turn, reason cut at 160. */
+  readonly lastRefusal: { readonly tool: string; readonly reason: string } | null;
+  /** What the turn has used so far, from its completed steps. */
+  readonly tokens: { readonly input: number; readonly output: number };
 }
+
+/** What happened in a run that a person might want to hear about when they are not looking. */
+export type RunEventKind = 'task-completed' | 'task-failed' | 'turn-limit' | 'run-ended' | 'provider-error';
+
+/** One such thing, kept in memory for the life of the launcher. */
+export interface RunEvent {
+  /** Unique for the event: the run id and the kind, or the intent's run and `run-ended`. */
+  readonly key: string;
+  readonly kind: RunEventKind;
+  readonly appId: string;
+  readonly intentId: number;
+  readonly runId: string | null;
+  readonly taskSlug: string | null;
+  /** One sentence a person reads. */
+  readonly text: string;
+  readonly at: number;
+}
+
+/** How many run events the executor remembers. */
+export const RECENT_RUN_EVENTS = 20;
 
 /** A question the standing answer did not cover, waiting for the person. */
 export interface RunQuestion {
@@ -487,6 +606,17 @@ export interface CreateExecutorOptions {
    * Absent, the host builds nothing.
    */
   readonly hostCycle?: (input: unknown, envelope: Envelope, signal: AbortSignal) => Promise<unknown>;
+  /**
+   * What a running turn has used so far, as the AI layer's `onUsageSoFar`
+   * last said; `null` before its first step completes. Absent, a running
+   * turn's tokens read as zero.
+   */
+  readonly usageSoFar?: (runId: string) => { readonly inputTokens: number; readonly outputTokens: number } | null;
+  /**
+   * The paths the given runs edited, as the knowledge log's `edit` events
+   * recorded them. Absent, only what this run's own results showed is counted.
+   */
+  readonly editedPaths?: (runIds: readonly string[]) => readonly string[];
 }
 
 /** The executor. One run per launcher, one task at a time. */
@@ -510,6 +640,8 @@ export interface Executor {
   active(): { readonly intentId: number; readonly appId: string } | null;
   /** What the panel shows about an intent's run. */
   progress(intentId: number): { readonly run: RunProgress | null; readonly question: RunQuestion | null };
+  /** What happened in runs since the launcher started, newest first, at most {@link RECENT_RUN_EVENTS}. */
+  recent(): readonly RunEvent[];
   /** Resolves when no run is active. */
   idle(): Promise<void>;
 }
@@ -522,14 +654,26 @@ type Ending =
   /** Not the builder's attempt: the provider failed, or the model never acted. */
   | { readonly kind: 'provider'; readonly note: string; readonly reason: string };
 
+/** The part of a turn's progress set as it happens; the rest is derived when read. */
+type RunBase = Pick<RunProgress, 'taskId' | 'runId' | 'attempt' | 'startedAt' | 'lastTool' | 'lastToolAt' | 'approvals' | 'turn'>;
+
 interface Active {
   readonly intentId: number;
   readonly appId: string;
   controller: AbortController | null;
   runId: string | null;
   taskId: number | null;
-  run: RunProgress | null;
+  /** What the turn in hand began with; the rest of {@link RunProgress} is derived when it is read. */
+  run: RunBase | null;
   questions: RunQuestion[];
+  /** The turn's tool events, in order, for {@link stageOf}. */
+  events: StageEvent[];
+  /** The last tool call or result of the turn, or its start. */
+  quietSince: number;
+  /** Paths this task's turns in this run showed as edited. */
+  taskFiles: Set<string>;
+  /** The newest refusal of the turn. */
+  lastRefusal: RefusalGroup | null;
   ending: Ending | null;
   /** The calls of this turn whose tool is running now. */
   inFlight: Set<string>;
@@ -624,6 +768,23 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
 
   let current: Active | null = null;
   let loop: Promise<void> = Promise.resolve();
+  /** What happened in runs, newest last; the overview reads it for alerts. */
+  const recentEvents: RunEvent[] = [];
+
+  /** Remember one run event, once per key. */
+  const remember = (event: Omit<RunEvent, 'at'>): void => {
+    if (recentEvents.some((seen) => seen.key === event.key)) return;
+    recentEvents.push({ ...event, at: Date.now() });
+    if (recentEvents.length > RECENT_RUN_EVENTS) recentEvents.splice(0, recentEvents.length - RECENT_RUN_EVENTS);
+  };
+
+  /** The paths a result shows as edited: `changed` of an edit, `applied.changed` of a cycle. */
+  const pathsIn = (tool: string, output: unknown): string[] => {
+    if (!landedEdit(tool, output)) return [];
+    const record = output as { changed?: unknown; applied?: { changed?: unknown } };
+    const list = tool === 'candidate.cycle' ? record.applied?.changed : record.changed;
+    return Array.isArray(list) ? list.filter((path): path is string => typeof path === 'string') : [];
+  };
 
   /** Tell whoever keeps derived data that a task's attempt is over. Never a reason to fail. */
   const ended = (task: TaskRecord): void => {
@@ -691,9 +852,16 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
   async function advise(task: TaskRecord, reasons: readonly string[], runIds: readonly string[]): Promise<void> {
     const failures = states.get(task.appId).cycle?.failures.map((failure) => failure.summary) ?? [];
     const refusals = { last: refusedIn(runIds[runIds.length - 1]), before: refusedIn(runIds[runIds.length - 2]) };
+    // The advice question is a turn too, on the Settings model, and it costs
+    // what it costs whether or not its answer can be read: one usage row,
+    // partial with zeros when the provider never said.
+    const started = Date.now();
+    let used: { inputTokens: number; outputTokens: number } | undefined;
     try {
       const model = await options.ai().model();
-      const answer = await askAdvice(model, advicePrompt(task, reasons, failures, refusals), AbortSignal.timeout(ADVICE_TIMEOUT_MS));
+      const answer = await askAdvice(model, advicePrompt(task, reasons, failures, refusals), AbortSignal.timeout(ADVICE_TIMEOUT_MS), (usage) => {
+        used = usage;
+      });
       store.setAdvice(task.id, { ...answer, at: Date.now() });
       note(`task ${task.slug}: the main model advises ${answer.advice}`, task.appId);
     } catch (cause) {
@@ -701,6 +869,23 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         `task ${task.slug}: no advice could be read from the main model (${sanitise(String(cause instanceof Error ? cause.message : cause)).slice(0, 200)})`,
         task.appId,
       );
+    }
+    try {
+      const modelId = (await options.ai().registry.settings()).modelId;
+      recordUsage(store, {
+        runId: `advice-${String(task.id)}-${String(started)}`,
+        appId: task.appId,
+        taskId: task.id,
+        modelId,
+        inputTokens: used?.inputTokens ?? 0,
+        outputTokens: used?.outputTokens ?? 0,
+        partial: used === undefined,
+        steps: 0,
+        ms: Date.now() - started,
+        endedAt: Date.now(),
+      });
+    } catch (cause) {
+      logger.error(`[autoapp] could not keep what the advice question used: ${String(cause instanceof Error ? cause.message : cause)}`);
     }
   }
 
@@ -783,9 +968,11 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     const tool = event.tool ?? '';
     if (landedEdit(tool, event.output)) {
       active.landed += 1;
+      for (const path of pathsIn(tool, event.output)) active.taskFiles.add(path);
       return;
     }
     const group = refusalOf(tool, event.output, event.denied === true);
+    if (group !== null) active.lastRefusal = group;
     if (group === null || active.stuck !== null || active.ending !== null) return;
     const key = `${group.route} ${group.kind}`;
     const seen = active.refusals.get(key);
@@ -822,6 +1009,10 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         active.providerError = event.message ?? 'The AI provider returned an error.';
       }
       if (event.type === 'tool-call') active.toolCalls += 1;
+      if (event.type === 'tool-call' || event.type === 'tool-result' || event.type === 'confirm') {
+        active.events.push({ type: event.type, tool: event.tool, output: event.output, denied: event.denied });
+      }
+      if (event.type === 'tool-call' || event.type === 'tool-result') active.quietSince = Date.now();
       if (event.type === 'tool-call' && run !== null) {
         active.run = { ...run, lastTool: event.tool ?? null, lastToolAt: Date.now() };
       } else if (event.type === 'confirm' && run !== null) {
@@ -945,6 +1136,7 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       break;
     }
     const runIds: string[] = [];
+    active.taskFiles = new Set();
     // Attempts that count against `maxAttempts`, and the most criteria any
     // attempt of this run has passed: an attempt that gets further than every
     // one before it is not counted, up to `maxTurns` turns.
@@ -959,6 +1151,15 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
           task = move(task, 'failed', reason);
           store.setFailure(task.id, { reasons: [reason], runIds, at: Date.now() });
           stopIntent(active, `${task.slug} failed: ${reason}`);
+          remember({
+            key: `${task.slug}:${String(task.attempts)}:task-failed`,
+            kind: 'task-failed',
+            appId: active.appId,
+            intentId: active.intentId,
+            runId: null,
+            taskSlug: task.slug,
+            text: `${task.title} failed: ${reason}`,
+          });
           return false;
         }
       }
@@ -984,7 +1185,11 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       active.landed = 0;
       active.turnRev = revBefore;
       active.stuck = null;
-      active.run = { taskId: task.id, attempt: turnNumber, startedAt: Date.now(), lastTool: null, lastToolAt: null, approvals: 0 };
+      active.events = [];
+      active.lastRefusal = null;
+      const startedAt = Date.now();
+      active.quietSince = startedAt;
+      active.run = { taskId: task.id, runId, attempt: turnNumber, startedAt, lastTool: null, lastToolAt: null, approvals: 0, turn };
 
       const limit = AbortSignal.timeout(turnTimeoutMs);
       let idle = false;
@@ -1106,7 +1311,40 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         });
         store.setAdvice(task.id, null);
         move(task, 'completed', hostBuilt ? HOST_BUILT_COMPLETED : 'a verified build passes an example for every criterion', runId);
+        remember({
+          key: `${runId}:task-completed`,
+          kind: 'task-completed',
+          appId: active.appId,
+          intentId: active.intentId,
+          runId,
+          taskSlug: task.slug,
+          text: `${task.title} is built and checked.`,
+        });
         return true;
+      }
+
+      // A turn a limit ended is said on its own, whatever follows it: the
+      // person hears that the clock or a loop ended a turn, and that a retry
+      // may follow, before they hear whether the task failed.
+      // Read again rather than narrowed: the follower sets it while the turn runs.
+      const stuck = active.stuck as Active['stuck'];
+      const limitSentence = limit.aborted
+        ? 'The turn ran out of time.'
+        : idle
+          ? idleSentence(idleTimeoutMs)
+          : stuck === null
+            ? null
+            : stuckSentence(stuck.count, stuck.group);
+      if (limitSentence !== null) {
+        remember({
+          key: `${runId}:turn-limit`,
+          kind: 'turn-limit',
+          appId: active.appId,
+          intentId: active.intentId,
+          runId,
+          taskSlug: task.slug,
+          text: `${task.slug}: ${limitSentence}`,
+        });
       }
 
       lastReasons = verdict.reasons;
@@ -1119,6 +1357,16 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         store.setFailure(task.id, { reasons: verdict.reasons, runIds, at: Date.now() });
         stopIntent(active, `${task.slug} failed after ${plural(turn, 'attempt', 'attempts')}.`);
         await advise(task, verdict.reasons, runIds);
+        // After the advice, so that when the person looks, it is there.
+        remember({
+          key: `${runId}:task-failed`,
+          kind: 'task-failed',
+          appId: active.appId,
+          intentId: active.intentId,
+          runId,
+          taskSlug: task.slug,
+          text: `${task.title} failed after ${plural(turn, 'attempt', 'attempts')}.`,
+        });
         return false;
       }
       // Another attempt: written down as the failure it was, then queued again.
@@ -1144,6 +1392,16 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
       // the advice question would go to the same provider.
       if (task?.stored === 'in-progress') move(task, 'interrupted', ending.note);
       stopIntent(active, ending.reason);
+      const runId = task?.runIds[task.runIds.length - 1] ?? null;
+      remember({
+        key: `${runId ?? `intent-${String(active.intentId)}`}:provider-error`,
+        kind: 'provider-error',
+        appId: active.appId,
+        intentId: active.intentId,
+        runId,
+        taskSlug: task?.slug ?? null,
+        text: ending.reason,
+      });
       return false;
     }
     if (task?.stored === 'in-progress') {
@@ -1191,6 +1449,72 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         // The intent is still stopped below.
       }
       stopIntent(active, `The run stopped on an error: ${sanitise(message).slice(0, 300)}`);
+    } finally {
+      runEnded(active);
+    }
+  }
+
+  /**
+   * The turn in hand's progress, derived now from what the executor holds:
+   * no timer of its own, and nothing written.
+   */
+  function progressOf(active: Active): RunProgress | null {
+    const base = active.run;
+    if (base === null) return null;
+    const task = store.task(base.taskId);
+    // The criteria: the last check when it ran any of this task's examples,
+    // else the last verdict's, else nothing yet.
+    let passed = 0;
+    const total = task?.criteria.length ?? 0;
+    if (task !== null) {
+      const checks = new Map(states.get(active.appId).checks?.results.map((check) => [check.id, check.passed]) ?? []);
+      const ids = task.criteria.map((criterion) => exampleIdFor(task.slug, criterion.id));
+      passed = ids.some((id) => checks.has(id))
+        ? ids.filter((id) => checks.get(id) === true).length
+        : task.criteria.filter((criterion) => criterion.passed === true).length;
+    }
+    const files = new Set(active.taskFiles);
+    if (task !== null && options.editedPaths !== undefined) {
+      try {
+        for (const path of options.editedPaths(task.runIds)) files.add(path);
+      } catch (cause) {
+        logger.error(`[autoapp] could not read what a task edited: ${String(cause instanceof Error ? cause.message : cause)}`);
+      }
+    }
+    const soFar = options.usageSoFar?.(base.runId) ?? null;
+    const refusal = active.lastRefusal;
+    return {
+      ...base,
+      stage: stageOf(active.events),
+      maxTurns,
+      maxAttempts,
+      quietSince: active.quietSince,
+      idleLimitMs: idleTimeoutMs,
+      turnLimitMs: turnTimeoutMs,
+      filesChanged: files.size,
+      criteria: { passed, total },
+      lastRefusal: refusal === null ? null : { tool: refusal.route, reason: refusalError(refusal, 160) },
+      tokens: { input: soFar?.inputTokens ?? 0, output: soFar?.outputTokens ?? 0 },
+    };
+  }
+
+  /** Remember that a run finished or stopped, with the sentence the intent was left with. */
+  function runEnded(active: Active): void {
+    try {
+      const intent = store.get(active.intentId)?.intent;
+      if (intent === undefined) return;
+      const finished = intent.status === 'done';
+      remember({
+        key: `intent-${String(active.intentId)}-${String(intent.startedAt ?? 0)}:run-ended`,
+        kind: 'run-ended',
+        appId: active.appId,
+        intentId: active.intentId,
+        runId: null,
+        taskSlug: null,
+        text: finished ? RUN_FINISHED : `The run stopped: ${intent.stopReason ?? 'no reason was given'}`,
+      });
+    } catch (cause) {
+      logger.error(`[autoapp] could not note the end of a run: ${String(cause instanceof Error ? cause.message : cause)}`);
     }
   }
 
@@ -1258,6 +1582,10 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
         landed: 0,
         turnRev: 'no-git',
         stuck: null,
+        events: [],
+        quietSince: Date.now(),
+        taskFiles: new Set(),
+        lastRefusal: null,
       };
       current = active;
       loop = drive(active).finally(() => {
@@ -1321,7 +1649,11 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
     progress(intentId) {
       const active = current;
       if (active === null || active.intentId !== intentId) return { run: null, question: null };
-      return { run: active.run, question: active.questions[0] ?? null };
+      return { run: progressOf(active), question: active.questions[0] ?? null };
+    },
+
+    recent() {
+      return [...recentEvents].reverse();
     },
 
     async idle() {

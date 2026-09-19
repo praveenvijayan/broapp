@@ -775,6 +775,82 @@ describe('15d: a turn’s usage, step by step', () => {
   });
 });
 
+describe('17a: a running turn says what it has used', () => {
+  /** The 15d script: two read tools, then words; each fake step reports 11 in and 7 out. */
+  const THREE_STEPS: readonly FakeStep[] = [
+    {
+      kind: 'tool',
+      name: 'look',
+      input: { q: 1 },
+      then: [{ kind: 'tool', name: 'peek', input: { q: 2 }, then: [{ kind: 'text', chunks: ['Looked ', 'and peeked.'] }] }],
+    },
+  ];
+
+  /** The events 15d captured for this script before either change. */
+  const TODAY =
+    '[{"type":"tool-call","callId":"call-0","tool":"look","input":{"q":1},"permission":"read"},{"type":"tool-result","callId":"call-0","tool":"look","output":{"ok":"look"}},{"type":"tool-call","callId":"call-1","tool":"peek","input":{"q":2},"permission":"read"},{"type":"tool-result","callId":"call-1","tool":"peek","output":{"ok":"peek"}},{"type":"text","text":"Looked "},{"type":"text","text":"and peeked."},{"type":"usage","inputTokens":33,"outputTokens":21},{"type":"done"}]';
+
+  async function built(hook?: (runId: string, soFar: { inputTokens: number; outputTokens: number }) => void): Promise<{
+    ai: Ai;
+    logger: ReturnType<typeof recordingLogger>;
+    ended: { usage: unknown; modelId: unknown }[];
+  }> {
+    const fake = createFakeAdapter({ script: THREE_STEPS });
+    const gate = createGate({ appId: 'so-far-test', releaseId: 'so-far-test' });
+    const read = (name: string) =>
+      guardedTool(gate, { name, effect: 'read', description: name, inputSchema: { type: 'object' }, run: () => Promise.resolve({ ok: name }) });
+    const logger = recordingLogger();
+    const ended: { usage: unknown; modelId: unknown }[] = [];
+    const ai = createAi({
+      dataDir: fresh(),
+      providers: [fake],
+      app: { name: 'test', purpose: 'counting usage as it goes' },
+      fetch: noNetwork,
+      logger,
+      tools: { look: read('look'), peek: read('peek') },
+      onRunEnd: (_runId, _status, _summary, detail) => ended.push({ usage: detail?.usage, modelId: detail?.modelId }),
+      ...(hook === undefined ? {} : { onUsageSoFar: hook }),
+    });
+    await ai.registry.update({ provider: 'fake', modelId: 'fake-1' });
+    return { ai, logger, ended };
+  }
+
+  test('called once per completed step with a growing subtotal that ends at the turn’s usage; the events do not change', async () => {
+    const seen: { runId: string; inputTokens: number; outputTokens: number }[] = [];
+    const { ai, ended } = await built((runId, soFar) => seen.push({ runId, ...soFar }));
+    const result = await ai.turn({ runId: 'run-so-far-1', message: 'go' }, { answer: () => true });
+    expect(seen).toEqual([
+      { runId: 'run-so-far-1', inputTokens: 11, outputTokens: 7 },
+      { runId: 'run-so-far-1', inputTokens: 22, outputTokens: 14 },
+      { runId: 'run-so-far-1', inputTokens: 33, outputTokens: 21 },
+    ]);
+    const last = seen[seen.length - 1];
+    expect(ended).toEqual([{ usage: { inputTokens: last?.inputTokens, outputTokens: last?.outputTokens }, modelId: 'fake-1' }]);
+    expect(JSON.stringify(result.events)).toBe(TODAY);
+    ai.close();
+  });
+
+  test('a hook that throws is logged and the turn goes on as if it were not there', async () => {
+    const { ai, logger, ended } = await built(() => {
+      throw new Error('the listener broke');
+    });
+    const result = await ai.turn({ runId: 'run-so-far-2', message: 'go' }, { answer: () => true });
+    expect(result.status).toBe('succeeded');
+    expect(JSON.stringify(result.events)).toBe(TODAY);
+    expect(logger.errors.filter((line) => line.includes('onUsageSoFar hook failed: the listener broke'))).toHaveLength(3);
+    expect(ended[0]?.usage).toEqual({ inputTokens: 33, outputTokens: 21 });
+    ai.close();
+  });
+
+  test('a turn that sets no hook emits byte for byte what it emitted before, and its end names the model', async () => {
+    const { ai, ended } = await built();
+    const result = await ai.turn({ runId: 'run-so-far-3', message: 'go' }, { answer: () => true });
+    expect(JSON.stringify(result.events)).toBe(TODAY);
+    expect(ended).toEqual([{ usage: { inputTokens: 33, outputTokens: 21 }, modelId: 'fake-1' }]);
+    ai.close();
+  });
+});
+
 describe('15e: a turn too long to expand gives its newest calls', () => {
   /** One read and its result: an assistant message with one call, and the tool message answering it. */
   const pair = (n: number, outputChars: number): ResponseMessage[] => [

@@ -299,16 +299,87 @@ const runQuestion = s.object({
   expiresAt: count,
 });
 
-/** Where a running intent is, kept in memory by the executor. */
-const runProgress = s.object({
+/** The stages a builder's turn moves through; a test holds it equal to the executor's. */
+export const RUN_STAGE_NAMES = ['reading', 'editing', 'building', 'checking'] as const;
+
+/** Where a running intent is, kept in memory by the executor and derived when read. */
+const runProgressFields = {
   taskId: count,
+  runId: s.string({ max: 200 }),
   attempt: count,
   startedAt: count,
   lastTool: s.nullable(s.string({ max: 100 })),
   lastToolAt: s.nullable(count),
   approvals: count,
+  stage: s.enum(RUN_STAGE_NAMES),
+  turn: count,
+  maxTurns: count,
+  maxAttempts: count,
+  /** The last tool call or result, or the turn's start. */
+  quietSince: count,
+  idleLimitMs: count,
+  turnLimitMs: count,
+  filesChanged: count,
+  criteria: s.object({ passed: count, total: count }),
+  lastRefusal: s.nullable(s.object({ tool: s.string({ max: 100 }), reason: s.string({ max: 400 }) })),
+  /** What the turn has used so far, from its completed steps. */
+  tokens: s.object({ input: count, output: count }),
+};
+
+const runProgress = s.object({
+  ...runProgressFields,
   /** The question waiting for the person, if the run brought one to them. */
   question: s.nullable(runQuestion),
+});
+
+/**
+ * A total, said honestly: `cost` is `null` when nothing in it is priced,
+ * `atLeast` when a partial row or a running turn is in it, and
+ * `unpricedTokens` the tokens of models nobody priced, which `cost` leaves out.
+ */
+const spendTotal = s.object({
+  inputTokens: count,
+  outputTokens: count,
+  cost: s.nullable(s.number({ min: 0 })),
+  atLeast: s.boolean(),
+  unpricedTokens: count,
+});
+
+export const NEEDS_YOU_KINDS = ['question', 'answer', 'advice', 'activate'] as const;
+export const RUN_EVENT_KINDS = ['task-completed', 'task-failed', 'turn-limit', 'run-ended', 'provider-error'] as const;
+
+const needsYouItem = s.object({
+  key: s.string({ max: 300 }),
+  kind: s.enum(NEEDS_YOU_KINDS),
+  appId: s.string({ max: 40 }),
+  title: s.string({ max: 80 }),
+  detail: s.string({ max: 400 }),
+  at: count,
+  expiresAt: s.nullable(count),
+  target: s.object({
+    panel: s.enum(['backlog', 'candidate']),
+    appId: s.string({ max: 40 }),
+    intentId: s.nullable(count),
+    taskId: s.nullable(count),
+    releaseId: s.nullable(s.string({ max: 64 })),
+  }),
+});
+
+const runEvent = s.object({
+  key: s.string({ max: 300 }),
+  kind: s.enum(RUN_EVENT_KINDS),
+  appId: s.string({ max: 40 }),
+  intentId: count,
+  runId: s.nullable(s.string({ max: 200 })),
+  taskSlug: s.nullable(s.string({ max: 80 })),
+  text: s.string({ max: 2_000 }),
+  at: count,
+});
+
+const priceRow = s.object({
+  modelId: s.string({ min: 1, max: 200 }),
+  input: s.number(),
+  output: s.number(),
 });
 
 const modelChoice = s.nullable(s.string({ min: 1, max: 200 }));
@@ -323,6 +394,20 @@ const appSummary = s.object({
   schemaVersion: s.nullable(s.number()),
   /** True while an activation for this application is unfinished in the journal. */
   activationPending: s.boolean(),
+});
+
+/** One application on the overview: its row, its state and its candidate's own checks. */
+const appBlock = s.object({
+  appId: s.string({ max: 40 }),
+  name: s.string({ max: 200 }),
+  currentRelease: s.nullable(s.string({ max: 64 })),
+  serving: s.boolean(),
+  pid: s.nullable(s.number()),
+  schemaVersion: s.nullable(s.number()),
+  activationPending: s.boolean(),
+  state: s.enum(['serving', 'stopped', 'building', 'needs-review']),
+  checks: s.nullable(s.object({ passed: count, total: count })),
+  changedAt: s.nullable(count),
 });
 
 const releaseSummary = s.object({
@@ -669,6 +754,79 @@ export const launcherContract = defineContract({
       input: s.object({ id: s.number({ int: true, min: 1 }) }),
       output: s.object({ status: s.enum(INTENT_STATUS_NAMES) }),
       summary: 'Withdraw a request that is not running; every task it has not completed is removed.',
+    },
+    'launcher.overview': {
+      effect: 'read',
+      input: s.void(),
+      output: s.object({
+        needsYou: s.array(needsYouItem, { max: 500 }),
+        running: s.nullable(
+          s.object({
+            ...runProgressFields,
+            appId: s.string({ max: 40 }),
+            appName: s.string({ max: 200 }),
+            intentId: count,
+            taskSlug: s.string({ max: 80 }),
+            taskTitle: s.string({ max: 200 }),
+            taskIndex: count,
+            taskCount: count,
+            modelId: s.nullable(s.string({ max: 200 })),
+          }),
+        ),
+        spend: s.object({
+          task: s.nullable(spendTotal),
+          run: s.nullable(spendTotal),
+          today: spendTotal,
+          budgetDay: s.nullable(s.number({ min: 0 })),
+          todayByModel: s.array(
+            s.object({
+              modelId: s.nullable(s.string({ max: 200 })),
+              inputTokens: count,
+              outputTokens: count,
+              cost: s.nullable(s.number({ min: 0 })),
+              atLeast: s.boolean(),
+            }),
+            { max: 500 },
+          ),
+        }),
+        backlog: s.array(
+          s.object({
+            appId: s.string({ max: 40 }),
+            appName: s.string({ max: 200 }),
+            intentIds: s.array(count, { max: 100 }),
+            done: count,
+            failed: count,
+            running: count,
+            queued: count,
+            blocked: count,
+            total: count,
+            estimate: s.nullable(s.object({ ms: count, tokens: count, estimate: s.boolean() })),
+          }),
+          { max: 500 },
+        ),
+        apps: s.array(appBlock, { max: 500 }),
+        recent: s.array(runEvent, { max: 50 }),
+      }),
+      summary:
+        'What needs the person, what is running and at what stage, what it has cost, what is left, and what each application is doing.',
+    },
+    'launcher.pricesGet': {
+      effect: 'read',
+      input: s.void(),
+      output: s.object({ models: s.array(priceRow, { max: 200 }), budgetDay: s.nullable(s.number({ min: 0 })) }),
+      summary: 'What each model costs per million tokens, as the person wrote it, and the daily budget.',
+    },
+    'launcher.pricesSet': {
+      // A person's own figures. The launcher never sets or fetches a price.
+      effect: 'write',
+      input: s.object({
+        // Wider than the file may be, so the refusal that names the limit comes
+        // from `writePrices` rather than from the schema.
+        models: s.array(priceRow, { max: 1_000 }),
+        budgetDay: s.nullable(s.number()),
+      }),
+      output: s.object({ models: s.array(priceRow, { max: 200 }), budgetDay: s.nullable(s.number({ min: 0 })) }),
+      summary: 'Replace what each model costs and the daily budget. Shown, never enforced.',
     },
     'launcher.intentModelsSet': {
       effect: 'write',
