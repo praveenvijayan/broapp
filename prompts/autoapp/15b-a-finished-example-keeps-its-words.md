@@ -23,7 +23,11 @@ Run this after 15a is merged.
 ## Read first
 
 - `prompts/autoapp/00-common-rules.md`; reports 13c, 13d (the removal rule and
-  why it exists), 14c, 14d.
+  why it exists), 14c, 14d, and 14e's last section: an example that hardcodes
+  ids passes on a fresh preview and can fail on one that has been written to.
+  `candidate.cycle` always starts a fresh preview before its checks;
+  `candidate.check` alone runs on whatever is running, including a copy the
+  last check already wrote to.
 - `packages/broapp-autoapp/src/intent/executor.ts`: `verdictOf` (line ~247) and
   its doc comment, `finishedExamples`, the call at line ~928, `exampleIdFor`,
   what `status.checks` holds (ids, titles, passed — not steps).
@@ -57,7 +61,7 @@ say so.
 | What the verdict is given | `required` stops being `string[]` and becomes `{ id, hash: string \| null }[]`; `verdictOf` gains the current examples' hashes by id. It stays pure: the executor reads and hashes, the verdict compares. |
 | The rule | For each required example: gone → today's sentence, unchanged. Present with a different hash → `The example <id>, from a finished task, was changed.` Present with the same hash → nothing, and its pass or fail is judged as today. A required example with a null hash (a task completed before this prompt) is held by id only, as today. |
 | Order of reasons | The changed sentence comes with the gone sentence, before the per-criterion lines, so the advice question and the next attempt's "The last attempt ended with:" both carry it. |
-| The builder is told | `builderMessage` already says "Do not remove or rename an acceptance example that is already there." It becomes "Do not remove, rename or change…". Then one sentence: "If your change makes an older example fail, the change is wrong or the plan is: say which with intent.ask." No other new text. |
+| The builder is told | `builderMessage` already says "Do not remove or rename an acceptance example that is already there." It becomes "Do not remove, rename or change…". Then: "If an older example fails, run candidate.cycle again so the checks run on a fresh preview. If it still fails, your change is wrong or the plan is: say which with intent.ask." The first half is there because a used preview is a third cause, and the only one that is nobody's fault; without it the sentence sends a builder to the person for nothing. No other new text. |
 | An honest change | Is not something a builder decides. A task whose plan truly requires an older example to change fails with the sentence above, and the person revises. A way for a person to accept a changed example from the panel is **not in scope**: a row in `docs/autoapp/backlog.md`, with Step 0's count as its justification or its absence. |
 | The task's own examples | Are not held until it completes: a retry may rewrite them freely. |
 | A removed or replaced task | A task replaced with `intent.task` and `replaces`, or removed by the person, stops contributing required examples exactly as it does today. Confirm and test; do not change. |
@@ -108,7 +112,8 @@ New tests, beside 13d's removal tests in `tests/autoapp-intent-run.test.ts`:
 cases, each marked honest or weakening; where the executor reads the examples
 from and why that is the specification that was built; what a task that must
 honestly change an older example now goes through, step by step, and whether
-that is tolerable until the backlog row is done.
+that is tolerable until the backlog row is done; and whether a backlog turn can
+reach a verdict on checks that ran on a preview already written to, with where.
 
 ## Commit
 

@@ -57,8 +57,10 @@ and 14e changes where activation reads and runs the examples.
 3. The other side of that: a candidate **built before this prompt** with a stray
    key in a step, and activated after it. 14e runs its examples on `data-check`
    before the switch. Say what the person is told and confirm the previous
-   release is still serving. Refusing it there is right; it must be said in a
-   sentence that names the key, not as a failed example.
+   release is still serving. 14e's report says a throw while starting that
+   child reads "the candidate would not run the acceptance examples: …"; find
+   out whether the refusal arrives there or earlier. Refusing it is right; it
+   must be said in a sentence that names the key, not as a failed example.
 
 ## Fixed decisions
 
