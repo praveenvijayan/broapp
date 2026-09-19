@@ -202,16 +202,26 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.14: a wider Backlog panel, tasks beside the request's analysis,
-and a task row whose model select stays on its row; only refused edits are
-counted as refused edits. One package: `broapp-autoapp` 0.3.13. Before it,
-0.4.13: a failed task says why, and the launcher can be stopped. A
+Version 0.4.15: a completed task means it. An acceptance example can say a
+value's kind (`{"$is": "number"}`) and that a route refuses (`fails`), and
+activation runs the examples where the preview ran them, on a copy that is
+thrown away, so an example that writes passes both. A step refuses a key it
+does not know, naming the one that was meant; a finished task's example is
+held by what it says, so a later task cannot keep its id and weaken it; the
+valid input shown to a refused builder is one that would really run; a
+backlog turn refused four times for the same reason is ended; a turn too long
+to give back whole gives its newest calls; and the evaluation counts an edit
+when it lands and tokens only when they are known. Two packages: `broapp`
+0.4.4, for a cut-short turn's partial usage and the history expansion, both
+additive, and `broapp-autoapp` 0.3.14, which depends on it. Before it, 0.4.14:
+a wider Backlog panel, tasks beside the request's analysis, and a task row
+whose model select stays on its row; one package, `broapp-autoapp` 0.3.13.
+Before it, 0.4.13: a failed task says why, and the launcher can be stopped. A
 task whose builds were refused names the tool, the count and the error, to
 the person, the advice and the next attempt; a turn that ends with unbuilt
 edits is built once by the host; `broapp-autoapp stop` and `status`, a
 **Quit** in the panel, and children that exit when their launcher is gone.
-`broapp` stays at 0.4.3,
-`broapp-ai-elements` at 0.4.6, the providers and `create-broapp` at 0.4.1.
+`broapp-ai-elements` stays at 0.4.6, the providers and `create-broapp` at 0.4.1.
 Earlier: 0.4.12, a backlog. The engineer restates a request, checks it against
 the application's real routes and pages, and splits it into tasks a person
 reviews in a Backlog panel; **Run** builds each task as its own turn on the

@@ -87,7 +87,7 @@
     },
     "packages/broapp": {
       "name": "broapp",
-      "version": "0.4.3",
+      "version": "0.4.4",
       "bin": {
         "broapp": "src/cli/main.ts",
       },
@@ -176,13 +176,13 @@
     },
     "packages/broapp-autoapp": {
       "name": "broapp-autoapp",
-      "version": "0.3.13",
+      "version": "0.3.14",
       "bin": {
         "broapp-autoapp": "src/launcher/main.ts",
       },
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.30.0",
-        "broapp": "^0.4.3",
+        "broapp": "^0.4.4",
         "broapp-ai-anthropic": "^0.3.0",
         "broapp-ai-compatible": "^0.3.0",
         "broapp-ai-elements": ">=0.4.6",
