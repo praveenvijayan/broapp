@@ -138,6 +138,10 @@ describe('the specification reference', () => {
     for (const field of fields) expect(specReference('acceptance')).toContain(`\`${field}\``);
   });
 
+  test('says a step holds only the keys it names, and that another is refused when read', () => {
+    expect(specReference('acceptance')).toContain('a key it does not know is refused when the specification is read');
+  });
+
   test('is served a topic at a time, and whole when none is named', () => {
     for (const topic of REFERENCE_TOPICS) expect(specReference(topic)).toMatch(new RegExp(`^# ${topic} `));
     const whole = specReference();

@@ -34,6 +34,7 @@ import {
   writeRelease,
 } from 'broapp-autoapp/spec';
 import type { AppSpec, Capability } from 'broapp-autoapp/spec';
+import { runAcceptance } from 'broapp-autoapp/engineer';
 
 import { contract as notesContract } from '../examples/notes/src/shared/contract.ts';
 
@@ -740,5 +741,130 @@ describe('14d: matchers and refusals in an example', () => {
   test('the refusal codes are read from broapp/shared, not typed out again', () => {
     expect([...REFUSAL_CODES].sort()).toEqual(['conflict', 'invalid_input', 'not_found', 'rejected', 'unavailable']);
     expect(MATCHER_KINDS).toEqual(['string', 'number', 'boolean', 'array', 'object', 'null', 'any']);
+  });
+});
+
+describe('15a: an example, a step and its view refuse a key they do not know', () => {
+  const example = (steps: unknown[], extra: Record<string, unknown> = {}): Partial<AppSpec> => ({
+    acceptance: [{ id: 'c1', title: 'Closed', steps: steps as never, ...extra } as never],
+  });
+  /** Every issue parseSpec finds, path joined, or [] when it accepts the specification. */
+  const issuesOf = (spec: Partial<AppSpec>): string[] => {
+    try {
+      parseSpec(JSON.parse(JSON.stringify(minimalSpec(spec))));
+      return [];
+    } catch (cause) {
+      return (cause as ValidationError).issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`);
+    }
+  };
+
+  test('a step with fail, expects, matches or bogus is refused at the step, naming the key that was meant', () => {
+    const step = { route: 'notes.list', input: {} };
+    expect(issuesOf(example([{ ...step, fail: { code: 'invalid_input' } }]))).toEqual([
+      'acceptance.0.steps.0: unknown field "fail"; did you mean "fails"?',
+    ]);
+    expect(issuesOf(example([{ ...step, expects: { notes: [] } }]))).toEqual([
+      'acceptance.0.steps.0: unknown field "expects"; did you mean "expect"?',
+    ]);
+    expect(issuesOf(example([{ ...step, matches: { notes: [] } }]))).toEqual([
+      'acceptance.0.steps.0: unknown field "matches"; did you mean "match"?',
+    ]);
+    // Nothing allowed is within two edits of it, so there is nothing to suggest.
+    expect(issuesOf(example([{ ...step, bogus: { x: 1 } }]))).toEqual(['acceptance.0.steps.0: unknown field "bogus"']);
+    // The step's own path, not the first step's: the second of two is the one named.
+    expect(issuesOf(example([step, { ...step, fail: {} }]))).toEqual([
+      'acceptance.0.steps.1: unknown field "fail"; did you mean "fails"?',
+    ]);
+  });
+
+  test('an example with a key beside id, title and steps is refused; a view with components names component', () => {
+    expect(issuesOf(example([{ route: 'notes.list', input: {} }], { failure: true }))).toEqual([
+      'acceptance.0: unknown field "failure"',
+    ]);
+    expect(issuesOf(example([{ route: 'notes.list', input: {} }], { titel: 'x' }))).toEqual([
+      'acceptance.0: unknown field "titel"; did you mean "title"?',
+    ]);
+    expect(issuesOf(example([{ view: { page: 'notes', components: 'all-notes' } }]))).toEqual([
+      'acceptance.0.steps.0.view: unknown field "components"; did you mean "component"?',
+    ]);
+  });
+
+  test('keys inside input, expect and match are the application’s own, and are never refused by this rule', () => {
+    const odd = { fail: 1, bogus: { x: 1 }, expects: [], components: 'x' };
+    expect(issuesOf(example([{ route: 'notes.list', input: odd }]))).toEqual([]);
+    expect(issuesOf(example([{ route: 'notes.list', input: {}, expect: odd }]))).toEqual([]);
+    expect(issuesOf(example([{ route: 'notes.list', input: {}, match: odd }]))).toEqual([]);
+    expect(issuesOf(example([{ view: { page: 'notes', component: 'all-notes', match: odd } }]))).toEqual([]);
+  });
+
+  test('the probe: a misspelt fails against a route that succeeds no longer parses, so it can no longer pass', async () => {
+    const misspelt = { route: 'notes.list', input: {}, fail: { code: 'invalid_input' } };
+    expect(() => parseSpec(JSON.parse(JSON.stringify(minimalSpec(example([misspelt])))))).toThrow(
+      /^acceptance\[0\]\.steps\[0\]: unknown field "fail"; did you mean "fails"\?$/,
+    );
+    // What the parser used to hand on: the same step with the key dropped. It
+    // asserts nothing, so a route that succeeds made it pass.
+    const { fail: _dropped, ...handedOn } = misspelt;
+    const succeeding = { invoke: async () => ({ notes: [] }) } as unknown as Parameters<typeof runAcceptance>[0];
+    const [result] = await runAcceptance(succeeding, [{ id: 'c1', title: 'Refused', steps: [handedOn] }]);
+    expect(result?.passed).toBe(true);
+  });
+
+  test('every autoapp.json in the templates, the examples and the fixtures still parses', () => {
+    const files = [
+      'templates/autoapp-starter/autoapp.json',
+      'templates/autoapp-blank/autoapp.json',
+      'examples/notes/autoapp.json',
+      'tests/fixtures/autoapp-app/autoapp.json',
+    ];
+    for (const file of files) {
+      const manifest = JSON.parse(readFileSync(join(import.meta.dir, '..', file), 'utf8')) as {
+        schemaVersion: number;
+        capabilities: Capability[];
+        migrations: AppSpec['migrations'];
+        acceptance: AppSpec['acceptance'];
+      };
+      // The workspace's manifest is half a specification; the build supplies
+      // the contract and the views. Stand in for them with every route and
+      // page the examples name, so what is checked is the examples themselves.
+      const routes = new Set<string>();
+      const pages = new Set<string>();
+      for (const each of manifest.acceptance) {
+        for (const step of each.steps) {
+          if ('route' in step) routes.add(step.route);
+          else pages.add(step.view.page);
+        }
+      }
+      const base = minimalSpec();
+      const operation = base.contract.operations['notes.list'];
+      if (operation === undefined) throw new Error('the minimal contract has notes.list');
+      const spec = minimalSpec({
+        contract: { operations: Object.fromEntries([...routes, 'notes.list'].map((route) => [route, operation])), streams: {} },
+        views: {
+          ...minimalViews,
+          pages: [
+            ...minimalViews.pages,
+            ...[...pages].filter((id) => id !== 'notes').map((id) => ({ id, title: id, children: [{ id: `${id}-text`, kind: 'text' as const, template: 'x' }] })),
+          ],
+        },
+        manifest: { ...base.manifest, schemaVersion: manifest.schemaVersion, capabilities: manifest.capabilities },
+        migrations: manifest.migrations,
+        acceptance: manifest.acceptance,
+      });
+      const parsed = parseSpec(JSON.parse(JSON.stringify(spec)));
+      expect(parsed.acceptance).toEqual(manifest.acceptance);
+    }
+  });
+
+  test('a capability with a stray key says what it said, plus the key that was meant when one is near', () => {
+    const withCapability = (capability: Record<string, unknown>): Partial<AppSpec> => ({
+      manifest: { ...minimalSpec().manifest, capabilities: [capability as never] },
+    });
+    expect(issuesOf(withCapability({ kind: 'spawn', reason: 'To run.', allowEverything: true }))).toEqual([
+      'manifest.capabilities.0: unknown field "allowEverything"',
+    ]);
+    expect(issuesOf(withCapability({ kind: 'files', paths: ['/tmp/x'], acess: 'read', reason: 'To read.' }))).toEqual([
+      'manifest.capabilities.0: unknown field "acess"; did you mean "access"?',
+    ]);
   });
 });

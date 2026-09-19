@@ -132,6 +132,9 @@ asserts only a refusal. A crash is never a refusal. Such a step carries no \`exp
       "fails": { "code": "invalid_input", "message": "title" } },
     { "route": "items.list", "input": null, "match": { "count": 0 } } ] }
 
+An example holds only \`id\`, \`title\` and \`steps\`, and a step only the keys named
+above; a key it does not know is refused when the specification is read.
+
 Neither kind renders a page. What a browser shows is verified only by a person
 looking at the preview, and every check report says so. A good example fails on
 the release before the change and passes on the candidate; write the one that

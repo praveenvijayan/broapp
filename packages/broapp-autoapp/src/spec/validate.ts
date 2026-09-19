@@ -13,7 +13,8 @@
  * Two things the `s` validator does not do are done by hand. It has no record
  * type, and contracts are records. And it *drops* unknown keys rather than
  * refusing them, which is right for an operation input and wrong for a
- * capability: a field nobody read is a permission nobody granted.
+ * capability — a field nobody read is a permission nobody granted — and for an
+ * acceptance example, where a key nobody read is an assertion nobody made.
  */
 import { s, ValidationError } from 'broapp/shared';
 import type { Issue, JsonSchema, Result, Schema } from 'broapp/shared';
@@ -120,13 +121,50 @@ const jsonObject: Schema<JsonSchema> = custom<JsonSchema>(
   () => ({ type: 'object' }),
 );
 
+/** How many single-character insertions, deletions or substitutions turn `a` into `b`. */
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      const substitution = (previous[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1);
+      current.push(Math.min((previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1, substitution));
+    }
+    previous = current;
+  }
+  return previous[b.length] ?? 0;
+}
+
+/**
+ * The sentence for a key nobody reads, with the key that was probably meant.
+ *
+ * A key one or two letters from an allowed one is almost always that key
+ * misspelt, and saying which turns "unknown field" from a puzzle into a fix.
+ * Further than that, a guess is as likely to mislead as to help, so nothing
+ * is suggested.
+ */
+function unknownField(key: string, allowed: readonly string[]): string {
+  let nearest: string | undefined;
+  let best = 3;
+  for (const candidate of allowed) {
+    const distance = editDistance(key, candidate);
+    if (distance < best) {
+      best = distance;
+      nearest = candidate;
+    }
+  }
+  const sentence = `unknown field ${JSON.stringify(key)}`;
+  return nearest === undefined ? sentence : `${sentence}; did you mean ${JSON.stringify(nearest)}?`;
+}
+
 /**
  * Refuse a key the schema does not name.
  *
  * `s.object` drops what it does not know, which is exactly right for an
- * operation's input and exactly wrong for a capability or a manifest: a field
- * that was silently discarded is one somebody wrote expecting it to mean
- * something.
+ * operation's input and exactly wrong for a capability, a manifest or an
+ * acceptance example: a field that was silently discarded is one somebody
+ * wrote expecting it to mean something. A step whose misspelt `fails` was
+ * dropped asserts nothing and passes whenever its route succeeds.
  */
 function closed<T>(inner: Schema<T>, allowed: readonly string[]): Schema<T> {
   return custom<T>(
@@ -136,10 +174,12 @@ function closed<T>(inner: Schema<T>, allowed: readonly string[]): Schema<T> {
         const extra = Object.keys(value as Record<string, unknown>).filter(
           (key) => !allowed.includes(key),
         );
-        if (extra.length > 0) return fail(path, `unknown field ${JSON.stringify(extra[0])}`);
+        if (extra[0] !== undefined) return fail(path, unknownField(extra[0], allowed));
       }
       return inner.check(value, path);
     },
+    // `s.object` already describes itself with `additionalProperties: false`;
+    // what `closed` adds is that parsing now agrees with that description.
     () => inner.toJsonSchema(),
   );
 }
@@ -195,39 +235,59 @@ const migration = s.object({
   description: s.string({ min: 1, max: 400 }),
 }) as unknown as Schema<MigrationSpec>;
 
-const acceptance = s.object({
-  id: s.string({ min: 1, max: 100 }),
-  title: s.string({ min: 1, max: 200 }),
-  // A step is a route call or a view assertion. The shape admits both sets of
-  // fields; `specIssues` refuses a step that has both or neither, with the
-  // step's path, because a schema helper without unions cannot say it here.
-  steps: s.array(
-    s.object({
-      route: s.optional(s.string({ pattern: ROUTE_PATTERN })),
-      input: s.optional(s.unknown()),
-      expect: s.optional(s.unknown()),
-      match: s.optional(s.unknown()),
-      fails: s.optional(
-        closed(
-          s.object({
-            code: s.optional(s.string({ min: 1, max: 40 })),
-            message: s.optional(s.string({ min: 1, max: 200 })),
-          }),
-          ['code', 'message'],
-        ),
+/**
+ * The keys an acceptance example, a step and a step's view may carry.
+ *
+ * Everything else is refused when the specification is read. `input`,
+ * `expect` and `match` stay open: what they hold is the application's own
+ * values, and `matcherIssues` polices the `$` keys inside a `match`.
+ */
+const EXAMPLE_FIELDS = ['id', 'title', 'steps'] as const;
+const STEP_FIELDS = ['route', 'input', 'expect', 'match', 'fails', 'view'] as const;
+const VIEW_STEP_FIELDS = ['page', 'component', 'exists', 'match'] as const;
+const FAILS_FIELDS = ['code', 'message'] as const;
+
+const acceptanceStep = closed(
+  s.object({
+    route: s.optional(s.string({ pattern: ROUTE_PATTERN })),
+    input: s.optional(s.unknown()),
+    expect: s.optional(s.unknown()),
+    match: s.optional(s.unknown()),
+    fails: s.optional(
+      closed(
+        s.object({
+          code: s.optional(s.string({ min: 1, max: 40 })),
+          message: s.optional(s.string({ min: 1, max: 200 })),
+        }),
+        FAILS_FIELDS,
       ),
-      view: s.optional(
+    ),
+    view: s.optional(
+      closed(
         s.object({
           page: s.string({ min: 1, max: 100 }),
           component: s.optional(s.string({ min: 1, max: 100 })),
           exists: s.optional(s.boolean()),
           match: s.optional(s.unknown()),
         }),
+        VIEW_STEP_FIELDS,
       ),
-    }),
-    { min: 1, max: 100 },
-  ),
-}) as unknown as Schema<AcceptanceExample>;
+    ),
+  }),
+  STEP_FIELDS,
+);
+
+const acceptance = closed(
+  s.object({
+    id: s.string({ min: 1, max: 100 }),
+    title: s.string({ min: 1, max: 200 }),
+    // A step is a route call or a view assertion. The shape admits both sets of
+    // fields; `specIssues` refuses a step that has both or neither, with the
+    // step's path, because a schema helper without unions cannot say it here.
+    steps: s.array(acceptanceStep, { min: 1, max: 100 }),
+  }),
+  EXAMPLE_FIELDS,
+) as unknown as Schema<AcceptanceExample>;
 
 /**
  * The view specification, validated by its own parser.
