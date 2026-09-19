@@ -333,6 +333,85 @@ function boundMessage(message: ResponseMessage, limits: HistoryLimits): ModelMes
   return { ...message, content } as ModelMessage;
 }
 
+/** The line a partial turn opens with, saying how many of its calls are not there. */
+function omittedMarker(calls: number): string {
+  return `[${String(calls)} earlier tool calls of this turn are not shown]`;
+}
+
+/** The tool-call ids an assistant message makes, or the tool-result ids a tool message answers. */
+function partIds(message: ModelMessage, type: 'tool-call' | 'tool-result'): string[] {
+  if (!Array.isArray(message.content)) return [];
+  return (message.content as readonly unknown[])
+    .filter((part): part is { type: string; toolCallId: string } => isRecord(part) && part['type'] === type && typeof part['toolCallId'] === 'string')
+    .map((part) => part.toolCallId);
+}
+
+/**
+ * A transcript cut into groups: each assistant message with the tool messages
+ * that answer it. A group is complete when every call it makes has a result
+ * in it and every result answers one of its calls; `null` marks a group that
+ * is not, which no suffix may reach past.
+ */
+function groupsOf(messages: readonly ModelMessage[]): ({ messages: ModelMessage[]; calls: number } | null)[] {
+  const groups: { messages: ModelMessage[] }[] = [];
+  for (const message of messages) {
+    if (message.role === 'assistant') groups.push({ messages: [message] });
+    else {
+      const current = groups[groups.length - 1];
+      // A result with no assistant before it answers nothing that is kept.
+      if (current === undefined) groups.push({ messages: [message] });
+      else current.messages.push(message);
+    }
+  }
+  return groups.map((group) => {
+    const [head, ...answers] = group.messages;
+    if (head === undefined || head.role !== 'assistant') return null;
+    const calls = partIds(head, 'tool-call');
+    const results = answers.flatMap((message) => (message.role === 'tool' ? partIds(message, 'tool-result') : [null]));
+    const answered = new Set(results);
+    const complete =
+      results.length === calls.length && calls.every((id) => answered.has(id)) && results.every((id) => id !== null && calls.includes(id));
+    return complete ? { messages: group.messages, calls: calls.length } : null;
+  });
+}
+
+/** The first assistant message of a suffix, opening with the marker as its first text part. */
+function withMarker(messages: readonly ModelMessage[], marker: string): ModelMessage[] {
+  const [first, ...rest] = messages;
+  if (first === undefined || first.role !== 'assistant') return [...messages];
+  const text = { type: 'text' as const, text: marker };
+  const content = typeof first.content === 'string' ? [text, { type: 'text' as const, text: first.content }] : [text, ...first.content];
+  return [{ ...first, content } as ModelMessage, ...rest];
+}
+
+/**
+ * The newest complete groups of a turn too long to expand whole, or `null`
+ * when not even its closing words and one group with a call fit in `room`.
+ *
+ * Kept newest first, whole groups only, so a call never arrives without its
+ * result or a result without its call. The first kept assistant message says
+ * how many earlier calls are not shown, and the marker counts toward `room`.
+ */
+function newestGroups(bounded: readonly ModelMessage[], room: number): ModelMessage[] | null {
+  const groups = groupsOf(bounded);
+  const totalCalls = groups.reduce((sum, group) => sum + (group?.calls ?? 0), 0);
+  let best: ModelMessage[] | null = null;
+  let kept: ModelMessage[] = [];
+  let keptCalls = 0;
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    const group = groups[index];
+    if (group === null || group === undefined) break;
+    kept = [...group.messages, ...kept];
+    keptCalls += group.calls;
+    // The closing words alone are not worth a partial turn: it needs a call.
+    if (keptCalls === 0) continue;
+    const candidate = withMarker(kept, omittedMarker(totalCalls - keptCalls));
+    if (JSON.stringify(candidate).length > room) break;
+    best = candidate;
+  }
+  return best;
+}
+
 /**
  * History as the model is given it.
  *
@@ -340,8 +419,13 @@ function boundMessage(message: ResponseMessage, limits: HistoryLimits): ModelMes
  * transcript the host holds is replaced by that transcript — its own tool calls
  * and results, bounded — while fewer than `limits.turns` have been and the total
  * stays under `limits.totalChars`. The first turn that would cross the total
- * stays text, and so does every turn older than it. Every other turn is its text,
- * exactly as before. User turns keep their place.
+ * gives its newest complete calls instead, as many as fit what is left, under a
+ * line saying how many earlier ones are not shown; if not even one call and its
+ * result fit, it stays text. Either way it is the last turn expanded, and every
+ * turn older than it is text. 12j expanded a turn whole or not at all, and
+ * measured that a turn of twenty calls or so is 60,000 to 145,000 characters
+ * after bounds: the long turns were exactly the ones that came back as words.
+ * Every other turn is its text, exactly as before. User turns keep their place.
  */
 export function expandHistory(
   history: readonly ChatTurn[],
@@ -369,7 +453,14 @@ export function expandHistory(
     const chars = JSON.stringify(bounded).length;
     if (total + chars > limits.totalChars) {
       full = true;
-      segments.push(text);
+      const partial = newestGroups(bounded, limits.totalChars - total);
+      if (partial === null) {
+        segments.push(text);
+        continue;
+      }
+      total += JSON.stringify(partial).length;
+      expanded += 1;
+      segments.push(partial);
       continue;
     }
     total += chars;

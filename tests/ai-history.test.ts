@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { readUIMessageStream } from 'ai';
+import { readUIMessageStream, streamText } from 'ai';
 import type { UIMessageChunk } from 'ai';
 import { aiContract } from 'broapp/ai';
 import type { ChatTurn, StoredMessage } from 'broapp/ai';
@@ -21,6 +21,7 @@ import type { Ai, FakeAdapter, FakeStep } from 'broapp/ai/host';
 import { createGate, createHostApp } from 'broapp/host';
 import type { HostLogger } from 'broapp/host';
 import { defineContract, mergeContracts, s } from 'broapp/shared';
+import { anthropic } from 'broapp-ai-anthropic';
 import { ollama } from 'broapp-ai-compatible';
 import { createBroappChatTransport } from 'broapp-ai-elements';
 import type { BroappUIMessage } from 'broapp-ai-elements';
@@ -771,5 +772,195 @@ describe('15d: a turn’s usage, step by step', () => {
     expect(result.events.some((event) => event.type === 'usage')).toBe(false);
     expect(ended[0]?.usage).toBeUndefined();
     ai.close();
+  });
+});
+
+describe('15e: a turn too long to expand gives its newest calls', () => {
+  /** One read and its result: an assistant message with one call, and the tool message answering it. */
+  const pair = (n: number, outputChars: number): ResponseMessage[] => [
+    { role: 'assistant', content: [{ type: 'tool-call', toolCallId: `c${String(n)}`, toolName: 'look', input: { path: `src/file-${String(n)}.ts` } }] },
+    {
+      role: 'tool',
+      content: [{ type: 'tool-result', toolCallId: `c${String(n)}`, toolName: 'look', output: { type: 'json', value: { content: 'x'.repeat(outputChars) } as never } }],
+    },
+  ];
+  /** An assistant message making two calls, and the one tool message answering both. */
+  const double = (n: number, outputChars: number): ResponseMessage[] => [
+    {
+      role: 'assistant',
+      content: [
+        { type: 'tool-call', toolCallId: `d${String(n)}a`, toolName: 'look', input: { n } },
+        { type: 'tool-call', toolCallId: `d${String(n)}b`, toolName: 'peek', input: { n } },
+      ],
+    },
+    {
+      role: 'tool',
+      content: [
+        { type: 'tool-result', toolCallId: `d${String(n)}a`, toolName: 'look', output: { type: 'json', value: { content: 'y'.repeat(outputChars) } as never } },
+        { type: 'tool-result', toolCallId: `d${String(n)}b`, toolName: 'peek', output: { type: 'json', value: { content: 'z'.repeat(outputChars) } as never } },
+      ],
+    },
+  ];
+  const closing: ResponseMessage = { role: 'assistant', content: [{ type: 'text', text: 'I read thirty files.' }] };
+  /** Thirty read/result pairs, each result at the output bound: over the 60,000 cap after bounds. */
+  const THIRTY = [...Array.from({ length: 30 }, (_, n) => pair(n, 3_000)).flat(), closing];
+  const history = (...runs: string[]): ChatTurn[] =>
+    runs.flatMap((runId) => [
+      { role: 'user' as const, content: `do ${runId}` },
+      { role: 'assistant' as const, content: `text of ${runId}`, runId },
+    ]);
+  const reader = (turns: Record<string, readonly ResponseMessage[]>) => (runId: string): readonly ResponseMessage[] | null => turns[runId] ?? null;
+
+  /** Every call id and every result id in some messages. */
+  const idsOf = (messages: readonly { role: string; content: unknown }[], type: 'tool-call' | 'tool-result'): string[] =>
+    messages.flatMap((message) =>
+      Array.isArray(message.content)
+        ? (message.content as { type: string; toolCallId?: string }[]).filter((part) => part.type === type).map((part) => part.toolCallId ?? '')
+        : [],
+    );
+
+  // 1.
+  test('the probe: thirty pairs over the cap give the closing words, the newest groups that fit and the marker, within the cap', () => {
+    const whole = JSON.stringify(THIRTY).length;
+    expect(whole).toBeGreaterThan(HISTORY_LIMITS.totalChars);
+    const out = expandHistory(history('run-thirty'), reader({ 'run-thirty': THIRTY }));
+    const expanded = out.filter((message) => message.role !== 'user');
+    // It is not the turn's text any more.
+    expect(out.some((message) => message.content === 'text of run-thirty')).toBe(false);
+    // The closing words are last, and the newest calls are the ones kept.
+    expect(expanded.at(-1)).toEqual(closing);
+    const kept = idsOf(expanded, 'tool-call');
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.at(-1)).toBe('c29');
+    expect(kept).toEqual(Array.from({ length: kept.length }, (_, n) => `c${String(30 - kept.length + n)}`));
+    // The marker is the first text part of the first kept assistant message, with the right count.
+    const first = expanded[0] as { role: string; content: { type: string; text?: string }[] };
+    expect(first.role).toBe('assistant');
+    expect(first.content[0]).toEqual({ type: 'text', text: `[${String(30 - kept.length)} earlier tool calls of this turn are not shown]` });
+    expect(JSON.stringify(expanded).length).toBeLessThanOrEqual(HISTORY_LIMITS.totalChars);
+  });
+
+  // 2.
+  test('every call has its result and every result its call, one call a message or two', () => {
+    const doubles = [...Array.from({ length: 20 }, (_, n) => double(n, 2_000)).flat(), closing];
+    for (const transcript of [THIRTY, doubles]) {
+      const out = expandHistory(history('run-long'), reader({ 'run-long': transcript }));
+      const calls = idsOf(out, 'tool-call');
+      const results = idsOf(out, 'tool-result');
+      expect(calls.length).toBeGreaterThan(0);
+      expect([...results].sort()).toEqual([...calls].sort());
+      // And each result follows the message that made its call.
+      for (const [index, message] of out.entries()) {
+        if (message.role !== 'tool') continue;
+        const before = out[index - 1];
+        expect(before?.role).toBe('assistant');
+        expect(idsOf([message], 'tool-result').every((id) => idsOf(before === undefined ? [] : [before], 'tool-call').includes(id))).toBe(true);
+      }
+    }
+  });
+
+  // 3.
+  test('no two assistant messages are adjacent, and the sequence is user, assistant[, tool, assistant…], user', () => {
+    const out = [...expandHistory(history('run-thirty'), reader({ 'run-thirty': THIRTY })), { role: 'user', content: 'continue' }];
+    const roles = out.map((message) => message.role);
+    expect(roles[0]).toBe('user');
+    expect(roles.at(-1)).toBe('user');
+    expect(roles.slice(1, -1).join(',')).toMatch(/^assistant(,tool,assistant)*$/);
+  });
+
+  // 4.
+  test('a turn that fits expands whole, byte for byte as before', () => {
+    const small = [...pair(1, 10), ...pair(2, 10), closing];
+    const out = expandHistory(history('run-small'), reader({ 'run-small': small }));
+    expect(JSON.stringify(out)).toBe(JSON.stringify([{ role: 'user', content: 'do run-small' }, ...small]));
+  });
+
+  // 5.
+  test('two long turns: the newer is partial, the older is text', () => {
+    const out = expandHistory(history('run-old', 'run-new'), reader({ 'run-old': THIRTY, 'run-new': THIRTY }));
+    expect(out.slice(0, 2)).toEqual([
+      { role: 'user', content: 'do run-old' },
+      { role: 'assistant', content: 'text of run-old' },
+    ]);
+    expect(out[2]).toEqual({ role: 'user', content: 'do run-new' });
+    expect(JSON.stringify(out[3])).toContain('earlier tool calls of this turn are not shown');
+  });
+
+  // 6.
+  test('a turn too large for even one group beside its closing words is text', () => {
+    const limits = { ...HISTORY_LIMITS, totalChars: 1_500 };
+    const out = expandHistory(history('run-thirty'), reader({ 'run-thirty': THIRTY }), limits);
+    expect(out).toEqual([
+      { role: 'user', content: 'do run-thirty' },
+      { role: 'assistant', content: 'text of run-thirty' },
+    ]);
+  });
+
+  // 7.
+  test('a partial turn counts toward turns', () => {
+    const small = [...pair(1, 10), closing];
+    // One turn allowed: the newest, which is partial, is it; the one before is text though it would fit.
+    const out = expandHistory(history('run-small', 'run-thirty'), reader({ 'run-small': small, 'run-thirty': THIRTY }), { ...HISTORY_LIMITS, turns: 1 });
+    expect(out[1]).toEqual({ role: 'assistant', content: 'text of run-small' });
+    expect(JSON.stringify(out.slice(3))).toContain('earlier tool calls of this turn are not shown');
+  });
+
+  // 8.
+  test('both adapters accept the partial sequence, each tool result answering the call before it', async () => {
+    const messages = [...expandHistory(history('run-thirty'), reader({ 'run-thirty': THIRTY })), { role: 'user' as const, content: 'continue' }];
+
+    // OpenAI-compatible, as 12j's test scripts it.
+    const openaiBodies: string[] = [];
+    const chunk = (delta: object, finish: string | null): string =>
+      `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: 'qwen', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+    const openaiFetch = Object.assign(
+      (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        openaiBodies.push(String(init?.body ?? ''));
+        return Promise.resolve(
+          new Response(`${chunk({ role: 'assistant', content: 'ok' }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }),
+        );
+      },
+      { preconnect: () => undefined },
+    ) as typeof fetch;
+    const viaOpenai = streamText({ model: ollama().model({ apiKey: null, baseUrl: null, fetch: openaiFetch }, 'qwen'), messages });
+    expect(await viaOpenai.text).toBe('ok');
+    const sent = (JSON.parse(openaiBodies[0] ?? '{}') as { messages: { role: string; content: unknown; tool_calls?: { id: string }[]; tool_call_id?: string }[] }).messages;
+    expect(sent.some((message) => typeof message.content === 'string' && message.content.includes('earlier tool calls of this turn are not shown'))).toBe(true);
+    let open = new Set<string>();
+    for (const message of sent) {
+      if (message.role === 'assistant') open = new Set((message.tool_calls ?? []).map((call) => call.id));
+      else if (message.role === 'tool') expect(open.has(message.tool_call_id ?? '')).toBe(true);
+    }
+
+    // Anthropic, over a stubbed Messages stream.
+    const anthropicBodies: string[] = [];
+    const event = (name: string, data: object): string => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+    const anthropicFetch = Object.assign(
+      (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        anthropicBodies.push(String(init?.body ?? ''));
+        const body = [
+          event('message_start', { type: 'message_start', message: { id: 'm', type: 'message', role: 'assistant', model: 'claude-opus-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } }),
+          event('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+          event('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'ok' } }),
+          event('content_block_stop', { type: 'content_block_stop', index: 0 }),
+          event('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } }),
+          event('message_stop', { type: 'message_stop' }),
+        ].join('');
+        return Promise.resolve(new Response(body, { headers: { 'content-type': 'text/event-stream' } }));
+      },
+      { preconnect: () => undefined },
+    ) as typeof fetch;
+    const viaAnthropic = streamText({ model: anthropic().model({ apiKey: 'k', baseUrl: null, fetch: anthropicFetch }, 'claude-opus-5'), messages });
+    expect(await viaAnthropic.text).toBe('ok');
+    const blocks = (JSON.parse(anthropicBodies[0] ?? '{}') as { messages: { role: string; content: { type: string; id?: string; tool_use_id?: string; text?: string }[] }[] }).messages;
+    // Roles alternate, and every tool_use is answered in the very next user message.
+    for (const [index, message] of blocks.entries()) {
+      if (index > 0) expect(message.role).not.toBe(blocks[index - 1]?.role);
+      const uses = message.content.filter((part) => part.type === 'tool_use').map((part) => part.id);
+      if (uses.length === 0) continue;
+      const answers = (blocks[index + 1]?.content ?? []).filter((part) => part.type === 'tool_result').map((part) => part.tool_use_id);
+      expect(answers.sort()).toEqual([...uses].sort());
+    }
+    expect(JSON.stringify(blocks)).toContain('earlier tool calls of this turn are not shown');
   });
 });

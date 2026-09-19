@@ -252,9 +252,13 @@ Elements transport from `metadata.runId`, which survives a save and a reload.
 The host replaces the newest six such turns whose transcripts it holds with
 those transcripts — each tool input cut to 1,000 characters and each output to
 2,000, with the head kept and `<omitted N chars>` in place of the rest, errors
-whole — up to 60,000 characters in all; every other turn is its text, as
-before. So a "continue" gets the previous turn's reads and edits rather than
-its summary of them. A run id the host does not hold is text; nothing a browser
+whole — up to 60,000 characters in all. The first turn that would cross that
+total gives its newest complete calls instead, each with its result, as many as
+fit what is left, opening with a line that says how many earlier calls of the
+turn are not shown; if not even one call fits beside the turn's closing words,
+it is its text. Every turn older than that one, and every other turn, is its
+text, as before. So a "continue" gets the previous turn's reads and edits, or at
+least its latest ones, rather than its summary of them. A run id the host does not hold is text; nothing a browser
 saved is ever read into a prompt. Transcripts older than 30 days, or beyond the
 newest 2,000, are deleted when the store opens and on every write. Deleting a
 conversation does not delete its transcripts, because the host does not know
