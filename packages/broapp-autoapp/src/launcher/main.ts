@@ -460,6 +460,8 @@ async function openLauncher(
       if (tab.executor !== null) {
         await Promise.race([tab.executor.idle(), Bun.sleep(STOP_DEADLINE_MS)]);
       }
+      // A folder window nobody answered does not outlive the launcher that opened it.
+      tab.app.shutdown();
       tab.ai.abortAll('the launcher is shutting down');
       // The conversations live in a SQLite file of the AI layer's own, and a
       // database that is never closed misses its last WAL checkpoint.

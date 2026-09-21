@@ -34,6 +34,31 @@ for a pointer edited by hand (it is then `unreadable`, and nothing builds) and
 for `launcher.appLocate`. Nothing in the launcher deletes, moves or recreates
 anything in a folder a person chose; removal leaves the workspace where it is.
 
+### The folder window
+
+`launcher.folderChoose` opens the operating system's own folder dialog —
+`osascript`'s `choose folder` on macOS, a `FolderBrowserDialog` through
+PowerShell on Windows, `zenity` or `kdialog` on Linux — so that a person can
+pick a folder without the page ever listing their directories. It is a `write`,
+though it changes nothing on disk: it puts a window on a person's screen, so on
+channel `ai` it is asked about like any write, and no engineer tool reaches it.
+
+It is given two things, the window's title and where it starts, and neither is
+ever script text. Every script is a constant; the starting folder reaches it as
+one whole argument (`on run argv` for AppleScript, a separate argv element for
+`zenity` and `kdialog`) or one environment variable (PowerShell), through
+`Bun.spawn` with an argument array and never a shell. A test builds the command
+for every platform with starting folders like `"; rm -rf ~ #` and `$(id)` and
+holds that the value is one element and the script's bytes do not change. A
+starting folder that is not an existing directory is dropped, not passed on.
+
+What the window answers is a string like any a person typed, and is treated as
+one: the form sends it through `launcher.locationCheck`, and
+`launcher.appCreate` and `launcher.appLocate` check it again with the rules
+above. The dialog is not trusted to have returned a folder that is allowed —
+only a folder the person pointed at. One window is open at a time, one left
+open is closed after five minutes, and the launcher closes it when it stops.
+
 ## Opening a tab
 
 An application's launch URL is a credential, and the launcher's page never

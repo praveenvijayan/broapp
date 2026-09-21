@@ -18,7 +18,12 @@ to the engineer. What comes out is an ordinary source workspace,
 indistinguishable from one you imported yourself. `--at <dir>` puts that
 workspace at `<dir>/<appId>` instead of inside the launcher's own folder, and
 `broapp-autoapp locate <appId> <dir>` says where it went after it was moved or
-renamed; everything else stays with the launcher.
+renamed; everything else stays with the launcher. In the tab, **New
+application** has a **Where it lives** group for the same choice: *In the
+launcher’s own folder* until you press **Choose a folder…** (the system's folder
+window) or **Type a path instead**, and then *It will be made at* the full path,
+checked before you press Create. A row whose workspace has gone says so and has
+**Locate…**; the removal confirmation says a chosen folder is left where it is.
 
 `broapp-autoapp remove <appId> --yes`, and **Remove** on the row in the tab,
 move an application's whole directory — releases, source workspace and data —

@@ -58,7 +58,9 @@ import { PanelHeader } from './PanelHeader.tsx';
 import { LauncherStopped, QuitControl } from './QuitControl.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
 import { readScheme, applyScheme, SCHEME_KEY } from './scheme.ts';
+import { onReturn } from './on-return.ts';
 import { firstSelection } from './selection.ts';
+import { remember, remembered } from './storage.ts';
 
 /** Where the columns' open state and the chosen conversation are remembered. */
 const HISTORY_OPEN = 'broapp-autoapp:history-open';
@@ -100,25 +102,6 @@ const ENGINEER_SUGGESTIONS = [
   'Add a field to notes',
   'What changed in the last candidate?',
 ];
-
-/** Read a remembered flag. Storage can be unavailable, and that is not a fault. */
-function remembered(key: string, fallback: boolean): boolean {
-  try {
-    const stored = window.localStorage.getItem(key);
-    return stored === null ? fallback : stored === 'true';
-  } catch {
-    return fallback;
-  }
-}
-
-/** Write one, ignoring a storage that refuses. The page still works. */
-function remember(key: string, value: string): void {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Nothing to do: the launcher still works, it just forgets.
-  }
-}
 
 /**
  * The launcher's tab: the workspace while the launcher runs, and one sentence
@@ -290,6 +273,15 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
   useEffect(() => {
     if (ready) void refreshApps(undefined);
   }, [ready, refreshApps, changed]);
+
+  // A folder that was renamed back, or a drive plugged in again, should show
+  // as there the moment the person looks: nothing else re-reads the list while
+  // the page sits open, and a timer would read it for nobody. So it is read
+  // again when the window comes back — focus, or the tab shown again.
+  useEffect(() => {
+    if (!ready) return undefined;
+    return onReturn({ window, document }, () => void refreshApps(undefined));
+  }, [ready, refreshApps]);
 
   const rows = apps.data?.apps ?? [];
   const lastChosen = apps.data?.selected;
@@ -792,6 +784,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
             onSelect={chooseApp}
             onCreated={noteCreated}
             onRemoved={noteRemoved}
+            onLocated={() => setChanged((count) => count + 1)}
             onOpen={(appId) => void openApp(appId)}
             onStop={(appId) => void stop.run({ appId }).then(() => setChanged((count) => count + 1))}
           />

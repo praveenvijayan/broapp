@@ -65,6 +65,32 @@ export const LOCATION_WORDS = {
     `${sourceDir} does not hold ${appId}: there is no autoapp.json there with that id. The one there belongs to ${owner}.`,
   locateDefault: (appId: string): string =>
     `${appId}’s workspace is in the launcher’s own folder and is not moved from here.`,
+
+  // The New application form and the list (19b). The page draws these; it
+  // writes none of its own.
+
+  /** A second press while the system's folder window is still open. */
+  folderWindowOpen: (): string => 'A folder window is already open.',
+  /** Beside the button while the window is open: on macOS it often opens behind the browser. */
+  folderWindowStatus: (): string => 'A folder window is open. It may be behind this one.',
+  /** The form at rest, where the project goes when nothing is chosen. */
+  defaultPlace: (): string => 'In the launcher’s own folder',
+  /** Under the choice, muted. */
+  chooseHint: (): string =>
+    'Choose a folder to keep the project beside your others. A folder for it is made inside the one you pick.',
+  /** Under the typed field. */
+  typedHint: (windows: boolean): string =>
+    `The full path of a folder that exists, for example ${windows ? 'C:\\Users\\you\\Projects' : '/Users/you/Projects'}`,
+  /** Before the target, which the page shows in `<code>` after these words. */
+  willBeMadeAt: (): string => 'It will be made at',
+  /** While the id is not yet one the target could be named after. */
+  willBeMadeInside: (location: string): string =>
+    `It will be made inside ${location}, in a folder named after its id.`,
+  /** The removal confirmation, for a workspace the person chose. */
+  removalWillLeave: (dir: string): string => `Its workspace at ${dir} will be left where it is.`,
+  /** The removal confirmation, for a chosen workspace that is not there. */
+  removalCannotFind: (dir: string): string =>
+    `Its workspace at ${dir} cannot be found; nothing there will be touched.`,
 } as const;
 
 /** The states a workspace can be found in, as the list reports them. */

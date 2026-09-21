@@ -55,6 +55,7 @@ import { activate } from './activate.ts';
 import { appIds, listApps, serving as servingChild, workspaceOf } from './apps.ts';
 import { launcherContract, type LauncherContract } from './contract.ts';
 import { createApplication } from './create.ts';
+import { createFolderChooser, type FolderChooserOptions } from './choose-folder.ts';
 import { checkLocation, locateApplication } from './location.ts';
 import { readOverview, type LiveUsage } from './overview.ts';
 import type { Journal } from './journal.ts';
@@ -108,6 +109,11 @@ export interface CreateLauncherAppOptions {
   readonly install?: PrepareOptions['install'];
   readonly initGit?: PrepareOptions['initGit'];
   /**
+   * The system's folder window, replaceable as `install` is, so a test opens
+   * no window: its spawn, its platform and its deadline.
+   */
+  readonly folderChooser?: Omit<FolderChooserOptions, 'logger'>;
+  /**
    * Begin the launcher's stop path, the one Ctrl+C takes. `launcher.quit`
    * calls it after its reply has gone. Absent, the route answers `unavailable`.
    */
@@ -137,6 +143,11 @@ export interface LauncherApp {
   invoke(route: string, input: unknown, envelope: Envelope): Promise<unknown>;
   /** Applications this launcher has started. */
   readonly children: readonly ChildHandle[];
+  /**
+   * Close what the routes left open on the person's screen — a folder window
+   * nobody answered. The launcher's shutdown calls it; nothing else needs to.
+   */
+  shutdown(): void;
 }
 
 /** How long a child gets to drain, and then to stop. */
@@ -280,6 +291,12 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   // A person saying where a moved workspace went. No engineer tool reaches
   // this: where a person's files are is theirs to say.
   host.operation('launcher.appLocate', ({ appId, sourceDir }) => locateApplication(root, appId, sourceDir));
+
+  // The system's folder window, for the form and for Locate. What it answers
+  // is a string like any typed one: the form checks it with `locationCheck`,
+  // and creation and `appLocate` check it again.
+  const folders = createFolderChooser({ ...options.folderChooser, logger });
+  host.operation('launcher.folderChoose', async ({ startAt }) => await folders.choose(startAt));
 
   /**
    * Move an application to the trash.
@@ -794,6 +811,7 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
     get children() {
       return supervisor.children;
     },
+    shutdown: () => folders.stop(),
   };
 }
 

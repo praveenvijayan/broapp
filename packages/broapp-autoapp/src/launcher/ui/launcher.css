@@ -906,6 +906,86 @@ code {
 }
 
 /*
+ * Where an application lives (19b): one quiet group in the New application
+ * form, and a line under a row whose workspace the person chose.
+ *
+ * A path is long, and its end is the part that differs, so it wraps anywhere
+ * and is never cut. The warning line for a workspace that has gone uses the
+ * warning pair the table's badge already uses, with words in it: the colour
+ * says nothing the sentence does not.
+ */
+.launcher__where {
+  gap: 0.4rem;
+}
+
+.launcher__where-place {
+  margin: 0;
+  color: var(--launcher-text);
+}
+
+.launcher__where-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+  align-items: center;
+}
+
+.launcher__where-status {
+  color: var(--launcher-muted);
+}
+
+.launcher__where-status:empty {
+  display: none;
+}
+
+.launcher__where-link {
+  align-self: flex-start;
+  min-height: 1.5rem;
+}
+
+.launcher__where-link:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 2px;
+}
+
+.launcher__path,
+.launcher__path code {
+  overflow-wrap: anywhere;
+}
+
+.launcher__message--warn {
+  border: 1px solid var(--launcher-warn-border);
+  background: var(--launcher-warn-surface);
+  color: var(--launcher-warn-text);
+}
+
+/* The line under a row sits with the row, not as a row of its own. */
+.launcher__row-detail td {
+  padding-top: 0;
+}
+
+.launcher__table tr:has(+ .launcher__row-detail) td {
+  border-bottom: 0;
+}
+
+.launcher__row-detail .launcher__lede {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.launcher__where-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.launcher__where-locate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/*
  * The Knowledge panel: the log's overlay, wider, with three views.
  *
  * Rows reuse the log's list and its data blocks; what is new is a line that

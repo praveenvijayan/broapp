@@ -562,6 +562,23 @@ export const launcherContract = defineContract({
       output: s.object({ dir: s.string({ max: 1_100 }) }),
       summary: 'Say where an application’s workspace went, when it was moved or renamed.',
     },
+    'launcher.folderChoose': {
+      // A write, though it changes nothing on disk: it puts a window on a
+      // person's screen, so on channel `ai` it is asked about, and no engineer
+      // tool reaches it.
+      effect: 'write',
+      input: s.object({
+        /** Where the window opens. One that is not an existing folder is dropped, not refused. */
+        startAt: s.optional(s.string({ max: 1_024 })),
+      }),
+      output: s.object({
+        /** Whether this computer has a folder window at all; without one, the form offers a typed path. */
+        available: s.boolean(),
+        /** The folder chosen, or `null` for Cancel. Checked like a typed path before anything uses it. */
+        chosen: s.nullable(s.string({ max: 1_024 })),
+      }),
+      summary: 'Open the system’s folder window so a person can choose where an application lives.',
+    },
     'launcher.appOpen': {
       // A write: it may start a process and it opens a browser tab, which is
       // why only a person's own click reaches this route.

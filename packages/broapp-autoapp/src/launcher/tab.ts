@@ -36,7 +36,13 @@ import type { Knowledge } from '../knowledge/store.ts';
 import { AUTOAPP_VERSION } from '../knowledge/version.ts';
 import type { Layout } from '../spec/index.ts';
 
-import { createLauncherApp, LAUNCHER_CONFIRM_TIMEOUT_MS, LAUNCHER_MAX_STEPS, type LauncherApp } from './app.ts';
+import {
+  createLauncherApp,
+  LAUNCHER_CONFIRM_TIMEOUT_MS,
+  LAUNCHER_MAX_STEPS,
+  type CreateLauncherAppOptions,
+  type LauncherApp,
+} from './app.ts';
 import type { LiveUsage } from './overview.ts';
 import { appIds, listApps } from './apps.ts';
 import type { Journal } from './journal.ts';
@@ -68,6 +74,8 @@ export interface CreateLauncherTabOptions {
   /** Creation's two spawns, injectable so a test reaches no registry and no git. */
   readonly install?: PrepareOptions['install'];
   readonly initGit?: PrepareOptions['initGit'];
+  /** The system's folder window. Tests replace its spawn so nothing opens. */
+  readonly folderChooser?: CreateLauncherAppOptions['folderChooser'];
   /**
    * The launcher's knowledge store, its log and its evidence writer.
    *
@@ -370,6 +378,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ...(options.install === undefined ? {} : { install: options.install }),
     ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
     ...(options.quit === undefined ? {} : { quit: options.quit }),
+    ...(options.folderChooser === undefined ? {} : { folderChooser: options.folderChooser }),
     live: () => [...live.values()],
     providerIds: options.providers.map((provider) => provider.id),
   });

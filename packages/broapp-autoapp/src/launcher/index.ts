@@ -66,6 +66,15 @@ export {
 export type { LocationCheck, LocationOptions, LocationProblem, SourceStateResult, WriteLocationOptions } from './location.ts';
 export { LOCATION_WORDS, WORKSPACE_STATES, workspaceSentence } from './location-words.ts';
 export type { WordsPlatform, WorkspaceState } from './location-words.ts';
+export {
+  chooserCommand,
+  createFolderChooser,
+  FOLDER_PROMPT,
+  FOLDER_WINDOW_DEADLINE_MS,
+  trimChosen,
+  usableStart,
+} from './choose-folder.ts';
+export type { ChooserCommand, ChooserProcess, FolderChoice, FolderChooser, FolderChooserOptions, SpawnChooser } from './choose-folder.ts';
 
 export { describeReceipt, describeRemoval, leftSentence, removeApplication } from './remove.ts';
 export type { RemovalDescription, RemovalReceipt, RemoveDeps } from './remove.ts';

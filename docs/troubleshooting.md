@@ -166,9 +166,11 @@ the application still opens and serves — its releases are in the launcher's ow
 folder — but nothing can change it: builds, the engineer's `source.*` tools and
 backlog runs stop with a sentence that names the path. Four causes:
 
-- **Moved or renamed.** Say where it went:
+- **Moved or renamed.** Say where it went: **Locate…** on its row in the
+  launcher's Applications list, or
   `broapp-autoapp locate <appId> <the workspace folder>`. The folder has to hold
-  that application's `autoapp.json`.
+  that application's `autoapp.json`. A folder renamed back shows as found the
+  next time you switch to the launcher's tab.
 - **Deleted.** Restore it from wherever you keep copies, to the same path or
   anywhere else followed by `locate`. The launcher never recreates it for you:
   an empty folder in its place would not be your project.
@@ -181,6 +183,29 @@ backlog runs stop with a sentence that names the path. Four causes:
 A launcher root copied by hand carries its pointers, so the copy and the
 original share every chosen workspace: a change made from one is a change to
 the other's source.
+
+### The folder window did not appear
+
+**Choose a folder…** in **New application** (and **Locate…** on a row) asks
+the operating system for its own folder window. While it is open the form says
+"A folder window is open. It may be behind this one." Where it went:
+
+- **Behind the browser.** On macOS the window belongs to `osascript`, which
+  runs in the background; look behind the browser, or use Mission Control. The
+  launcher does not reach for System Events to raise it, because that would ask
+  you for an automation permission to save one click. A window nobody answers
+  closes itself after five minutes, and pressing the button again meanwhile
+  says one is already open.
+- **Linux with no `zenity` or `kdialog`.** The launcher uses whichever is
+  installed. With neither, the button is replaced by a **Folder** field.
+- **A remote session.** Over SSH, or anywhere without `DISPLAY` or
+  `WAYLAND_DISPLAY`, there is nowhere to draw a window, so the form offers the
+  field.
+
+In every case the answer is the typed path: **Type a path instead** (or the
+field that replaced the button), and paste the folder's full path. Quotes that
+Finder's and Explorer's "copy as path" put around it are taken off. The form
+checks it as you type and says where the project will be made.
 
 ## AI
 
