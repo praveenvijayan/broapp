@@ -23,6 +23,7 @@ import { useOperation } from 'broapp/react';
 import type { OperationOutput } from 'broapp/shared';
 
 import type { LauncherContract } from '../contract.ts';
+import { AppIcon } from './AppIcon.tsx';
 import { modelName, type ModelPlaces } from './IntentPanel.tsx';
 
 export type OverviewData = OperationOutput<LauncherContract, 'launcher.overview'>;
@@ -631,14 +632,17 @@ function Applications({
           const share = block === undefined || block.total === 0 ? null : Math.round((block.done / block.total) * 100);
           return (
             <li className="launcher__ov-app" key={app.appId}>
-              <div>
-                <div className="launcher__ov-app-name">{app.name}</div>
-                <div className="launcher__ov-app-detail">
-                  {block === undefined
-                    ? app.changedAt === null
-                      ? 'Not built yet'
-                      : `Last changed ${ago(now - app.changedAt)}`
-                    : `${String(block.done)} of ${count(block.total, 'task', 'tasks')} done`}
+              <div className="launcher__ov-app-who">
+                <AppIcon appId={app.appId} name={app.name} />
+                <div>
+                  <div className="launcher__ov-app-name">{app.name}</div>
+                  <div className="launcher__ov-app-detail">
+                    {block === undefined
+                      ? app.changedAt === null
+                        ? 'Not built yet'
+                        : `Last changed ${ago(now - app.changedAt)}`
+                      : `${String(block.done)} of ${count(block.total, 'task', 'tasks')} done`}
+                  </div>
                 </div>
               </div>
               <span className="launcher__ov-state">

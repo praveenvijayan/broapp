@@ -1561,6 +1561,67 @@ code {
 }
 
 /*
+ * An application's icon: a glyph or a letter on a tile tinted by a hue from its
+ * id. The hue arrives as `--app-hue`; light and dark only change how much of it.
+ */
+.launcher__app-icon {
+  --app-icon-ground: hsl(var(--app-hue, 220) 70% 93%);
+  --app-icon-ink: hsl(var(--app-hue, 220) 55% 32%);
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border-radius: 0.6rem;
+  background: var(--app-icon-ground);
+  color: var(--app-icon-ink);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.launcher__app-icon--medium {
+  width: 2.25rem;
+  height: 2.25rem;
+  font-size: 1rem;
+}
+
+.launcher__app-icon--small {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.4rem;
+  font-size: 0.75rem;
+}
+
+.launcher__app-icon svg {
+  width: 55%;
+  height: 55%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-scheme='light']) .launcher__app-icon {
+    --app-icon-ground: hsl(var(--app-hue, 220) 35% 22%);
+    --app-icon-ink: hsl(var(--app-hue, 220) 70% 78%);
+  }
+}
+
+:root[data-scheme='dark'] .launcher__app-icon {
+  --app-icon-ground: hsl(var(--app-hue, 220) 35% 22%);
+  --app-icon-ink: hsl(var(--app-hue, 220) 70% 78%);
+}
+
+.launcher__ov-app-who,
+.launcher__app-named {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.launcher__app-named {
+  display: inline-flex;
+  gap: 0.5rem;
+  vertical-align: middle;
+}
+
+/*
  * The Overview: the screen the launcher opens on, beside the chat rather than
  * over it. Laid out as `prompts/autoapp/mockups/overview.html` is — title, the
  * summary strip, the attention band, Running now beside Applications, the
@@ -2329,3 +2390,4 @@ code {
 .launcher__overview .launcher__button:focus-visible {
   outline-offset: 2px;
 }
+

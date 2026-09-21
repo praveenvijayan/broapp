@@ -771,8 +771,16 @@ describe('the form', () => {
 
 // ── The row and removal ─────────────────────────────────────────────────────
 
+/** A row's name cell without the icon beside the name, which these tests are not about. */
+function withoutIcons(html: string): string {
+  return html.replace(
+    /<span class="launcher__app-named"><span aria-hidden="true" class="launcher__app-icon[^"]*"[^>]*>(?:<svg[\s\S]*?<\/svg>|[^<]*)<\/span>([\s\S]*?)<\/span>/g,
+    '$1',
+  );
+}
+
 function table(apps: readonly AppRow[]): string {
-  return renderToString(
+  const html = renderToString(
     createElement(BroappProvider, {
       contract: launcherContract,
       children: createElement(AppsTable, {
@@ -786,6 +794,7 @@ function table(apps: readonly AppRow[]): string {
       }),
     }),
   );
+  return withoutIcons(html);
 }
 
 const row = (workspace: AppRow['workspace'], extra: Partial<AppRow> = {}): AppRow => ({

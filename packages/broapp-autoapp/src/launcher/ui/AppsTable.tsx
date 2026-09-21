@@ -37,6 +37,7 @@ import type { LauncherContract } from '../contract.ts';
 import { LOCATION_WORDS, workspaceSentence } from '../location-words.ts';
 import type { WorkspaceState } from '../location-words.ts';
 
+import { AppIcon } from './AppIcon.tsx';
 import {
   createLocateControl,
   createNewApplicationForm,
@@ -720,7 +721,10 @@ export function AppsTable({
               return [
                 <tr key={app.appId} className={rowClass} onClick={() => onSelect(app.appId)}>
                   <td>
-                    {app.name}
+                    <span className="launcher__app-named">
+                      <AppIcon appId={app.appId} name={app.name} size="small" />
+                      {app.name}
+                    </span>
                     {app.activationPending && (
                       <span className="launcher__badge" title="An update was interrupted">
                         unfinished update

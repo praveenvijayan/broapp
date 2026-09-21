@@ -914,6 +914,14 @@ describe.skipIf(!available)('the command line', () => {
 
 // ── The page ────────────────────────────────────────────────────────────────
 
+/** A row's name cell without the icon beside the name, which these tests are not about. */
+function withoutIcons(html: string): string {
+  return html.replace(
+    /<span class="launcher__app-named"><span aria-hidden="true" class="launcher__app-icon[^"]*"[^>]*>(?:<svg[\s\S]*?<\/svg>|[^<]*)<\/span>([\s\S]*?)<\/span>/g,
+    '$1',
+  );
+}
+
 describe('the page, unedited', () => {
   test('22. renders a chosen, missing application, and reads a receipt with workspaceLeftAt', () => {
     const route = launcherContract.operations['launcher.appsList'];
@@ -946,7 +954,7 @@ describe('the page, unedited', () => {
         }),
       }),
     );
-    expect(html).toContain('<td>Recipe tracker</td>');
+    expect(withoutIcons(html)).toContain('<td>Recipe tracker</td>');
 
     const receipt = launcherContract.operations['launcher.appRemove'].output.parse({
       appId: 'recipes',
