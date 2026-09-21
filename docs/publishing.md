@@ -8,13 +8,17 @@ what a maintainer has to do, and what they have to decide.
 Published on npm from the `Publish to npm` workflow, each with provenance:
 `broapp` at 0.4.8, `create-broapp` and `broapp-ai-anthropic` at 0.4.1,
 `broapp-ai-compatible` at 0.4.2, `broapp-ai-elements` at 0.4.8, and
-`broapp-autoapp` at 0.3.18 (2026-09-21). Earlier: 0.4.18 with the launcher at 0.3.17, the core and the panel at 0.4.7 and `broapp-ai-compatible` at 0.4.2 (2026-09-19), 0.4.17 with the launcher at 0.3.16 and the core at 0.4.6 (2026-09-19), 0.4.16 with the launcher at 0.3.15 and the core at 0.4.5 (2026-09-19), 0.4.15 with the launcher at 0.3.14 and the core at 0.4.4 (2026-09-19), 0.4.14 with the launcher at 0.3.13 (2026-09-18), 0.4.13 with the launcher at 0.3.12 (2026-09-18), 0.4.12 with the launcher at 0.3.11 (2026-09-18), 0.4.11 with the launcher at 0.3.10 (2026-09-13), 0.4.10 with the launcher at 0.3.9, 0.4.9 with the launcher at 0.3.8 and the panel at 0.4.5, 0.4.8 with the launcher at 0.3.7 and the panel at 0.4.4, 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
+`broapp-autoapp` at 0.3.19 (2026-09-21). Earlier: 0.4.19 with the launcher at 0.3.18, the core and the panel at 0.4.8 (2026-09-21), 0.4.18 with the launcher at 0.3.17, the core and the panel at 0.4.7 and `broapp-ai-compatible` at 0.4.2 (2026-09-19), 0.4.17 with the launcher at 0.3.16 and the core at 0.4.6 (2026-09-19), 0.4.16 with the launcher at 0.3.15 and the core at 0.4.5 (2026-09-19), 0.4.15 with the launcher at 0.3.14 and the core at 0.4.4 (2026-09-19), 0.4.14 with the launcher at 0.3.13 (2026-09-18), 0.4.13 with the launcher at 0.3.12 (2026-09-18), 0.4.12 with the launcher at 0.3.11 (2026-09-18), 0.4.11 with the launcher at 0.3.10 (2026-09-13), 0.4.10 with the launcher at 0.3.9, 0.4.9 with the launcher at 0.3.8 and the panel at 0.4.5, 0.4.8 with the launcher at 0.3.7 and the panel at 0.4.4, 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
 0.4.0 with 0.2.0, all on 2026-09-11; 0.3.0 on 2026-09-08; 0.2.0 and 0.1.0
 before that. To generate from an unreleased checkout instead, see
 [troubleshooting.md](troubleshooting.md).
 
-Repository release v0.4.19 ships the launcher binaries built from the same
-commit; it moves three packages: the core, whose model list gives each
+Repository release v0.4.20 ships the launcher binaries built from the same
+commit; it moves the launcher only: a person chooses the folder an
+application's source workspace is made in, from the form's folder window or
+with `create --at`, and a workspace that later goes missing is said in a
+sentence, never recreated, and found again with Locate. v0.4.19 before it
+moved three packages: the core, whose model list gives each
 provider five seconds, keeps the list a provider gave last and gains
 `ai.modelsRefresh` (additive, so a patch); the AI panel, whose picker marks a
 list `listed earlier`; and the launcher, which depends on both. v0.4.18 before
@@ -62,7 +66,7 @@ packages: the launcher, because a created application installs
 its starter now relies on; and the AI panel, because its portalled components
 and its corner radius were fixed. The launcher's peer range on the panel is
 `>=0.4.8`. A created application installs `broapp@^0.4.8` and
-`broapp-autoapp@^0.3.18`.
+`broapp-autoapp@^0.3.19`.
 
 ## Before publishing
 

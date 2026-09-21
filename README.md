@@ -202,7 +202,19 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.19: a model list that does not wait for its slowest provider.
+Version 0.4.20: an application's project where you keep your projects. The
+New application form has a **Where it lives** field: left alone, nothing
+changes; with a folder chosen — from the system's own folder window, or typed —
+the source workspace is made at `<folder>/<id>`, and the form says where before
+Create is pressed. Only the source moves: releases, data and snapshots stay with
+the launcher. A workspace that later goes missing — renamed, deleted, on a drive
+that is not connected — is said in one sentence on its row, is never recreated,
+and never stops the application opening; it comes back by itself when the folder
+does, or through **Locate…** when it moved. Removing an application leaves a
+chosen workspace where it is. From the command line: `create --at <dir>` and
+`locate <appId> <dir>`. A model cannot choose a location. Launcher only:
+`broapp-autoapp` 0.3.19. Before it, 0.4.19: a model list that does not wait for
+its slowest provider.
 Listing gives each provider five seconds, and no longer. One that does not
 answer in time gives the list it gave last, marked `listed earlier` and when,
 and its models can still be chosen. A provider that answered in the last
