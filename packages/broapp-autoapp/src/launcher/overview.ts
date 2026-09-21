@@ -347,7 +347,8 @@ export function readOverview(sources: OverviewSources): Overview {
       question === null || active === null
         ? null
         : { ...question, appId: active.appId, intentId: active.intentId, taskId: progress?.run?.taskId ?? null },
-    tasks: intents === undefined ? [] : intents.tasksIn(['needs-answer', 'failed']),
+    // A removed application's tasks stay in the store, but nobody can act on them.
+    tasks: intents === undefined ? [] : intents.tasksIn(['needs-answer', 'failed']).filter((task) => nameOf.has(task.appId)),
     candidates,
   });
 

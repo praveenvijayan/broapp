@@ -686,6 +686,22 @@ describe('17a: launcher.overview', () => {
     expect(files(world.root)).toEqual(before);
   });
 
+  test('a removed application’s failed task does not need the person', async () => {
+    const world = tabOver();
+    mkdirSync(join(world.root, 'apps'), { recursive: true });
+    const { taskIds } = intentWith(world.intents, ['fails-part'], 'gone');
+    const [fails] = taskIds;
+    if (fails === undefined) throw new Error('one task');
+    world.intents.moveTask(fails, 'in-queue', 'queued');
+    world.intents.moveTask(fails, 'in-progress', 'started', 'run-fails');
+    world.intents.moveTask(fails, 'failed', 'two attempts');
+    world.intents.setAdvice(fails, { diagnosis: 'x', advice: 'retry', note: 'Run it again.', at: Date.now() });
+    // The rule alone would raise it; the overview leaves it out because no application is called gone.
+    expect(needsYouOf({ question: null, tasks: world.intents.tasksIn(['failed']), candidates: [] }).map((item) => item.kind)).toEqual(['advice']);
+    const overview = (await world.tab.app.invoke('launcher.overview', undefined, person)) as { needsYou: unknown[] };
+    expect(overview.needsYou).toEqual([]);
+  });
+
   test('a thousand usage rows: the best of ten reads is under 50 ms', async () => {
     const world = tabOver();
     mkdirSync(join(world.root, 'apps'), { recursive: true });
@@ -1469,6 +1485,8 @@ describe.skipIf(!browserAvailable)('17b: the Overview in a browser', () => {
         world.intents.setAdvice(failed, { diagnosis: 'x', advice: 'retry', note: 'Run it again.', at: Date.now() - 1_000 });
         world.intents.setRun(id, 'running');
         world.intents.setRun(id, 'stopped', 'Build the fails part failed after 2 attempts.');
+        // Its application still there: a removed one's failed tasks need nobody.
+        mkdirSync(layout(world.root).app('items').dir, { recursive: true });
         // A candidate whose checks all passed on its own build, and nothing serving.
         const appDir = layout(world.root).app('shelf').dir;
         mkdirSync(appDir, { recursive: true });
