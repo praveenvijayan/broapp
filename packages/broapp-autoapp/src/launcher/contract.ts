@@ -501,7 +501,10 @@ export const launcherContract = defineContract({
         releaseId: s.nullable(s.string({ max: 64 })),
         installed: s.boolean(),
         problems: s.array(buildProblem, { max: 200 }),
-        notes: s.array(s.string({ max: 400 }), { max: 20 }),
+        // Long enough for `the workspace is at <target>`: a target is a chosen
+        // folder (1,024) and an id, and an answer that fails its own schema
+        // would report a created application as an error.
+        notes: s.array(s.string({ max: 1_400 }), { max: 20 }),
         opened: s.boolean(),
       }),
       summary:
@@ -547,7 +550,8 @@ export const launcherContract = defineContract({
       output: s.object({
         ok: s.boolean(),
         target: s.nullable(s.string({ max: 1_100 })),
-        problem: s.nullable(s.string({ max: 600 })),
+        // A sentence that names the folder, which may itself be 1,024 long.
+        problem: s.nullable(s.string({ max: 2_400 })),
       }),
       summary: 'Whether an application could be created in a folder, and where its workspace would be.',
     },

@@ -793,7 +793,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   tools['apps.list'] = guardedTool(gate, {
     name: 'apps.list',
     description:
-      'Every application on this computer: its id, its name, the release it is on, whether it is running, its data schema version, and and — when the person chose where its source workspace lives, or it is not there — workspace.state and workspace.dir. Start here when you were not told which application to change.',
+      'Every application on this computer: its id, its name, the release it is on, whether it is running, its data schema version, and — when the person chose where its source workspace lives, or it is not there — workspace.state and workspace.dir. Start here when you were not told which application to change.',
     inputSchema: s.void().toJsonSchema(),
     effect: 'read',
     // The same rows `launcher.appsList` shows the person, minus the process id:

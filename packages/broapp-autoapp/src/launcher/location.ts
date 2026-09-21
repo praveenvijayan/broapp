@@ -390,6 +390,14 @@ export function locateApplication(
   if (isWithin(realOrResolved(root.root), real) || isWithin(resolve(root.root), sourceDir)) {
     throw publicError.invalidInput(LOCATION_WORDS.insideRoot(sourceDir));
   }
+  // And the other way round: a folder that holds another application's
+  // workspace would confine this one's engineer to a place with that
+  // application's files in it. Creation cannot meet this — its target does not
+  // exist yet — but a folder a person points at can. After the root, whose
+  // sentence is the better one for a folder that holds every default workspace.
+  for (const other of otherWorkspaces(root, appId)) {
+    if (isWithin(real, other.dir)) throw publicError.invalidInput(LOCATION_WORDS.holdsWorkspace(sourceDir, other.appId));
+  }
 
   let owner: unknown;
   try {

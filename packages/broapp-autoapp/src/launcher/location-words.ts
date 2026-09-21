@@ -38,6 +38,9 @@ export const LOCATION_WORDS = {
     `${location} is inside the launcher’s own folder. Leave the choice empty to keep the application there, or choose somewhere else.`,
   insideWorkspace: (location: string, otherAppId: string): string =>
     `${location} is inside the workspace of ${otherAppId}. Choose a folder that is not part of another application.`,
+  /** Locate only: the folder pointed at has another application's workspace somewhere beneath it. */
+  holdsWorkspace: (location: string, otherAppId: string): string =>
+    `${location} has the workspace of ${otherAppId} inside it. Choose the folder that is this application’s own.`,
   targetExists: (target: string): string =>
     `${target} already exists. Choose another folder, or move or rename that one first.`,
   diskFull: (target: string): string =>

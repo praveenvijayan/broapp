@@ -992,3 +992,47 @@ describe('the source', () => {
     ).toThrow(/EEXIST/);
   });
 });
+
+describe('found in review', () => {
+  test('a long folder: creation and the live check still answer inside their own schemas', async () => {
+    const where = makeWorld();
+    const app = launcherApp(where);
+    // Deep rather than long-named: a single name is capped near 255 bytes, a path is not.
+    let location = where.places;
+    while (location.length < 520) location = join(location, 'a-folder-with-quite-a-long-name-'.repeat(3));
+    mkdirSync(location, { recursive: true });
+
+    const made = (await app.invoke(
+      'launcher.appCreate',
+      { appId: 'recipes', name: 'Recipe tracker', location },
+      asPerson('r-long-1'),
+    )) as { ok: boolean; notes: string[] };
+    expect(made.ok).toBe(true);
+    expect(made.notes[0]).toBe(LOCATION_WORDS.created(join(location, 'recipes')));
+    expect(made.notes[0]!.length).toBeGreaterThan(400);
+
+    // The same folder again is *target exists*, a sentence that carries the path.
+    const again = (await app.invoke(
+      'launcher.locationCheck',
+      { appId: 'recipes', location },
+      asPerson('r-long-2'),
+    )) as { ok: boolean; problem: string | null };
+    expect(again.ok).toBe(false);
+    expect(again.problem).toBe(LOCATION_WORDS.targetExists(join(location, 'recipes')));
+  });
+
+  test('locate refuses a folder that holds another application’s workspace', async () => {
+    const where = makeWorld();
+    const outer = join(where.places, 'outer');
+    mkdirSync(outer);
+    expect((await create(where, 'recipes', where.places)).ok).toBe(true);
+    expect((await create(where, 'ledger', outer)).ok).toBe(true);
+    // A folder above `ledger`'s workspace that claims to be `recipes`.
+    writeFileSync(join(outer, 'autoapp.json'), JSON.stringify({ appId: 'recipes' }));
+    const before = readFileSync(where.root.app('recipes').location, 'utf8');
+    expect(() => locateApplication(where.root, 'recipes', outer)).toThrow(
+      LOCATION_WORDS.holdsWorkspace(outer, 'ledger'),
+    );
+    expect(readFileSync(where.root.app('recipes').location, 'utf8')).toBe(before);
+  });
+});

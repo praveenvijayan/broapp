@@ -59,6 +59,14 @@ above. The dialog is not trusted to have returned a folder that is allowed —
 only a folder the person pointed at. One window is open at a time, one left
 open is closed after five minutes, and the launcher closes it when it stops.
 
+`launcher.locationCheck` is a read, so on channel `ai` it is answered without a
+question, and its sentences tell a folder that does not exist from one that is a
+file or cannot be written to. A model that can call the launcher's routes can
+therefore learn whether a path exists. It learns nothing about what is in it,
+it runs on the person's own computer beside tools that already read their
+workspace, and the form needs the answer before anybody has been asked
+anything; the trade is written down here rather than hidden.
+
 ## Opening a tab
 
 An application's launch URL is a credential, and the launcher's page never

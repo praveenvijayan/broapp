@@ -299,7 +299,7 @@ export function describeReceipt(receipt: RemovalDescription): string {
   return [
     `${String(receipt.releases)} release${receipt.releases === 1 ? '' : 's'}`,
     // A chosen workspace does not move, so it is not in the list of what does.
-    receipt.workspaceLeftAt !== undefined
+    receipt.workspaceLeftAt != null
       ? 'its workspace stays where it is'
       : receipt.hadSource
         ? 'a source workspace'
