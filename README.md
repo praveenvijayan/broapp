@@ -202,7 +202,17 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.18: more than one model source at once. Every provider keeps its
+Version 0.4.19: a model list that does not wait for its slowest provider.
+Listing gives each provider five seconds, and no longer. One that does not
+answer in time gives the list it gave last, marked `listed earlier` and when,
+and its models can still be chosen. A provider that answered in the last
+thirty seconds is not asked again, so three panels opening is one request;
+Refresh always asks. What is kept is in memory only, and is dropped when the
+provider's address or key changes or it is turned off. Three packages:
+`broapp` 0.4.8, additive (`ai.modelsRefresh`, a `reason` on a provider under
+the list); `broapp-ai-elements` 0.4.8, for the picker's heading and line; and
+`broapp-autoapp` 0.3.18, which depends on both. Before it, 0.4.18: more than
+one model source at once. Every provider keeps its
 own address, model and key, and is either turned on or never contacted. A
 model written `<provider>:<model>` runs on that provider from a conversation,
 a task or a tier, so light work can stay on Ollama while deep work goes to a
@@ -213,7 +223,7 @@ its own group and says why; wherever a model is chosen or named it says `on
 this computer` or `sent to` its provider. OpenRouter has a preset of its own.
 Four packages: `broapp` 0.4.7, additive; `broapp-ai-compatible` 0.4.2, for the
 preset; `broapp-ai-elements` 0.4.7, for the picker; and `broapp-autoapp`
-0.3.17, which depends on all three. Before it, 0.4.17: Settings is one set of
+0.3.17, which depended on all three. Before it, 0.4.17: Settings is one set of
 controls. The AI settings panel draws
 itself whole in any application: one height, corner and border for a field, a
 select and a button, "Required" or "Saved" beside the label, a saved key shown
