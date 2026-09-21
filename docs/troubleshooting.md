@@ -194,9 +194,22 @@ provider under **Providers** and check **Offer this provider's models** (the
 provider in use always is). A provider that is on but could not be read is
 named under the list with its reason — "Could not reach Ollama (local)…" when
 the server is not running, "An API key is required for …" when it has no key —
-and the other providers' models are still shown. Refresh reads every provider
-again. More than 1000 models together are cut fairly between providers, and
-the one cut says "only the first n models are shown".
+and the other providers' models are still shown. More than 1000 models
+together are cut fairly between providers, and the one cut says "only the
+first n models are shown".
+
+A list waits five seconds for each provider, and no longer. A provider that
+does not answer in that time reads "<provider> did not answer." If it gave a
+list earlier, that list is shown in its place and can still be chosen from: its
+heading ends "— listed earlier", and the line under the list says "These are
+the models it listed earlier, at 21:12." A model in it may have gone since.
+The earlier list is kept in memory only, and is dropped when the provider's
+address or key changes, when the provider is turned off, and when the
+application quits.
+
+A provider that answered in the last thirty seconds is not asked again, so a
+model added a moment ago may not show yet. **Refresh** always asks every
+provider that is turned on, however recently it answered.
 
 ### "<provider> is not turned on in Settings."
 
