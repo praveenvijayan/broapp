@@ -35,6 +35,7 @@ import type { RunStore } from '../host/run-store.ts';
 import { sourceRevision } from '../knowledge/ids.ts';
 import { stepsHash } from '../knowledge/evidence.ts';
 import { sanitise, type EventLog } from '../knowledge/log.ts';
+import { sourceProblem } from '../launcher/location.ts';
 import { readRelease, type Layout } from '../spec/index.ts';
 
 import { modelFor, readTierModels, type TierModels } from './models.ts';
@@ -1146,6 +1147,16 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
 
   /** Run one task to completed, failed, interrupted or waiting; `true` when the run goes on. */
   async function runTask(active: Active, first: TaskRecord): Promise<boolean> {
+    // A workspace that is not there stops the run before any model is asked
+    // anything: every turn would only be refused by the same tool for the same
+    // reason. The task is not moved — it is not failed, not interrupted, not an
+    // attempt, and no refusal is counted — so when the folder is back, or
+    // located, Run starts it as if nothing happened.
+    const missing = sourceProblem(layout, active.appId);
+    if (missing !== null) {
+      stopIntent(active, missing);
+      return false;
+    }
     const sourceDir = layout.app(active.appId).source;
     let task = first;
     // What the last attempt ended with, from the task's own history, so that a

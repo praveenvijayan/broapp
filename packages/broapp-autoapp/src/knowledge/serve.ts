@@ -38,6 +38,7 @@ import type { TaskContextSwitches } from './task-context.ts';
 import { sourceRevision, type FullOrigin } from './ids.ts';
 import { stagesFor } from './links.ts';
 import type { EventLog } from './log.ts';
+import { sourceProblem } from '../launcher/location.ts';
 import { indexWorkspace, orientation, taskEvidence, type SymbolIndex, type TaskEvidence } from './path.ts';
 import { problemSignature } from './scoring.ts';
 import { seedLessons } from './seed.ts';
@@ -379,6 +380,9 @@ export function createServe(input: CreateServeInput): Serve {
 
   /** A workspace's symbols, recomputed when its revision moves and every time when it has none. */
   function indexOf(appId: string): SymbolIndex {
+    // A workspace that is not there has no symbols, and is not indexed: an
+    // unreadable pointer's default path is not this application's workspace.
+    if (sourceProblem(layout, appId) !== null) return { rev: 'no-git', symbols: [] };
     const source = layout.app(appId).source;
     const rev = sourceRevision(source);
     const cached = indexes.get(appId);

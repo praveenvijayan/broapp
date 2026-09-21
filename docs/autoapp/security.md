@@ -17,6 +17,23 @@ nothing it can write is consulted when the channel is chosen.
 stops and asks. A `preview` refuses `external` outright, for everybody: a copy
 of the data is not a copy of the world.
 
+## Where a workspace may be
+
+A person chooses where an application's source workspace lives: the
+`location` of `launcher.appCreate`, or `create --at`. A model does not. The
+engineer's `apps.create` has no such field and refuses one by name, so the
+place on a disk that files are written to is never something a model decided.
+`launcher.appCreate` arriving on channel `ai` (an MCP client, a workflow) is a
+`write` and asks first, and the question carries the location as it was sent.
+
+A chosen folder may not be inside the launcher's own folder, and may not be
+inside another application's workspace, default or chosen: the engineer is
+confined to one workspace with `realpath`, and a workspace containing another
+would hand one application's engineer the other's files. The same rule holds
+for a pointer edited by hand (it is then `unreadable`, and nothing builds) and
+for `launcher.appLocate`. Nothing in the launcher deletes, moves or recreates
+anything in a folder a person chose; removal leaves the workspace where it is.
+
 ## Opening a tab
 
 An application's launch URL is a credential, and the launcher's page never

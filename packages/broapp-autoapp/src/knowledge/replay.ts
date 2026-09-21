@@ -29,6 +29,7 @@ import type { HostLogger } from 'broapp/host';
 
 import { ENGINEER_INSTRUCTIONS } from '../engineer/instructions.ts';
 import { LAUNCHER_MAX_STEPS } from '../launcher/app.ts';
+import { requireSource } from '../launcher/location.ts';
 import { snapshotDirectory } from '../launcher/snapshot.ts';
 import type { PrepareOptions } from '../launcher/workspace.ts';
 import type { AcceptanceExample, Layout } from '../spec/index.ts';
@@ -183,7 +184,9 @@ export async function manifestFor(options: ReplayOptions): Promise<ReplayManifes
   const row = replayableCase(options.knowledge, options.episodeId);
   // Asked first: a replay with no model says so before it touches the disk.
   const model = identityOf(await options.model());
-  const source = options.layout.app(row.app_id).source;
+  // Through the guard: a replay clones the workspace's history, and one that
+  // has gone is said in its sentence before anything is copied.
+  const source = requireSource(options.layout, row.app_id);
   const caseInstructions =
     row.context_id === null
       ? null

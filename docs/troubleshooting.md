@@ -157,6 +157,31 @@ Either the host stopped emitting, or the consumer stopped reading and
 backpressure stalled the producer. `emit` resolving slowly is the signal for the
 second.
 
+### An application says its workspace cannot be found
+
+An Autoapp application whose workspace was made in a folder you chose
+(`create --at`, or the folder field of **New application**) keeps a pointer to
+that folder, `<root>/apps/<appId>/location.json`. When the folder is not there
+the application still opens and serves — its releases are in the launcher's own
+folder — but nothing can change it: builds, the engineer's `source.*` tools and
+backlog runs stop with a sentence that names the path. Four causes:
+
+- **Moved or renamed.** Say where it went:
+  `broapp-autoapp locate <appId> <the workspace folder>`. The folder has to hold
+  that application's `autoapp.json`.
+- **Deleted.** Restore it from wherever you keep copies, to the same path or
+  anywhere else followed by `locate`. The launcher never recreates it for you:
+  an empty folder in its place would not be your project.
+- **On a drive that is not connected.** Connect it. The next list, build or
+  turn finds it; no restart is needed.
+- **No permission** (macOS: a folder in Desktop, Documents or Downloads the
+  launcher has not been allowed to use). Allow it in System Settings → Privacy &
+  Security → Files and Folders, or move the folder and `locate` it.
+
+A launcher root copied by hand carries its pointers, so the copy and the
+original share every chosen workspace: a change made from one is a change to
+the other's source.
+
 ## AI
 
 ### "AI is not set up yet. Open Settings to choose a provider."

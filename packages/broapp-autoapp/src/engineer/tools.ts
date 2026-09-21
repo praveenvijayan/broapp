@@ -34,6 +34,7 @@ import { listApps } from '../launcher/apps.ts';
 import { buildCandidate, SOURCE, type BuildProblem } from '../launcher/candidate.ts';
 import { createApplication } from '../launcher/create.ts';
 import type { Journal } from '../launcher/journal.ts';
+import { requireSource } from '../launcher/location.ts';
 import { TEMPLATE_NAMES, type Templates } from '../launcher/starter.ts';
 import { startFailure, type Supervisor } from '../launcher/supervisor.ts';
 import type { PrepareOptions } from '../launcher/workspace.ts';
@@ -756,7 +757,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     envelope: Envelope | undefined,
   ): { changed: readonly string[]; undo: string; matchedBy: readonly string[]; diff: string; verification: ReturnType<typeof verification> } => {
     select(appId);
-    const sourceDir = root.app(appId).source;
+    const sourceDir = requireSource(root, appId);
     const before = snapshot(sourceDir);
     const applied = applyEdits(sourceDir, hunks, message);
     const summary = diffSummary(before, snapshot(sourceDir));
@@ -792,7 +793,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   tools['apps.list'] = guardedTool(gate, {
     name: 'apps.list',
     description:
-      'Every application on this computer: its id, its name, the release it is on, whether it is running, and its data schema version. Start here when you were not told which application to change.',
+      'Every application on this computer: its id, its name, the release it is on, whether it is running, its data schema version, and and — when the person chose where its source workspace lives, or it is not there — workspace.state and workspace.dir. Start here when you were not told which application to change.',
     inputSchema: s.void().toJsonSchema(),
     effect: 'read',
     // The same rows `launcher.appsList` shows the person, minus the process id:
@@ -806,6 +807,19 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
           currentRelease: row.currentRelease,
           serving: row.serving,
           schemaVersion: row.schemaVersion,
+          // Whether its workspace is there, and where when a person chose it:
+          // a path is not a credential, and a model told "missing" without
+          // being told where cannot tell the person anything useful. Only
+          // when it says something — chosen, or not there — so the row of an
+          // ordinary application reads exactly as it did before 19a.
+          ...(row.workspace === undefined || (!row.workspace.chosen && row.workspace.state === 'present')
+            ? {}
+            : {
+                workspace: {
+                  state: row.workspace.state,
+                  ...(row.workspace.dir === null ? {} : { dir: row.workspace.dir }),
+                },
+              }),
         })),
       }),
   });
@@ -827,6 +841,14 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     // computer, as they are for every write.
     effect: 'external',
     run: async (input) => {
+      // Refused rather than dropped: the schema's `additionalProperties: false`
+      // is a rule, and the one field a model most needs to hear it for is
+      // `location` — a model does not decide where on a disk files go.
+      const allowed = Object.keys(createInput.toJsonSchema()['properties'] as Record<string, unknown>);
+      const extra = typeof input === 'object' && input !== null ? Object.keys(input).filter((key) => !allowed.includes(key)) : [];
+      if (extra.length > 0) {
+        throw publicError.invalidInput(`${INPUT_REFUSAL}: apps.create takes no ${extra.join(', ')}. Where an application's workspace lives is the person's choice, in the launcher's form or with create --at.`);
+      }
       const { appId, name, description, template } = parsed(createInput, input);
       const created = await createApplication({
         ...(template === undefined ? {} : { template }),
@@ -927,9 +949,10 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     run: (input, _signal, envelope) => {
       const { appId } = parsed(appIdInput, input);
       select(appId);
+      const sourceDir = requireSource(root, appId);
       return Promise.resolve({
-        rev: sourceRevision(root.app(appId).source),
-        files: readTree(root.app(appId).source),
+        rev: sourceRevision(sourceDir),
+        files: readTree(sourceDir),
         ...noteRead(envelope, 'source.list', { appId }),
       });
     },
@@ -947,12 +970,13 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     run: (input, _signal, envelope) => {
       const { appId, path } = parsed(readInput, input);
       select(appId);
+      const sourceDir = requireSource(root, appId);
       return Promise.resolve({
         path,
         // The revision the text came from, so a later result can be compared
         // with what was read rather than remembered.
-        rev: sourceRevision(root.app(appId).source),
-        content: readWorkspaceFile(root.app(appId).source, path),
+        rev: sourceRevision(sourceDir),
+        content: readWorkspaceFile(sourceDir, path),
         ...noteRead(envelope, 'source.read', { appId, path }),
       });
     },
@@ -974,7 +998,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       const { appId, pattern, literal, files } = parsed(searchInput, input);
       select(appId);
       return Promise.resolve({
-        ...searchWorkspace(root.app(appId).source, pattern, {
+        ...searchWorkspace(requireSource(root, appId), pattern, {
           ...(literal === undefined ? {} : { literal }),
           ...(files === undefined ? {} : { files }),
         }),
@@ -992,7 +1016,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
     run: (input, _signal, envelope) => {
       const { appId, message, changes } = parsed(changeInput, input);
       select(appId);
-      const sourceDir = root.app(appId).source;
+      const sourceDir = requireSource(root, appId);
       const before = snapshot(sourceDir);
 
       // Whole-file rewrites of large files were measured to stall models: the
@@ -1383,7 +1407,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
         throw publicError.unavailable('candidate.cycle runs only inside a turn.');
       }
       select(appId);
-      const sourceDir = root.app(appId).source;
+      const sourceDir = requireSource(root, appId);
       const previous = new Set(states.get(appId).problems.map((problem) => problemSignature(problem.stage, problem.message)));
       const runId = runIdOf(envelope) ?? envelope.requestId;
       const before = states.get(appId).cycle;

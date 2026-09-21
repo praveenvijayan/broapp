@@ -8,7 +8,7 @@
 export { createLauncherApp, createLauncherGate, QUIT_AFTER_MS, LAUNCHER_CONFIRM_TIMEOUT_MS, LAUNCHER_MAX_STEPS } from './app.ts';
 export type { CreateLauncherAppOptions, LauncherApp } from './app.ts';
 
-export { appIds, listApps, serving } from './apps.ts';
+export { appIds, listApps, serving, workspaceOf } from './apps.ts';
 export type { AppRow } from './apps.ts';
 
 export {
@@ -51,7 +51,23 @@ export type { CreateOptions, CreateResult } from './create.ts';
 export { isTemplateName, STARTER_MARKERS, TEMPLATE_NAMES, writeStarter } from './starter.ts';
 export type { StarterTemplate, StarterValues, TemplateName, Templates } from './starter.ts';
 
-export { describeReceipt, describeRemoval, removeApplication } from './remove.ts';
+export {
+  checkLocation,
+  idProblem,
+  locateApplication,
+  looksSynced,
+  MAX_LOCATION,
+  normaliseLocation,
+  requireSource,
+  sourceProblem,
+  sourceState,
+  writeLocation,
+} from './location.ts';
+export type { LocationCheck, LocationOptions, LocationProblem, SourceStateResult, WriteLocationOptions } from './location.ts';
+export { LOCATION_WORDS, WORKSPACE_STATES, workspaceSentence } from './location-words.ts';
+export type { WordsPlatform, WorkspaceState } from './location-words.ts';
+
+export { describeReceipt, describeRemoval, leftSentence, removeApplication } from './remove.ts';
 export type { RemovalDescription, RemovalReceipt, RemoveDeps } from './remove.ts';
 
 export { adopt, prepareWorkspace } from './workspace.ts';

@@ -134,7 +134,8 @@ release. An approval names a release, so an approval cannot survive a rebuild.
 1. The owner describes a change. The engineer proposes an edit to the
    application specification and to any host code the change needs.
 2. The launcher writes the proposal into the candidate workspace,
-   `<root>/apps/<appId>/source/`, which is a git repository.
+   `<root>/apps/<appId>/source/`, which is a git repository — or the folder a
+   person chose for it (see below).
 3. A build produces an immutable release directory,
    `<root>/apps/<appId>/releases/<releaseId>/`: page, host bundle, spec.
 4. The launcher takes a consistent snapshot of the live database (`VACUUM INTO`
@@ -154,6 +155,37 @@ release. An approval names a release, so an approval cannot survive a rebuild.
    `data-next/` becomes `data/`, and `<root>/apps/<appId>/current` names the new
    release. The switch is recorded in `<root>/journal.sqlite`.
 8. The old child is drained and shut down; the new one is started.
+
+### A workspace where the person chose
+
+By default the workspace is `<root>/apps/<appId>/source/`, inside the launcher's
+own data directory, where nobody keeps their projects. `create --at <dir>` and
+`launcher.appCreate`'s `location` make it at `<dir>/<appId>/` instead, and write
+a pointer beside the application's releases:
+`<root>/apps/<appId>/location.json`, mode 0600,
+`{ "version": 1, "source": "<absolute path>" }`. Without the file the workspace
+is where it always was. `layout.app()` is the only reader; its `source` is the
+pointer's path, and its `sourceLocation` says `default`, `chosen` or
+`unreadable`.
+
+Only the source moves. Releases, `data*/`, snapshots, `current`, the grants,
+the candidate state, the journal and the trash stay under `<root>`: activation
+swaps `data-next/` into `data/` and removal moves the application's directory
+into the trash, each with one `renameSync`, and a rename is atomic only on one
+volume. The pointer lives in the application's directory so that it goes to the
+trash with it and comes back with it.
+
+A chosen folder is checked before anything is written — it must exist, be a
+writable folder, not be inside the launcher's folder or another application's
+workspace, and not already hold `<appId>` — so a refusal keeps the id free. The
+pointer is written only after the workspace has been made by that creation. A
+workspace that later goes missing, becomes a file, cannot be read, or whose
+pointer cannot be believed is said in one sentence wherever it is met — the
+list, a build, the engineer's tools, a backlog run, orientation — and nothing
+recreates it; the application still opens, because a release is
+self-contained. `launcher.appLocate` and `broapp-autoapp locate` rewrite the
+pointer to a folder holding that application's `autoapp.json`. Removal leaves a
+chosen workspace where it is.
 
 The launcher's tab with the engineer at work: the conversation in the middle,
 and beside it the applications and the proposed change, with its checks.

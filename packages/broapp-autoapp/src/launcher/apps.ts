@@ -15,6 +15,8 @@ import { readdirSync } from 'node:fs';
 import { APP_ID_PATTERN, readCurrent, readRelease, type Layout } from '../spec/index.ts';
 
 import type { Journal } from './journal.ts';
+import type { WorkspaceState } from './location-words.ts';
+import { sourceState } from './location.ts';
 import type { ChildHandle, Supervisor } from './supervisor.ts';
 
 /** One application, as anything listing them sees it. */
@@ -26,6 +28,18 @@ export interface AppRow {
   readonly pid: number | null;
   readonly schemaVersion: number | null;
   readonly activationPending: boolean;
+  /**
+   * Where the source workspace is and whether it is there, computed now. `dir`
+   * is `null` for one in the launcher's own folder. One application whose
+   * folder has gone is one row that says so, never a list that fails.
+   * {@link listApps} always fills it; it is optional in the type only because
+   * rows are also written by hand where no workspace is involved.
+   */
+  readonly workspace?: {
+    readonly chosen: boolean;
+    readonly dir: string | null;
+    readonly state: WorkspaceState;
+  };
 }
 
 /**
@@ -55,6 +69,12 @@ export function serving(supervisor: Supervisor, appId: string): ChildHandle | nu
   );
 }
 
+/** A row's workspace: the state, and the path only when a person chose it. */
+export function workspaceOf(root: Layout, appId: string): NonNullable<AppRow['workspace']> {
+  const found = sourceState(root, appId);
+  return { chosen: found.chosen, dir: found.chosen ? found.dir : null, state: found.state };
+}
+
 /** Every application, with what is running and what is half-finished. */
 export function listApps(
   root: Layout,
@@ -82,6 +102,7 @@ export function listApps(
       pid: child?.pid ?? null,
       schemaVersion: child?.schemaVersion ?? null,
       activationPending: unfinished.some((row) => row.appId === appId),
+      workspace: workspaceOf(root, appId),
     };
   });
 }

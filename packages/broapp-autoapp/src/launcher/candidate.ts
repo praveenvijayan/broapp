@@ -38,6 +38,8 @@ import {
   type AcceptanceExample,
 } from '../spec/index.ts';
 
+import { sourceProblem } from './location.ts';
+
 /** What `autoapp.json` in a source workspace says. */
 export interface SourceManifest {
   readonly appId: string;
@@ -185,6 +187,14 @@ function versionOf(specifier: string, fallback: string): string {
 /** Build one candidate release from a source workspace. */
 export async function buildCandidate(params: BuildCandidateParams): Promise<BuildCandidateResult> {
   const app = params.layout.app(params.appId);
+  // The application's own workspace goes through the guard: one that has gone
+  // is said in its sentence rather than as `autoapp.json: ENOENT`, and a
+  // pointer that cannot be read never falls back to building the default
+  // path. A caller that names a directory (evaluation, replay) owns that.
+  if (params.sourceDir === undefined) {
+    const missing = sourceProblem(params.layout, params.appId);
+    if (missing !== null) return { ok: false, problems: [{ stage: 'spec', message: missing }], stagesRun: ['spec'] };
+  }
   const sourceDir = params.sourceDir ?? app.source;
   const problems: BuildProblem[] = [];
   const work = mkdtempSync(join(tmpdir(), 'autoapp-build-'));

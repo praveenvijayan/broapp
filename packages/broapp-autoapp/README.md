@@ -15,11 +15,14 @@ engineer's `apps.create` — writes one of them to disk, installs its
 dependencies, builds the first release and opens it. `starter`, the default, is
 a list of items with a table and a form; `blank` is one empty page to describe
 to the engineer. What comes out is an ordinary source workspace,
-indistinguishable from one you imported yourself.
+indistinguishable from one you imported yourself. `--at <dir>` puts that
+workspace at `<dir>/<appId>` instead of inside the launcher's own folder, and
+`broapp-autoapp locate <appId> <dir>` says where it went after it was moved or
+renamed; everything else stays with the launcher.
 
 `broapp-autoapp remove <appId> --yes`, and **Remove** on the row in the tab,
 move an application's whole directory — releases, source workspace and data —
-into `<root>/trash/`. Nothing is deleted, the launcher never empties that
+into `<root>/trash/`; a workspace made with `--at` is left where it is. Nothing is deleted, the launcher never empties that
 directory, and nothing is removed while the application is running.
 
 Every application the launcher serves has an **Autoapp** mark in its page that

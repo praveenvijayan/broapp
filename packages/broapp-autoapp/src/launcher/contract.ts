@@ -394,6 +394,17 @@ const appSummary = s.object({
   schemaVersion: s.nullable(s.number()),
   /** True while an activation for this application is unfinished in the journal. */
   activationPending: s.boolean(),
+  /**
+   * Where its source workspace is, and whether it is there (19a). `dir` is
+   * `null` for a workspace in the launcher's own folder: the page has nothing
+   * to do with that path. A new field, so a page built before 19a, which
+   * parses with the object schema's known keys only, reads the rest unchanged.
+   */
+  workspace: s.object({
+    chosen: s.boolean(),
+    dir: s.nullable(s.string({ max: 1_100 })),
+    state: s.enum(['present', 'missing', 'not-a-directory', 'unreadable', 'denied']),
+  }),
 });
 
 /** One application on the overview: its row, its state and its candidate's own checks. */
@@ -478,6 +489,12 @@ export const launcherContract = defineContract({
         description: s.optional(s.string({ max: 400 })),
         /** Which starter to write. Absent is `starter`, so nothing existing changes. */
         template: s.optional(s.enum(['starter', 'blank'])),
+        /**
+         * The folder the workspace is made in, as `<location>/<appId>`. Absent
+         * is the launcher's own folder, exactly as before 19a. A person's
+         * choice only: the engineer's `apps.create` has no such field.
+         */
+        location: s.optional(s.string({ min: 1, max: 1_024 })),
       }),
       output: s.object({
         ok: s.boolean(),
@@ -510,9 +527,40 @@ export const launcherContract = defineContract({
         snapshots: s.number({ int: true, min: 0 }),
         dataPrev: s.number({ int: true, min: 0 }),
         previewStopped: s.boolean(),
+        /**
+         * Where a workspace the person chose was left, untouched, or `null`
+         * for one in the launcher's own folder, which moved with the rest.
+         */
+        workspaceLeftAt: s.nullable(s.string({ max: 1_100 })),
       }),
       summary:
-        'Move an application’s directory — its releases, its source workspace and its data — to the launcher’s trash.',
+        'Move an application’s directory — its releases, its source workspace and its data — to the launcher’s trash. A workspace in a folder the person chose is left where it is.',
+    },
+    'launcher.locationCheck': {
+      // A read: it looks at a folder and writes nothing, takes no lock, and is
+      // what the form asks before Create is pressed.
+      effect: 'read',
+      input: s.object({
+        appId: s.string({ min: 1, max: 40 }),
+        location: s.string({ min: 1, max: 1_024 }),
+      }),
+      output: s.object({
+        ok: s.boolean(),
+        target: s.nullable(s.string({ max: 1_100 })),
+        problem: s.nullable(s.string({ max: 600 })),
+      }),
+      summary: 'Whether an application could be created in a folder, and where its workspace would be.',
+    },
+    'launcher.appLocate': {
+      // A write: it rewrites the pointer that says where the workspace is.
+      effect: 'write',
+      input: s.object({
+        appId: s.string({ min: 1, max: 40 }),
+        /** The workspace itself, not its parent. */
+        sourceDir: s.string({ min: 1, max: 1_024 }),
+      }),
+      output: s.object({ dir: s.string({ max: 1_100 }) }),
+      summary: 'Say where an application’s workspace went, when it was moved or renamed.',
     },
     'launcher.appOpen': {
       // A write: it may start a process and it opens a browser tab, which is

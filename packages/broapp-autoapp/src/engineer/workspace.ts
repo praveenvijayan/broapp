@@ -293,6 +293,14 @@ export function applyChange(
   changes: readonly FileChange[],
   message: string,
 ): EditResult {
+  // The tools check the workspace is there before they get here; this is for
+  // the moment between that check and the write. The `mkdirSync` below is
+  // recursive, and a workspace whose folder has just gone — a drive pulled
+  // out, a rename in Finder — must never be recreated by it as an empty
+  // project in the same place.
+  if (!existsSync(sourceDir)) {
+    throw publicError.unavailable(`${sourceDir} is not there any more; nothing was written.`);
+  }
   const targets = changes.map((change) => {
     const path = asPosix(change.path);
     if (!WRITABLE.test(path)) {

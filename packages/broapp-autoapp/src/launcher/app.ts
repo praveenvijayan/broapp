@@ -52,9 +52,10 @@ import {
 } from '../spec/index.ts';
 
 import { activate } from './activate.ts';
-import { appIds, listApps, serving as servingChild } from './apps.ts';
+import { appIds, listApps, serving as servingChild, workspaceOf } from './apps.ts';
 import { launcherContract, type LauncherContract } from './contract.ts';
 import { createApplication } from './create.ts';
+import { checkLocation, locateApplication } from './location.ts';
 import { readOverview, type LiveUsage } from './overview.ts';
 import type { Journal } from './journal.ts';
 import { removeApplication } from './remove.ts';
@@ -189,7 +190,10 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
 
   // The same rows the engineer's `apps.list` gets, from the same helper.
   host.operation('launcher.appsList', () => {
-    const apps = listApps(root, supervisor, journal).map((row) => ({ ...row }));
+    const apps = listApps(root, supervisor, journal).map((row) => ({
+      ...row,
+      workspace: { ...(row.workspace ?? workspaceOf(root, row.appId)) },
+    }));
     const chosen = options.session?.get().selectedAppId ?? null;
     return { apps, selected: chosen !== null && apps.some((row) => row.appId === chosen) ? chosen : null };
   });
@@ -225,11 +229,12 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
     return await openTab(child);
   }
 
-  host.operation('launcher.appCreate', async ({ appId, name, description, template }) => {
+  host.operation('launcher.appCreate', async ({ appId, name, description, template, location }) => {
     const created = await createApplication({
       layout: root,
       templates: options.templates,
       ...(template === undefined ? {} : { template }),
+      ...(location === undefined ? {} : { location }),
       versions: options.versions,
       appId,
       name,
@@ -260,6 +265,21 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   });
 
   host.operation('launcher.appOpen', async ({ appId }) => await openApplication(appId));
+
+  // The form's question before Create is pressed: the same checks creation
+  // makes, so the answer here and the refusal there cannot disagree. It
+  // writes nothing and takes no lock, so its "yes" is a prediction, and
+  // creation checks again.
+  host.operation('launcher.locationCheck', ({ appId, location }) => {
+    const checked = checkLocation(root, appId, location);
+    return checked.ok
+      ? { ok: true, target: checked.target, problem: null }
+      : { ok: false, target: null, problem: checked.problem };
+  });
+
+  // A person saying where a moved workspace went. No engineer tool reaches
+  // this: where a person's files are is theirs to say.
+  host.operation('launcher.appLocate', ({ appId, sourceDir }) => locateApplication(root, appId, sourceDir));
 
   /**
    * Move an application to the trash.

@@ -36,6 +36,7 @@ import { readCurrent, type Layout } from '../spec/index.ts';
 
 import { serving } from './apps.ts';
 import type { Journal } from './journal.ts';
+import { LOCATION_WORDS } from './location-words.ts';
 import { removeServing } from './serving.ts';
 import type { Supervisor } from './supervisor.ts';
 
@@ -51,10 +52,21 @@ export interface RemovalReceipt {
   readonly dataPrev: number;
   /** A preview was running and was stopped so its directory could move. */
   readonly previewStopped: boolean;
+  /**
+   * Where a workspace the person chose was left — whether or not it is there —
+   * or `null` for one in the launcher's own folder, which moved with the rest.
+   */
+  readonly workspaceLeftAt: string | null;
 }
 
-/** What a removal would move: the receipt, before there is anywhere to say it went. */
-export type RemovalDescription = Omit<RemovalReceipt, 'trashPath' | 'previewStopped'>;
+/**
+ * What a removal would move: the receipt, before there is anywhere to say it
+ * went. `workspaceLeftAt` is present only for a workspace a person chose, so a
+ * description of any other application reads exactly as it did before 19a.
+ */
+export type RemovalDescription = Omit<RemovalReceipt, 'trashPath' | 'previewStopped' | 'workspaceLeftAt'> & {
+  readonly workspaceLeftAt?: string;
+};
 
 /** How long a preview child gets to stop. */
 const STOP_DEADLINE_MS = 10_000;
@@ -140,10 +152,25 @@ export function describeRemoval(layout: Layout, appId: string): RemovalDescripti
   if (!existsSync(app.dir)) {
     throw publicError.notFound(`There is no application called ${appId}.`);
   }
+  const where = app.sourceLocation;
+  // A chosen workspace is in the person's folder, among the person's things,
+  // and the launcher's trash is on another volume as often as not: it is not
+  // moved, looked into or counted, and its being missing, unreadable or
+  // denied cannot fail a removal. An unreadable pointer names no folder, so
+  // there is nothing to leave anywhere; the pointer itself goes to the trash.
+  const leftAt = where.kind === 'chosen' ? where.path : null;
+  let hadSource = false;
+  try {
+    hadSource = existsSync(app.source);
+  } catch {
+    hadSource = false;
+  }
   return {
     appId,
     releases: count(app.releases),
-    hadSource: existsSync(app.source),
+    // What it has always meant: the application had a source workspace.
+    hadSource: where.kind === 'unreadable' ? false : hadSource,
+    ...(leftAt === null ? {} : { workspaceLeftAt: leftAt }),
     dataBytes: bytesUnder(app.data),
     snapshots: count(app.snapshots),
     dataPrev: readdirSync(app.dir).filter((entry) => entry.startsWith('data-prev-')).length,
@@ -230,6 +257,7 @@ export async function removeApplication(deps: RemoveDeps, appId: string): Promis
     ...described,
     trashPath: relative(root.root, target),
     previewStopped,
+    workspaceLeftAt: described.workspaceLeftAt ?? null,
   };
   deps.log?.event(
     'remove',
@@ -242,18 +270,40 @@ export async function removeApplication(deps: RemoveDeps, appId: string): Promis
       snapshots: receipt.snapshots,
       dataPrev: receipt.dataPrev,
       previewStopped: receipt.previewStopped,
+      workspaceLeftAt: receipt.workspaceLeftAt,
     },
     { appId, ...(currentRelease === null ? {} : { releaseId: currentRelease }) },
   );
-  deps.logger?.warn(`[autoapp] ${appId} was moved to ${receipt.trashPath}`);
+  const left = leftSentence(receipt);
+  deps.logger?.warn(`[autoapp] ${appId} was moved to ${receipt.trashPath}${left === null ? '' : `. ${left}`}`);
   return receipt;
+}
+
+/**
+ * What happened to a chosen workspace, as a sentence, or `null` for one in the
+ * launcher's own folder. Said whether or not the folder is there, because the
+ * person may be about to go looking for it.
+ */
+export function leftSentence(receipt: {
+  readonly workspaceLeftAt?: string | null;
+  readonly hadSource: boolean;
+}): string | null {
+  if (receipt.workspaceLeftAt === undefined || receipt.workspaceLeftAt === null) return null;
+  return receipt.hadSource
+    ? LOCATION_WORDS.removalLeft(receipt.workspaceLeftAt)
+    : LOCATION_WORDS.removalMissing(receipt.workspaceLeftAt);
 }
 
 /** What a removal moved, as one line for a terminal. */
 export function describeReceipt(receipt: RemovalDescription): string {
   return [
     `${String(receipt.releases)} release${receipt.releases === 1 ? '' : 's'}`,
-    receipt.hadSource ? 'a source workspace' : 'no source workspace',
+    // A chosen workspace does not move, so it is not in the list of what does.
+    receipt.workspaceLeftAt !== undefined
+      ? 'its workspace stays where it is'
+      : receipt.hadSource
+        ? 'a source workspace'
+        : 'no source workspace',
     `${String(receipt.dataBytes)} bytes of data`,
     `${String(receipt.snapshots)} snapshot${receipt.snapshots === 1 ? '' : 's'}`,
     `${String(receipt.dataPrev)} previous data director${receipt.dataPrev === 1 ? 'y' : 'ies'}`,

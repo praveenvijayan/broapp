@@ -66,7 +66,8 @@ import { addServing, removeServing } from './serving.ts';
 import { createSupervisor, type Supervisor } from './supervisor.ts';
 import { createLauncherGate } from './app.ts';
 import { createApplication } from './create.ts';
-import { describeReceipt, describeRemoval, removeApplication, type RemovalDescription } from './remove.ts';
+import { locateApplication, requireSource } from './location.ts';
+import { describeReceipt, describeRemoval, leftSentence, removeApplication, type RemovalDescription } from './remove.ts';
 import { isTemplateName, type TemplateName, type Templates } from './starter.ts';
 import { createLauncherTab } from './tab.ts';
 import { adopt, prepareWorkspace } from './workspace.ts';
@@ -113,9 +114,13 @@ Usage:
                                         started again unless --no-restore.
   broapp-autoapp serve <appId> [--no-open]
   broapp-autoapp create <appId> [--name <name>] [--description <text>]
-                                [--template starter|blank]
+                                [--template starter|blank] [--at <dir>]
                                         starter (the default) is a list of items;
                                         blank is one empty page to describe.
+                                        --at makes the workspace in <dir>/<appId>
+                                        instead of the launcher's own folder.
+  broapp-autoapp locate <appId> <dir>   Say where a chosen workspace went, after it
+                                        was moved or renamed.
   broapp-autoapp remove <appId> [--yes] Move an application to the launcher's trash.
   broapp-autoapp import <sourceDir> --as <appId> [--grant]
   broapp-autoapp build <appId>
@@ -687,6 +692,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * The AI layer takes its `fetch` as an option precisely so a test can decide
  * what the network is. Nothing else in the launcher makes a request.
  */
+/**
+ * The install `create` runs, when a test says there is no network.
+ *
+ * A command-line test of `create --at` must not reach the registry, and the
+ * compiled launcher's install is itself spawned as `bun install`. Under
+ * `NODE_ENV=test` with `AUTOAPP_TEST_NO_NETWORK=1` — the same switch the AI
+ * layer honours — the install reports what an offline machine reports, and the
+ * build resolves what is already on disk, as it does after a failed install.
+ */
+const testInstall: ((sourceDir: string) => Promise<{ ok: boolean; detail: string }>) | null =
+  Bun.env['NODE_ENV'] === 'test' && Bun.env['AUTOAPP_TEST_NO_NETWORK'] === '1'
+    ? () => Promise.resolve({ ok: false, detail: 'the network is unavailable' })
+    : null;
+
 const noNetwork = Object.assign(
   () => Promise.reject(new Error('the network is unavailable')),
   { preconnect: () => undefined },
@@ -700,6 +719,14 @@ async function importApp(
   autoGrant: boolean,
 ): Promise<number> {
   const app = root.app(appId);
+  // `import` copies into the launcher's own folder only. An application that
+  // already has a pointer has a workspace somewhere a person chose, and
+  // copying into that path — which may be missing because its drive is not
+  // connected — would recreate a chosen folder, which nothing may do.
+  if (app.sourceLocation.kind !== 'default') {
+    console.error(`${appId} already has a source workspace in a folder that was chosen for it; import copies into the launcher's own folder only`);
+    return 1;
+  }
   mkdirSync(app.dir, { recursive: true, mode: 0o700 });
   if (existsSync(app.source)) {
     console.error(`${appId} already has a source workspace at ${app.source}`);
@@ -756,16 +783,26 @@ async function createApp(
   name: string,
   description: string,
   template: TemplateName,
+  location: string | undefined,
 ): Promise<number> {
-  const created = await createApplication({
-    layout: root,
-    templates,
-    template,
-    versions: VERSIONS,
-    appId,
-    name,
-    description,
-  });
+  let created;
+  try {
+    created = await createApplication({
+      layout: root,
+      templates,
+      template,
+      versions: VERSIONS,
+      appId,
+      name,
+      description,
+      ...(location === undefined ? {} : { location }),
+      ...(testInstall === null ? {} : { install: testInstall }),
+    });
+  } catch (cause) {
+    // A refusal is a sentence for a person, not a stack.
+    console.error(String(cause instanceof Error ? cause.message : cause));
+    return 1;
+  }
   for (const note of created.notes) console.log(note);
   if (!created.ok) {
     for (const problem of created.problems) console.error(`${problem.stage}: ${problem.message}`);
@@ -826,6 +863,8 @@ async function removeApp(
     appId,
   );
   console.log(`moved to ${receipt.trashPath}`);
+  const left = leftSentence(receipt);
+  if (left !== null) console.log(left);
   return 0;
 }
 
@@ -963,7 +1002,24 @@ async function main(): Promise<number> {
           flagValue(argv, '--name') ?? appId,
           flagValue(argv, '--description') ?? '',
           template,
+          flagValue(argv, '--at'),
         );
+      }
+
+      case 'locate': {
+        // Positional, not flag-skipping: a folder may legitimately start with
+        // a hyphen, and this command takes exactly two arguments.
+        const appId = argv[1];
+        const dir = argv[2];
+        if (appId === undefined || dir === undefined) return usage('locate <appId> <dir>');
+        try {
+          const located = locateApplication(root, appId, dir);
+          console.log(`${appId}'s workspace is at ${located.dir}`);
+          return 0;
+        } catch (cause) {
+          console.error(String(cause instanceof Error ? cause.message : cause));
+          return 1;
+        }
       }
 
       case 'remove': {
@@ -982,6 +1038,12 @@ async function main(): Promise<number> {
       case 'build': {
         const appId = positional(argv, 1);
         if (appId === undefined) return usage('build <appId>');
+        try {
+          requireSource(root, appId);
+        } catch (cause) {
+          console.error(String(cause instanceof Error ? cause.message : cause));
+          return 1;
+        }
         const built = await buildCandidate({ layout: root, appId });
         if (!built.ok) {
           for (const problem of built.problems) console.error(`${problem.stage}: ${problem.message}`);

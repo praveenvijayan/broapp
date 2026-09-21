@@ -32,8 +32,8 @@ export { exportContract } from './export-contract.ts';
 export { canonicalJson, releaseId, stripIdentity } from './release-id.ts';
 export type { ReleaseParts } from './release-id.ts';
 
-export { defaultRoot, layout } from './layout.ts';
-export type { AppLayout, Layout } from './layout.ts';
+export { defaultRoot, isWithin, layout, LOCATION_VERSION } from './layout.ts';
+export type { AppLayout, Layout, SourceLocation } from './layout.ts';
 
 export {
   listReleases,

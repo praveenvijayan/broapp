@@ -25,6 +25,7 @@ import { MAX_REPAIR_ATTEMPTS, type CandidateStates } from '../engineer/state.ts'
 import { within } from '../engineer/workspace.ts';
 import type { AppRow } from '../launcher/apps.ts';
 import { SOURCE } from '../launcher/candidate.ts';
+import { sourceProblem } from '../launcher/location.ts';
 import { readCurrent, readRelease, type AppSpec, type Layout } from '../spec/index.ts';
 import type { Component, Page } from '../views/types.ts';
 
@@ -159,8 +160,12 @@ export function orientation(input: {
       : `Candidate: ${built.slice(0, 8)} built ${state.builtAt === null ? 'at an unknown time' : ago(state.builtAt, now)} from ${rev === null ? 'an unknown revision' : rev === 'no-git' ? 'no-git' : rev.slice(0, 7)}`,
   );
 
-  const edited = state.editsSinceBuild && rev !== null ? changedSince(layout.app(appId).source, rev) : [];
-  lines.push(
+  // A workspace that is not there is said once, in its sentence, where the
+  // edits would have been listed; nothing below reads the folder.
+  const missing = sourceProblem(layout, appId);
+  if (missing !== null) lines.push(`Workspace: ${missing}`);
+  const edited = missing === null && state.editsSinceBuild && rev !== null ? changedSince(layout.app(appId).source, rev) : [];
+  if (missing === null) lines.push(
     !state.editsSinceBuild
       ? 'Edits since build: none'
       : edited.length === 0
@@ -223,7 +228,8 @@ export function orientation(input: {
   }
 
   let next: string;
-  if (stalled) next = 'the last cycles ended with the same failure: read the lines it points at and change approach, or ask the person';
+  if (missing !== null) next = 'nothing can be changed until the workspace is back: tell the person what the Workspace line says';
+  else if (stalled) next = 'the last cycles ended with the same failure: read the lines it points at and change approach, or ask the person';
   else if (unfinished) next = 'candidate.cycle with no hunks, to finish verifying the last change';
   else if (failing) next = 'fix what the last cycle reported, with another candidate.cycle';
   else if (built === null || state.editsSinceBuild) next = 'candidate.build';
@@ -566,6 +572,11 @@ export function taskEvidence(input: {
     );
   }
 
+  const missing = sourceProblem(layout, appId);
+  if (entries.length === 0 && missing !== null) {
+    lines.push(missing);
+    return { appId, text: cut(lines.join('\n'), EVIDENCE_MAX_CHARS), entries };
+  }
   if (entries.length === 0) {
     const sizes = Object.values(SOURCE).map((path) => {
       try {
@@ -586,7 +597,7 @@ export function taskEvidence(input: {
   entries.push({ kind: 'constraint', name: 'migrations', confidence: 'declared', note: `next ${nextMigrationId(last)}` });
   lines.push(CONSTRAINTS);
   entries.push({ kind: 'constraint', name: 'rules', confidence: 'declared' });
-  const context = contextLine(layout.app(appId).source);
+  const context = missing === null ? contextLine(layout.app(appId).source) : missing;
   if (context !== undefined) {
     lines.push(context);
     entries.push({ kind: 'constraint', name: 'context', confidence: 'declared', note: context });
