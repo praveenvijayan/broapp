@@ -79,7 +79,10 @@ const REPO = 'https://github.com/praveenvijayan/broapp';
  * Repository directories whose files are copied into the site as-is, so a
  * Markdown image that points at them keeps working after the rewrite.
  */
-const ASSET_DIRS = ['diagrams'] as const;
+const ASSET_DIRS = ['diagrams', 'screenshots'] as const;
+
+/** The kinds of file an asset directory may hold: drawn diagrams and captured screens. */
+const ASSET_EXTENSIONS = ['.svg', '.webp', '.png'] as const;
 
 /**
  * The directory of the document being rendered.
@@ -903,7 +906,7 @@ async function build(out: string): Promise<void> {
   for (const dir of ASSET_DIRS) {
     await mkdir(join(out, dir), { recursive: true });
     for (const name of await readdir(join(root, dir))) {
-      if (!name.endsWith('.svg')) continue;
+      if (!ASSET_EXTENSIONS.some((extension) => name.endsWith(extension))) continue;
       await copyFile(join(root, dir, name), join(out, dir, name));
       console.log(`  ${`${dir}/${name}`.padEnd(28)} <- ${dir}/${name}`);
     }

@@ -76,6 +76,22 @@ describe('the header menu', () => {
   });
 });
 
+describe('the Autoapp screenshots', () => {
+  test('each page that shows one links it into the site, and the file is copied beside it', () => {
+    const shown: Record<string, string[]> = {
+      'autoapp-design.html': ['autoapp-engineer.webp'],
+      'autoapp-intents.html': ['autoapp-settings.webp', 'autoapp-overview.webp', 'autoapp-backlog.webp'],
+      'autoapp-learning.html': ['autoapp-log.webp', 'autoapp-knowledge.webp'],
+    };
+    for (const [slug, files] of Object.entries(shown)) {
+      for (const file of files) {
+        expect(page(slug)).toContain(`<img src="screenshots/${file}" alt="`);
+        expect(existsSync(join(out, 'screenshots', file))).toBe(true);
+      }
+    }
+  });
+});
+
 describe('the Autoapp landing page', () => {
   test('carries the architecture diagram, with the diagram’s own description as its alt text', () => {
     const svg = readFileSync(join(root, 'diagrams', 'autoapp-architecture.svg'), 'utf8');

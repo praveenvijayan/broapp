@@ -25,6 +25,8 @@ follows, with a copy of the shown lines for a bug report. The route behind
 it is `launcher.eventsList`, a read; a launcher started without the store
 answers that it keeps no log.
 
+![The Log panel: filters for level, application and words, Follow and Copy, and the newest lines first, each with its time, level, source and message, such as a child stopping when its launcher closed the channel and a turn ending with the tokens it used.](../../screenshots/autoapp-log.webp)
+
 | Table | What it holds |
 |---|---|
 | `events` | One row per build, check, edit, activation, turn, token count, child stderr line, and launcher warning. |
@@ -43,6 +45,8 @@ that names an application, is kept in `<root>/launcher/session.json`.
 The book icon on the launcher tab's rail opens the **Knowledge** panel, over
 the page like the log, with three views. It reads when it opens and when
 Refresh is pressed, never on a timer, and every read writes nothing.
+
+![The Knowledge panel on its Turns view: one row per turn, newest first, with its application, the request or its words, the documents it was given, and the outcome of each lesson it was served.](../../screenshots/autoapp-knowledge.webp)
 
 - **Turns**, newest first. One row per `contexts` row: when, the application,
   the request (from the case the turn opened, when it opened one; otherwise the

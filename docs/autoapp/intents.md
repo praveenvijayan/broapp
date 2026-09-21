@@ -73,6 +73,8 @@ history does not say it did.
 The host computes a task's tier. A model never supplies it. The model gives
 `reasoning` (`low`, `medium` or `high`), and that is one input to the rule.
 
+![Settings: the provider in use and its model, a sentence saying where messages are sent, and every provider with where it runs and whether it is on, in use, or needs a key or an address, each with its own address, key and Test.](../../screenshots/autoapp-settings.webp)
+
 | Tier | When | Reason given |
 |---|---|---|
 | `deep` | `risk` is `high` | It is marked high risk. |
@@ -390,6 +392,8 @@ unknown rather than nothing. While a turn runs, what its completed steps have
 used so far is held in memory from the AI layer's `onUsageSoFar` hook, and the
 row replaces it when the turn ends.
 
+![The Overview screen: counts of what needs attention, what is running, what is queued and what was spent today; a band naming a failed task and its advice with a Review action; the run in progress, or that nothing is; each application with its state and progress; and today's usage with the prices a person sets.](../../screenshots/autoapp-overview.webp)
+
 Prices are the person's. `prices.json` in the launcher's data directory, beside
 `intent-models.json`, says what a model costs in US dollars per million tokens,
 and optionally a daily budget:
@@ -427,6 +431,8 @@ turn, when it started, its last tool, how many approvals, and a question
 waiting for the person), and `launcher.intentRunning` says whether any run is
 going and waiting. If a launcher has no store, every one of these routes answers
 `unavailable`.
+
+![The Backlog panel: a draft intent being written and a finished one with four completed tasks, the sentences a person checks by hand, each task with its priority, tier, model and where it runs, and on the right the request as asked, the restated analysis, what it builds on, its conflicts and what is out of reach.](../../screenshots/autoapp-backlog.webp)
 
 The **Backlog** panel shows the intents of the application selected in the
 launcher, newest first. Open an intent to see the request, the analysis and

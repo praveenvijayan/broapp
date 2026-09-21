@@ -155,6 +155,11 @@ release. An approval names a release, so an approval cannot survive a rebuild.
    release. The switch is recorded in `<root>/journal.sqlite`.
 8. The old child is drained and shut down; the new one is started.
 
+The launcher's tab with the engineer at work: the conversation in the middle,
+and beside it the applications and the proposed change, with its checks.
+
+![The launcher tab: a conversation history on the left; the engineer's turn in the middle, reading the specification and the source and then asking three questions before it plans; on the right the applications table with each application's release and process, and the proposed change with the files it changed, its build, and its acceptance checks marked passed or failed.](../../screenshots/autoapp-engineer.webp)
+
 The launcher writes down every build, check and edit in this loop with the run
 and call that made it and the source revision it happened at, in
 `<root>/launcher/knowledge.sqlite`. A failure and the repair that followed it
