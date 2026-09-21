@@ -202,7 +202,13 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.20: an application's project where you keep your projects. The
+Version 0.4.21: an icon for each application, and a removed application no
+longer needs you. Each application has an icon beside its name on the Overview
+and in the applications table — a glyph for what its name says it is, else its
+first letter, on a tile whose colour comes from its id; nobody chooses it yet.
+A failed task of an application that has been removed no longer stays in
+**Needs your attention**. Launcher only: `broapp-autoapp` 0.3.20. Before it,
+0.4.20: an application's project where you keep your projects. The
 New application form has a **Where it lives** field: left alone, nothing
 changes; with a folder chosen — from the system's own folder window, or typed —
 the source workspace is made at `<folder>/<id>`, and the form says where before
