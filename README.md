@@ -202,7 +202,14 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.24: a page cannot pass an input to an operation that takes none,
+Version 0.4.25: every Open of an application gets a launch address of its
+own. The second Open used to go to the bare origin and ride on the session
+cookie the first had minted; but the panel, a preview and every application on
+this host set a cookie of the same name, and a browser keeps one per host with
+no regard for the port, so whichever bootstrapped last owned it and any other
+tab reopened that way was refused. Now the launcher asks the child for a fresh
+single-use address on every click. `broapp-autoapp` 0.3.24. Before it,
+0.4.24: a page cannot pass an input to an operation that takes none,
 and an old build is not offered as an update. A view source or action with an
 `input` on a route declared `s.void()` is refused at build time, in a sentence
 that says to leave the input out; an application built before the check keeps
