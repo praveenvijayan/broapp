@@ -202,8 +202,17 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.25: every Open of an application gets a launch address of its
-own. The second Open used to go to the bare origin and ride on the session
+Version 0.4.26: a check that cannot fail is refused, and an `external` route
+names what it reaches. A build refuses an acceptance step on an `external`
+route, which a preview refuses before the route runs, so such a step passed on
+the preview's own refusal and asserted nothing; it also refuses an `external`
+route in a manifest that asks for no capability, so the person is told and
+asked at activation. A plan refuses a criterion only the activated application
+could show, and the engineer is told host code runs only when a route is
+called. **Work without asking** now covers the engineer's web search and page
+reads too. Releases built before keep their examples and still activate.
+`broapp-autoapp` 0.3.25. Before it, 0.4.25: every Open of an application gets a
+launch address of its own. The second Open used to go to the bare origin and ride on the session
 cookie the first had minted; but the panel, a preview and every application on
 this host set a cookie of the same name, and a browser keeps one per host with
 no regard for the port, so whichever bootstrapped last owned it and any other
