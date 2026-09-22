@@ -336,10 +336,13 @@ one switch for the whole launcher, **Work without asking**, and take it back.
 - **Where it is turned on and off.** The card's third button, **Allow, and stop
   asking**, shown only for a question the switch would cover while it is off;
   the switch in the launcher's Settings, under *The engineer*; and
-  `broapp-autoapp standing on|off`. All three call `launcher.standingSet`,
-  which refuses every channel but `user`. While it is on, the conversation's top
-  bar says *Working without asking* with **Ask again**, and the Overview has one
-  muted line.
+  `broapp-autoapp standing on|off`. The button and the switch call
+  `launcher.standingSet`, which refuses every channel but `user`; the command
+  writes the same file through the same functions, in its own process, so it
+  works whether or not a launcher is running, and a running launcher reads the
+  change at its next question. While it is on, the conversation's top bar says
+  *Working without asking* with **Ask again**, and the Overview has one muted
+  line.
 - **What it covers.** `source.edit`, `source.change`, `candidate.cycle`,
   `candidate.build`, `candidate.preview` and `preview.stop` — the run's list,
   one list in `engineer/standing.ts` — for **any** application the call names.
