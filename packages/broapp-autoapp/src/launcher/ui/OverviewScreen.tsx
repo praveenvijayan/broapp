@@ -2,11 +2,11 @@
  * The Overview: the screen the launcher opens on.
  *
  * One read of `launcher.overview`, drawn as the mockup the owner approved
- * (`prompts/autoapp/mockups/overview.html`) lays it out: what needs the person,
- * the run in hand and its stage, what is left, each application, and what it
- * has cost. Its layout, placement, hierarchy and words are the mockup's; its
- * colours and type are the launcher's own `--launcher-*` variables and system
- * font, in both schemes.
+ * (`prompts/autoapp/mockups/overview.html`) lays it out: each application
+ * first, then the activity — what needs the person, the run in hand and its
+ * stage, what is left, and what it has cost. Its layout, placement, hierarchy
+ * and words are the mockup's; its colours and type are the launcher's own
+ * `--launcher-*` variables and system font, in both schemes.
  *
  * It decides nothing. Every action opens the place where that decision is
  * already made — the Backlog panel at a question or a failure, the candidate
@@ -17,7 +17,8 @@
  * `App` reads the route and hands the data in, so this component can be drawn
  * from fixed values: nothing here reads the bridge but the prices section.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Bell, Check, ChevronDown, ChevronRight } from 'lucide-react';
 
 import { useOperation } from 'broapp/react';
 import type { OperationOutput } from 'broapp/shared';
@@ -236,13 +237,26 @@ export function OverviewScreen(props: OverviewScreenProps): React.ReactElement {
         </p>
       ) : null}
 
+      <Applications
+        apps={overview.apps}
+        backlog={overview.backlog}
+        needsYou={items}
+        now={now}
+        onOpenApp={props.onOpenApp}
+        onOpenTarget={props.onOpenTarget}
+        onViewAll={props.onViewAll}
+      />
+
+      <h2 className="launcher__ov-section-title">Activity</h2>
       <Summary overview={overview} onPrices={() => setPricesOpen(true)} />
       {/* A setting, not something that needs the person: one muted line. */}
       {overview.standing === true ? <p className="launcher__ov-standing">{STANDING_WORDS.overviewLine}</p> : null}
 
       <section aria-label="Needs your attention" aria-live="polite" className={`launcher__ov-attention${items.length === 0 ? ' launcher__ov-attention--calm' : ''}`}>
         {items.length === 0 ? (
-          <p className="launcher__ov-calm">Nothing needs you</p>
+          <p className="launcher__ov-calm">
+            <Check aria-hidden="true" size={15} />Nothing needs you
+          </p>
         ) : (
           <>
             <h2 className="launcher__ov-band-title">
@@ -275,15 +289,6 @@ export function OverviewScreen(props: OverviewScreenProps): React.ReactElement {
           previewError={props.previewError ?? null}
           running={running}
         />
-        <Applications
-          apps={overview.apps}
-          backlog={overview.backlog}
-          needsYou={items}
-          now={now}
-          onOpenApp={props.onOpenApp}
-          onOpenTarget={props.onOpenTarget}
-          onViewAll={props.onViewAll}
-        />
       </div>
 
       <footer className="launcher__ov-foot">
@@ -310,30 +315,57 @@ export function OverviewScreen(props: OverviewScreenProps): React.ReactElement {
 }
 
 function Header({ alerts }: { readonly alerts: AlertsState }): React.ReactElement {
+  // The notifications popover closes on Escape and on a press outside it, as
+  // a menu does; <details> alone would stay open until its summary is pressed.
+  const popover = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      const details = popover.current;
+      if (event.key === 'Escape' && details !== null && details.open) {
+        details.open = false;
+        details.querySelector('summary')?.focus();
+      }
+    };
+    const onPress = (event: PointerEvent): void => {
+      const details = popover.current;
+      if (details !== null && details.open && event.target instanceof Node && !details.contains(event.target)) details.open = false;
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPress);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPress);
+    };
+  }, []);
   return (
     <header className="launcher__ov-header">
       <div>
         <h1 className="launcher__ov-title">Overview</h1>
         <p className="launcher__ov-lede">Everything you need to keep work moving.</p>
       </div>
-      <div aria-label="Alerts" className="launcher__ov-alerts" role="group">
-        {alerts.permission === 'default' ? (
-          <button className="launcher__ov-link" onClick={alerts.onTurnOn} type="button">
-            Turn on alerts
+      <details className="launcher__ov-notifications" ref={popover}>
+        <summary>
+          <Bell aria-hidden="true" size={16} /> Notifications <ChevronDown aria-hidden="true" size={14} />
+        </summary>
+        <div aria-label="Alerts" className="launcher__ov-alerts" role="group">
+          {alerts.permission === 'default' ? (
+            <button className="launcher__ov-link" onClick={alerts.onTurnOn} type="button">
+              Turn on alerts
+            </button>
+          ) : alerts.permission === 'denied' ? (
+            <span className="launcher__ov-muted">Notifications are blocked in this browser’s settings. Sound still works.</span>
+          ) : alerts.permission === 'unsupported' ? (
+            <span className="launcher__ov-muted">This browser shows no notifications.</span>
+          ) : null}
+          <label className="launcher__ov-switch">
+            <input checked={alerts.sound} onChange={(event) => alerts.onSound(event.currentTarget.checked)} type="checkbox" />
+            Sound
+          </label>
+          <button className="launcher__ov-link" onClick={alerts.onTestSound} type="button">
+            Test sound
           </button>
-        ) : alerts.permission === 'denied' ? (
-          <span className="launcher__ov-muted">Notifications are blocked in this browser’s settings. Sound still works.</span>
-        ) : alerts.permission === 'unsupported' ? (
-          <span className="launcher__ov-muted">This browser shows no notifications.</span>
-        ) : null}
-        <label className="launcher__ov-switch">
-          <input checked={alerts.sound} onChange={(event) => alerts.onSound(event.currentTarget.checked)} type="checkbox" />
-          Sound
-        </label>
-        <button className="launcher__ov-link" onClick={alerts.onTestSound} type="button">
-          Test sound
-        </button>
-      </div>
+        </div>
+      </details>
     </header>
   );
 }
@@ -509,7 +541,7 @@ function RunningCard({
 }): React.ReactElement {
   if (running === null) {
     return (
-      <section aria-label="Running now" className="launcher__ov-card launcher__ov-pad launcher__ov-now">
+      <section aria-label="Running now" className="launcher__ov-card launcher__ov-pad launcher__ov-now launcher__ov-now--idle">
         <div className="launcher__ov-between">
           <span className="launcher__ov-eyebrow">Running now</span>
         </div>
@@ -617,15 +649,21 @@ function Applications({
 }): React.ReactElement {
   const work = new Map(backlog.map((block) => [block.appId, block]));
   return (
-    <section aria-label="Applications" className="launcher__ov-card launcher__ov-pad launcher__ov-apps">
+    <section aria-label="Applications" className="launcher__ov-apps">
       <div className="launcher__ov-between">
-        <h2 className="launcher__ov-apps-title">Applications</h2>
+        <div className="launcher__ov-apps-heading">
+          <h2 className="launcher__ov-apps-title">Applications</h2>
+          <span className="launcher__ov-app-count">{apps.length}</span>
+        </div>
         <button className="launcher__ov-link launcher__ov-link--plain" onClick={onViewAll} type="button">
-          View all
+          View all <ChevronRight aria-hidden="true" size={15} />
         </button>
       </div>
       {apps.length === 0 ? (
-        <p className="launcher__ov-where launcher__ov-empty">No applications yet. Create one from the chat or the applications column.</p>
+        <div className="launcher__ov-empty">
+          <p className="launcher__ov-where">No applications yet. Create one from the chat or the applications column.</p>
+          <button className="launcher__button" onClick={onViewAll} type="button">Open applications</button>
+        </div>
       ) : null}
       <ul className="launcher__ov-app-list" hidden={apps.length === 0}>
         {apps.map((app) => {
@@ -653,7 +691,8 @@ function Applications({
                 {STATE_WORDS[app.state]}
               </span>
               <button
-                className="launcher__button"
+                className="launcher__button launcher__ov-app-open"
+                aria-label={`${action} ${app.name}`}
                 onClick={() => (action === 'Review' && review !== undefined ? onOpenTarget(review.target) : onOpenApp(app.appId))}
                 type="button"
               >

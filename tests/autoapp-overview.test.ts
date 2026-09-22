@@ -1040,12 +1040,17 @@ describe('17b: the Overview screen', () => {
   });
 
   // 2.
-  test('the mockup’s data: every figure and word of the mockup, in its order', () => {
+  test('applications lead the dashboard, followed by activity, attention and usage', () => {
     const text = words(screen(MOCKUP));
     expect(
       inOrder(text, [
         'Overview',
         'Everything you need to keep work moving.',
+        'Applications', 'View all',
+        'Reading list', '3 of 6 tasks done', 'Building', 'Open', '50%',
+        'Notes', '1 of 3 tasks done', 'Needs review', 'Review', '33%',
+        'Invoices', 'Last changed 3 days ago', 'Stopped', 'Start',
+        'Activity',
         'Needs attention', '2', '1 question · 1 failed task',
         'Running now', '1', 'Reading list',
         'Queued tasks', '2', 'About 35 min remaining',
@@ -1058,10 +1063,6 @@ describe('17b: the Overview screen', () => {
         '2', 'Files changed', '1 / 3', 'Checks passing', '6m 10s', 'Turn time',
         'Last activity 38 seconds ago · attempt 1 of 2 · stops if quiet for 8 minutes',
         'Open preview', 'View details', 'Stop run',
-        'Applications', 'View all',
-        'Reading list', '3 of 6 tasks done', 'Building', 'Open', '50%',
-        'Notes', '1 of 3 tasks done', 'Needs review', 'Review', '33%',
-        'Invoices', 'Last changed 3 days ago', 'Stopped', 'Start',
         'Tokens today', '1.4M', 'Current run', '≥312k', 'Current task', '≥41k', '· partial', 'View usage',
       ]),
     ).toEqual([]);
@@ -1271,7 +1272,7 @@ describe('17b: the Overview screen', () => {
     const bad: string[] = [];
     for (const match of screenCss.matchAll(colour)) {
       const value = match[7] ?? '';
-      const colours = value.replace(/var\(--launcher-[a-z-]+\)/g, '').replace(/\b(none|transparent|0|solid|inset|[0-9.]+(px|rem|em)?)\b/g, '');
+      const colours = value.replace(/var\(--launcher-[a-z-]+\)/g, '').replace(/\b(none|transparent|0|solid|dashed|inset|[0-9.]+(px|rem|em)?)\b/g, '');
       if (/[a-z]/i.test(colours.replace(/[\s,()-]/g, ''))) bad.push(match[0].trim());
     }
     expect(bad).toEqual([]);
@@ -1552,6 +1553,7 @@ describe.skipIf(!browserAvailable)('17b: the Overview in a browser', () => {
       };
     `;
     const { page } = await openInBrowser({ init: stubs });
+    await page.getByText('Notifications', { exact: true }).click();
     const sound = page.getByRole('checkbox', { name: 'Sound' });
     expect(await sound.isChecked()).toBe(false);
     // Two reads go by; nothing asks.
@@ -1569,6 +1571,7 @@ describe.skipIf(!browserAvailable)('17b: the Overview in a browser', () => {
 
     await page.reload();
     await page.waitForSelector('[data-view="overview"]', { timeout: 20_000 });
+    await page.getByText('Notifications', { exact: true }).click();
     expect(await page.getByRole('checkbox', { name: 'Sound' }).isChecked()).toBe(true);
     expect(await page.evaluate(() => (window as unknown as { __asked: number }).__asked)).toBe(0);
 
@@ -1576,6 +1579,7 @@ describe.skipIf(!browserAvailable)('17b: the Overview in a browser', () => {
     const refusing = await openInBrowser({
       init: `${stubs}; Storage.prototype.getItem = function () { throw new Error('refused'); };`,
     });
+    await refusing.page.getByText('Notifications', { exact: true }).click();
     expect(await refusing.page.getByRole('checkbox', { name: 'Sound' }).isChecked()).toBe(false);
   }, 120_000);
 });

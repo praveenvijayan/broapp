@@ -25,28 +25,37 @@
  * a person who chose dark. Each block also sets `color-scheme`, which is what
  * scrollbars, form controls and the panel's own fallbacks read.
  */
+/*
+ * The values are the Linear system's (`packages/broapp-autoapp/DESIGN.md`).
+ * Dark is its canvas and surface ladder verbatim. The system ships no light
+ * scheme; light here is its inverse ladder (inverse-canvas, inverse-surface-1,
+ * inverse-surface-2) with the same lavender accent, and its borders and text
+ * greys are the nearest the ladder offers. Error, warning and pending colours
+ * are not in the system, which has one semantic colour (success); the launcher
+ * needs them, so they stay the launcher's own, kept quiet.
+ */
 :root {
   color-scheme: light;
 
-  --launcher-surface: #ffffff;
-  --launcher-ground: #f6f7f9;
-  --launcher-border: #dfe3ea;
-  --launcher-heading: #16181d;
-  --launcher-text: #33383f;
-  --launcher-muted: #6b7280;
-  --launcher-accent: #2a5bd7;
+  --launcher-surface: #f5f6f6;
+  --launcher-ground: #ffffff;
+  --launcher-border: #e4e5e8;
+  --launcher-heading: #000000;
+  --launcher-text: #2b2d31;
+  --launcher-muted: #62666d;
+  --launcher-accent: #5e6ad2;
   --launcher-accent-contrast: #ffffff;
   --launcher-error-surface: #fdecec;
   --launcher-error-text: #a12222;
-  --launcher-quiet: #f4f5f8;
+  --launcher-quiet: #f6f7f7;
   --launcher-pending: #8a6a12;
-  --launcher-good-surface: #e8f2e8;
-  --launcher-good-text: #2f6b34;
+  --launcher-good-surface: #e6f4ea;
+  --launcher-good-text: #1e7f37;
   --launcher-warn-surface: #fdf6e7;
   --launcher-warn-text: #6b5312;
   --launcher-warn-border: #f0d9a8;
-  --launcher-selected: #eef3fd;
-  --launcher-hover: #e9ebf1;
+  --launcher-selected: #eceefb;
+  --launcher-hover: #ebeced;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -54,25 +63,25 @@
   :root:not([data-scheme='light']) {
     color-scheme: dark;
 
-    --launcher-surface: #1e2024;
-    --launcher-ground: #16171a;
-    --launcher-border: #32353b;
-    --launcher-heading: #f2f3f5;
-    --launcher-text: #eceef1;
-    --launcher-muted: #a2a7b0;
-    --launcher-accent: #6fd3b4;
-    --launcher-accent-contrast: #10231e;
-    --launcher-error-surface: #3a1e1b;
-    --launcher-error-text: #f08a76;
-    --launcher-quiet: #24272c;
-    --launcher-pending: #e0b95a;
-    --launcher-good-surface: #1d2f22;
-    --launcher-good-text: #8fd39a;
-    --launcher-warn-surface: #33290f;
-    --launcher-warn-text: #e0b95a;
-    --launcher-warn-border: #4a3d18;
-    --launcher-selected: #22262e;
-    --launcher-hover: #2c3037;
+    --launcher-surface: #0f1011;
+    --launcher-ground: #010102;
+    --launcher-border: #23252a;
+    --launcher-heading: #f7f8f8;
+    --launcher-text: #d0d6e0;
+    --launcher-muted: #8a8f98;
+    --launcher-accent: #5e6ad2;
+    --launcher-accent-contrast: #ffffff;
+    --launcher-error-surface: #2a1715;
+    --launcher-error-text: #e8867a;
+    --launcher-quiet: #141516;
+    --launcher-pending: #d3b15a;
+    --launcher-good-surface: #10261a;
+    --launcher-good-text: #27a644;
+    --launcher-warn-surface: #221c0c;
+    --launcher-warn-text: #d3b15a;
+    --launcher-warn-border: #3e3418;
+    --launcher-selected: #191a1b;
+    --launcher-hover: #18191a;
   }
 }
 
@@ -83,25 +92,25 @@
 :root[data-scheme='dark'] {
   color-scheme: dark;
 
-  --launcher-surface: #1e2024;
-  --launcher-ground: #16171a;
-  --launcher-border: #32353b;
-  --launcher-heading: #f2f3f5;
-  --launcher-text: #eceef1;
-  --launcher-muted: #a2a7b0;
-  --launcher-accent: #6fd3b4;
-  --launcher-accent-contrast: #10231e;
-  --launcher-error-surface: #3a1e1b;
-  --launcher-error-text: #f08a76;
-  --launcher-quiet: #24272c;
-  --launcher-pending: #e0b95a;
-  --launcher-good-surface: #1d2f22;
-  --launcher-good-text: #8fd39a;
-  --launcher-warn-surface: #33290f;
-  --launcher-warn-text: #e0b95a;
-  --launcher-warn-border: #4a3d18;
-  --launcher-selected: #22262e;
-  --launcher-hover: #2c3037;
+  --launcher-surface: #0f1011;
+  --launcher-ground: #010102;
+  --launcher-border: #23252a;
+  --launcher-heading: #f7f8f8;
+  --launcher-text: #d0d6e0;
+  --launcher-muted: #8a8f98;
+  --launcher-accent: #5e6ad2;
+  --launcher-accent-contrast: #ffffff;
+  --launcher-error-surface: #2a1715;
+  --launcher-error-text: #e8867a;
+  --launcher-quiet: #141516;
+  --launcher-pending: #d3b15a;
+  --launcher-good-surface: #10261a;
+  --launcher-good-text: #27a644;
+  --launcher-warn-surface: #221c0c;
+  --launcher-warn-text: #d3b15a;
+  --launcher-warn-border: #3e3418;
+  --launcher-selected: #191a1b;
+  --launcher-hover: #18191a;
 }
 
 /*
@@ -1623,11 +1632,18 @@ code {
 
 /*
  * The Overview: the screen the launcher opens on, beside the chat rather than
- * over it. Laid out as `prompts/autoapp/mockups/overview.html` is — title, the
- * summary strip, the attention band, Running now beside Applications, the
- * footer strip — and drawn only in the `--launcher-*` variables above and the
- * body's system font, so both schemes come from the variables and nothing
- * here is written per scheme.
+ * over it. Laid out as `prompts/autoapp/mockups/overview.html` is — title,
+ * the applications, then the activity: the summary strip, the attention band,
+ * Running now, the footer strip — and drawn only in the `--launcher-*`
+ * variables above and the body's system font, so both schemes come from the
+ * variables and nothing here is written per scheme.
+ *
+ * Hallmark · genre: modern-minimal · macrostructure: workbench ·
+ * design-system: DESIGN.md · designed-as-app
+ * Type, radius and spacing follow `packages/broapp-autoapp/DESIGN.md`:
+ * headline 28/600/-0.6px, card-title 22/500/-0.4px, body 16, body-sm 14,
+ * caption 12, eyebrow 13/500/+0.4px, button 14/500; cards 12px radius and
+ * 24px padding, buttons 8px radius and 8px 14px padding, badges pill.
  */
 
 /* Two views of one main area. The chat is hidden, never removed, while the
@@ -1688,7 +1704,7 @@ code {
 
 @media (min-width: 45rem) {
   .launcher__overview {
-    padding: 2.25rem 2rem 1.5rem;
+    padding: 2.5rem clamp(1.5rem, 4vw, 4rem) 2rem;
   }
 }
 
@@ -1704,18 +1720,22 @@ code {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem 1.5rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
 }
 
 .launcher__ov-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
-  font-weight: 650;
+  margin: 0 0 4px;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.6px;
   color: var(--launcher-heading);
 }
 
 .launcher__ov-lede {
   margin: 0;
+  font-size: 16px;
+  letter-spacing: -0.05px;
   color: var(--launcher-muted);
 }
 
@@ -1760,12 +1780,12 @@ code {
 
 .launcher__ov-card {
   border: 1px solid var(--launcher-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--launcher-surface);
 }
 
 .launcher__ov-pad {
-  padding: 1.35rem 1.5rem;
+  padding: 24px;
 }
 
 .launcher__ov-tnum {
@@ -1776,12 +1796,15 @@ code {
 .launcher__ov-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  padding: 1.35rem 0;
+  padding: 1rem 0;
+  background: transparent;
+  border-radius: 0;
+  border-width: 1px 0;
 }
 
 .launcher__ov-tile {
   min-width: 0;
-  padding: 0.25rem 2.25rem;
+  padding: 0.25rem 1.5rem;
   border-left: 1px solid var(--launcher-border);
 }
 
@@ -1791,14 +1814,15 @@ code {
 
 .launcher__ov-k {
   color: var(--launcher-muted);
-  font-size: 0.85rem;
+  font-size: 14px;
 }
 
 .launcher__ov-num {
-  margin: 0.15rem 0;
-  font-size: 2rem;
+  margin: 4px 0;
+  font-size: 28px;
   font-weight: 600;
-  line-height: 1.15;
+  line-height: 1.2;
+  letter-spacing: -0.6px;
   color: var(--launcher-heading);
   overflow-wrap: anywhere;
 }
@@ -1815,7 +1839,7 @@ code {
 
 .launcher__ov-s {
   color: var(--launcher-muted);
-  font-size: 0.8rem;
+  font-size: 12px;
 }
 
 .launcher__ov-warn {
@@ -1849,20 +1873,24 @@ code {
 
 /* The attention band: one row per thing that needs the person. */
 .launcher__ov-attention {
-  margin-top: 1rem;
-  padding: 1rem 1.25rem 0.4rem;
+  margin-top: 16px;
+  padding: 16px 24px 8px;
   border: 1px solid var(--launcher-warn-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--launcher-warn-surface);
 }
 
 .launcher__ov-attention--calm {
-  padding: 0.75rem 1.25rem;
-  border-color: var(--launcher-border);
-  background: var(--launcher-surface);
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .launcher__ov-calm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
   margin: 0;
   color: var(--launcher-muted);
 }
@@ -1870,10 +1898,10 @@ code {
 .launcher__ov-band-title {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin: 0 0 0.4rem;
-  font-size: 1rem;
-  font-weight: 620;
+  gap: 12px;
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 500;
   color: var(--launcher-heading);
 }
 
@@ -1953,7 +1981,7 @@ code {
   overflow: hidden;
   /* Text, not muted: muted on the band's warm ground is just under 4.5:1. */
   color: var(--launcher-text);
-  font-size: 0.9rem;
+  font-size: 14px;
   overflow-wrap: anywhere;
   /* Two lines: the whole of it is in the panel the action opens. */
   -webkit-box-orient: vertical;
@@ -1977,8 +2005,14 @@ code {
 
 .launcher__overview .launcher__button {
   min-width: 6rem;
-  padding: 0.55rem 1.1rem;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 8px;
   background: var(--launcher-surface);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--launcher-heading);
 }
 
 .launcher__overview .launcher__button:hover:not(:disabled) {
@@ -1992,13 +2026,14 @@ code {
 
 .launcher__overview .launcher__button--small {
   min-width: 0;
-  padding: 0.2rem 0.5rem;
+  min-height: 0;
+  padding: 4px 8px;
 }
 
-/* Running now beside Applications. */
+/* Activity details below the application library. */
 .launcher__ov-main {
   display: grid;
-  grid-template-columns: minmax(0, 1.34fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 1rem;
   margin-top: 1rem;
@@ -2013,17 +2048,22 @@ code {
 
 .launcher__ov-eyebrow {
   color: var(--launcher-muted);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.4px;
 }
 
 .launcher__ov-state {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  color: var(--launcher-muted);
-  font-size: 0.9rem;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--launcher-quiet);
+  color: var(--launcher-text);
+  font-size: 12px;
+  line-height: 1.4;
   white-space: nowrap;
 }
 
@@ -2047,9 +2087,11 @@ code {
 }
 
 .launcher__ov-now-title {
-  margin: 0.5rem 0 0.15rem;
-  font-size: 1.05rem;
-  font-weight: 650;
+  margin: 8px 0 4px;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.4px;
   color: var(--launcher-heading);
 }
 
@@ -2157,9 +2199,10 @@ code {
 
 .launcher__ov-fact {
   white-space: nowrap;
-  font-size: 1.5rem;
-  font-weight: 600;
-  line-height: 1.1;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.4px;
   color: var(--launcher-heading);
 }
 
@@ -2186,51 +2229,128 @@ code {
   margin-left: auto;
 }
 
-/* Applications. */
+/* Applications lead the screen: one tile per application, icon beside name. */
+.launcher__ov-apps { margin-bottom: 32px; }
+.launcher__ov-apps-heading { display: flex; align-items: center; gap: 12px; }
 .launcher__ov-apps-title {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 620;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.4px;
   color: var(--launcher-heading);
 }
-
+.launcher__ov-app-count {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--launcher-quiet);
+  color: var(--launcher-text);
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+.launcher__ov-apps .launcher__ov-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  font-size: 14px;
+  font-weight: 500;
+}
 .launcher__ov-app-list {
-  margin: 1rem 0 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0 0;
   padding: 0;
   list-style: none;
 }
-
-.launcher__ov-empty {
-  margin-top: 0.75rem;
-}
-
+.launcher__ov-app-list[hidden] { display: none; }
+.launcher__ov-app-list:has(> :nth-child(2):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .launcher__ov-app {
   display: grid;
-  grid-template-columns: minmax(6rem, 1fr) auto auto;
-  align-items: center;
-  gap: 0.5rem 1.5rem;
-  padding: 1.1rem 0;
-  border-top: 1px solid var(--launcher-border);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px 16px;
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--launcher-border);
+  border-radius: 12px;
+  background: var(--launcher-surface);
 }
-
+.launcher__ov-app .launcher__ov-app-who { align-items: center; }
 .launcher__ov-app-name {
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: -0.05px;
   color: var(--launcher-heading);
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
 }
-
 .launcher__ov-app-detail {
   color: var(--launcher-muted);
-  font-size: 0.9rem;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
-
+.launcher__ov-app > .launcher__ov-state { align-self: center; }
+.launcher__ov-app .launcher__ov-app-open {
+  grid-column: 1 / 3;
+  justify-self: start;
+  margin-top: 4px;
+}
 .launcher__ov-meter {
   grid-column: 1 / 3;
   display: flex;
   align-items: center;
-  gap: 0.9rem;
+  gap: 12px;
+  width: 100%;
   color: var(--launcher-muted);
-  font-size: 0.85rem;
+  font-size: 12px;
+}
+.launcher__ov-empty {
+  margin-top: 16px;
+  padding: 24px;
+  border: 1px dashed var(--launcher-border);
+  border-radius: 12px;
+}
+.launcher__ov-empty .launcher__button { margin-top: 16px; }
+.launcher__ov-section-title {
+  margin: 0 0 16px;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.4px;
+  color: var(--launcher-heading);
+}
+.launcher__ov-notifications { position: relative; font-size: 14px; }
+.launcher__ov-notifications summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--launcher-border);
+  border-radius: 8px;
+  background: var(--launcher-surface);
+  color: var(--launcher-heading);
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+}
+.launcher__ov-notifications summary:hover { background: var(--launcher-hover); }
+.launcher__ov-notifications summary::-webkit-details-marker { display: none; }
+.launcher__ov-notifications summary:focus-visible { outline: 2px solid var(--launcher-accent); outline-offset: 3px; }
+.launcher__ov-notifications[open] .launcher__ov-alerts {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: min(18rem, 75vw);
+  padding: 16px;
+  border: 1px solid var(--launcher-border);
+  border-radius: 12px;
+  background: var(--launcher-hover);
 }
 
 .launcher__ov-track {
@@ -2261,7 +2381,7 @@ code {
   padding-top: 0.9rem;
   border-top: 1px solid var(--launcher-border);
   color: var(--launcher-muted);
-  font-size: 0.9rem;
+  font-size: 14px;
 }
 
 .launcher__ov-foot > span {
@@ -2275,9 +2395,9 @@ code {
 }
 
 .launcher__ov-foot b {
-  margin-left: 0.4rem;
-  font-size: 1rem;
-  font-weight: 600;
+  margin-left: 6px;
+  font-size: 16px;
+  font-weight: 500;
   color: var(--launcher-heading);
 }
 
@@ -2391,6 +2511,37 @@ code {
   outline-offset: 2px;
 }
 
+@container overview (max-width: 56.25rem) {
+  .launcher__ov-app-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container overview (max-width: 36rem) {
+  .launcher__ov-app-list,
+  .launcher__ov-app-list:has(> :nth-child(2):last-child) { grid-template-columns: minmax(0, 1fr); }
+  .launcher__ov-notifications { width: 100%; }
+  .launcher__ov-notifications summary { width: fit-content; }
+  .launcher__ov-notifications[open] .launcher__ov-alerts { position: static; width: auto; margin-top: 0.5rem; }
+}
+
+/* Idle work stays compact so the applications keep the visual emphasis. */
+.launcher__ov-now--idle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 1.5rem;
+}
+.launcher__ov-now--idle > .launcher__ov-between,
+.launcher__ov-now--idle > .launcher__ov-now-title,
+.launcher__ov-now--idle > .launcher__ov-where { grid-column: 1; }
+.launcher__ov-now--idle > .launcher__ov-actions {
+  grid-column: 2;
+  grid-row: 1 / 4;
+  align-self: center;
+  margin-top: 0;
+}
+.launcher__ov-now--idle .launcher__ov-where { font-size: 0.85rem; }
+@container overview (max-width: 36rem) {
+  .launcher__ov-now--idle { grid-template-columns: minmax(0, 1fr); }
+  .launcher__ov-now--idle > .launcher__ov-actions { grid-column: 1; grid-row: auto; margin-top: 1rem; }
+}
 
 /*
  * The person's standing approval (20a): the Settings switch, drawn the way

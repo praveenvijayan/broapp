@@ -88,7 +88,7 @@ h1 { font: 400 56px/1 var(--serif); letter-spacing: -0.01em; margin: 0 0 10px; }
 :is(.btn, .link):focus-visible { outline: 2px solid var(--attention); outline-offset: 2px; }
 
 /* main grid */
-.main { display: grid; grid-template-columns: minmax(0, 1.34fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
 .pad { padding: 22px 24px; }
 .eyebrow { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
 .state { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 14px; white-space: nowrap; }
@@ -118,8 +118,10 @@ h1 { font: 400 56px/1 var(--serif); letter-spacing: -0.01em; margin: 0 0 10px; }
 .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .actions .link { margin-left: auto; }
 
-/* applications */
-.apps h2 { font: 400 28px/1.1 var(--serif); margin: 0; }
+/* applications, first on the screen */
+.apps { margin-bottom: 28px; }
+.apps h2, h2.section { font: 400 28px/1.1 var(--serif); margin: 0; }
+h2.section { margin-top: 28px; }
 .app { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px 24px; align-items: center; padding: 18px 0; border-top: 1px solid var(--line); }
 .app:first-of-type { margin-top: 16px; }
 .app .n { font-weight: 500; font-size: 18px; }
@@ -162,6 +164,29 @@ h1 { font: 400 56px/1 var(--serif); letter-spacing: -0.01em; margin: 0 0 10px; }
   <h1>Overview</h1>
   <p class="lede">Everything you need to keep work moving.</p>
 
+  <section class="apps" aria-label="Applications">
+    <div class="between"><h2>Applications</h2><button class="link" type="button" style="text-decoration:none">View all</button></div>
+
+    <div class="app">
+      <div><div class="n">Reading list</div><div class="d">3 of 6 tasks done</div></div>
+      <span class="state"><span class="dot ok"></span>Building</span>
+      <button class="btn" type="button">Open</button>
+      <div class="meter"><i><b style="width:50%"></b></i><span class="tnum">50%</span></div>
+    </div>
+    <div class="app">
+      <div><div class="n">Notes</div><div class="d">1 of 3 tasks done</div></div>
+      <span class="state"><span class="dot hot"></span>Needs review</span>
+      <button class="btn" type="button">Review</button>
+      <div class="meter"><i><b style="width:33%"></b></i><span class="tnum">33%</span></div>
+    </div>
+    <div class="app">
+      <div><div class="n">Invoices</div><div class="d">Last changed 3 days ago</div></div>
+      <span class="state"><span class="dot"></span>Stopped</span>
+      <button class="btn" type="button">Start</button>
+    </div>
+  </section>
+
+  <h2 class="section">Activity</h2>
   <section class="card summary" aria-label="Summary">
     <div class="hot"><div class="k">Needs attention</div><div class="num tnum">2</div><div class="s">1 question · 1 failed task</div></div>
     <div><div class="k">Running now</div><div class="num tnum">1</div><div class="s">Reading list</div></div>
@@ -212,27 +237,6 @@ h1 { font: 400 56px/1 var(--serif); letter-spacing: -0.01em; margin: 0 0 10px; }
       </div>
     </section>
 
-    <section class="card pad apps" aria-label="Applications">
-      <div class="between"><h2>Applications</h2><button class="link" type="button" style="text-decoration:none">View all</button></div>
-
-      <div class="app">
-        <div><div class="n">Reading list</div><div class="d">3 of 6 tasks done</div></div>
-        <span class="state"><span class="dot ok"></span>Building</span>
-        <button class="btn" type="button">Open</button>
-        <div class="meter"><i><b style="width:50%"></b></i><span class="tnum">50%</span></div>
-      </div>
-      <div class="app">
-        <div><div class="n">Notes</div><div class="d">1 of 3 tasks done</div></div>
-        <span class="state"><span class="dot hot"></span>Needs review</span>
-        <button class="btn" type="button">Review</button>
-        <div class="meter"><i><b style="width:33%"></b></i><span class="tnum">33%</span></div>
-      </div>
-      <div class="app">
-        <div><div class="n">Invoices</div><div class="d">Last changed 3 days ago</div></div>
-        <span class="state"><span class="dot"></span>Stopped</span>
-        <button class="btn" type="button">Start</button>
-      </div>
-    </section>
   </div>
 
   <footer class="foot">
