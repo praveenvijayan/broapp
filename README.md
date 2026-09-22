@@ -202,14 +202,22 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.23: the prompt bar holds its shape, and so does the applications
-table. The box starts at the left edge and the image button, the counter and
-send sit together at the right; each piece is pinned to its cell, so nothing
-pushes the box aside or wraps the controls under the button. In the
-applications table, **Open**, **Stop** and **Remove** sit side by side on a
-line of their own under the row, above its workspace path, instead of stacking
-in a squeezed cell. `broapp-ai-elements` 0.4.10 and `broapp-autoapp` 0.3.22.
-Before it, 0.4.22: work without
+Version 0.4.24: a page cannot pass an input to an operation that takes none,
+and an old build is not offered as an update. A view source or action with an
+`input` on a route declared `s.void()` is refused at build time, in a sentence
+that says to leave the input out; an application built before the check keeps
+working, because the page now sends nothing for an empty input on such a
+route. A candidate that was activated once and no longer serves is never
+"ready to activate": the panel says activating it again is a rollback. The
+engineer can also search the web and read a page, each call approved first.
+`broapp-autoapp` 0.3.23. Before it, 0.4.23: the prompt bar holds its shape,
+and so does the applications table. The box starts at the left edge and the
+image button, the counter and send sit together at the right; each piece is
+pinned to its cell, so nothing pushes the box aside or wraps the controls
+under the button. In the applications table, **Open**, **Stop** and **Remove**
+sit side by side on a line of their own under the row, above its workspace
+path, instead of stacking in a squeezed cell. `broapp-ai-elements` 0.4.10 and
+`broapp-autoapp` 0.3.22. Before it, 0.4.22: work without
 asking. The engineer's edits, builds and previews can be approved once for
 every application — **Allow, and stop asking** on an approval card, **Work
 without asking** in Settings, or `broapp-autoapp standing on` — while

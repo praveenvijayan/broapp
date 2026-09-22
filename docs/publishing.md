@@ -8,13 +8,18 @@ what a maintainer has to do, and what they have to decide.
 Published on npm from the `Publish to npm` workflow, each with provenance:
 `broapp` at 0.4.9, `create-broapp` and `broapp-ai-anthropic` at 0.4.1,
 `broapp-ai-compatible` at 0.4.2, `broapp-ai-elements` at 0.4.10, and
-`broapp-autoapp` at 0.3.22 (2026-09-22). Earlier: 0.4.22 with the launcher at 0.3.21, the core and the panel at 0.4.9 (2026-09-22), 0.4.21 with the launcher at 0.3.20 (2026-09-21), 0.4.20 with the launcher at 0.3.19 (2026-09-21), 0.4.19 with the launcher at 0.3.18, the core and the panel at 0.4.8 (2026-09-21), 0.4.18 with the launcher at 0.3.17, the core and the panel at 0.4.7 and `broapp-ai-compatible` at 0.4.2 (2026-09-19), 0.4.17 with the launcher at 0.3.16 and the core at 0.4.6 (2026-09-19), 0.4.16 with the launcher at 0.3.15 and the core at 0.4.5 (2026-09-19), 0.4.15 with the launcher at 0.3.14 and the core at 0.4.4 (2026-09-19), 0.4.14 with the launcher at 0.3.13 (2026-09-18), 0.4.13 with the launcher at 0.3.12 (2026-09-18), 0.4.12 with the launcher at 0.3.11 (2026-09-18), 0.4.11 with the launcher at 0.3.10 (2026-09-13), 0.4.10 with the launcher at 0.3.9, 0.4.9 with the launcher at 0.3.8 and the panel at 0.4.5, 0.4.8 with the launcher at 0.3.7 and the panel at 0.4.4, 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
+`broapp-autoapp` at 0.3.23 (2026-09-22). Earlier: 0.4.23 with the launcher at 0.3.22 and the panel at 0.4.10 (2026-09-22), 0.4.22 with the launcher at 0.3.21, the core and the panel at 0.4.9 (2026-09-22), 0.4.21 with the launcher at 0.3.20 (2026-09-21), 0.4.20 with the launcher at 0.3.19 (2026-09-21), 0.4.19 with the launcher at 0.3.18, the core and the panel at 0.4.8 (2026-09-21), 0.4.18 with the launcher at 0.3.17, the core and the panel at 0.4.7 and `broapp-ai-compatible` at 0.4.2 (2026-09-19), 0.4.17 with the launcher at 0.3.16 and the core at 0.4.6 (2026-09-19), 0.4.16 with the launcher at 0.3.15 and the core at 0.4.5 (2026-09-19), 0.4.15 with the launcher at 0.3.14 and the core at 0.4.4 (2026-09-19), 0.4.14 with the launcher at 0.3.13 (2026-09-18), 0.4.13 with the launcher at 0.3.12 (2026-09-18), 0.4.12 with the launcher at 0.3.11 (2026-09-18), 0.4.11 with the launcher at 0.3.10 (2026-09-13), 0.4.10 with the launcher at 0.3.9, 0.4.9 with the launcher at 0.3.8 and the panel at 0.4.5, 0.4.8 with the launcher at 0.3.7 and the panel at 0.4.4, 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
 0.4.0 with 0.2.0, all on 2026-09-11; 0.3.0 on 2026-09-08; 0.2.0 and 0.1.0
 before that. To generate from an unreleased checkout instead, see
 [troubleshooting.md](troubleshooting.md).
 
-Repository release v0.4.23 ships the launcher binaries built from the same
-commit; it moves two packages: the AI panel, whose prompt bar pins each piece
+Repository release v0.4.24 ships the launcher binaries built from the same
+commit; it moves the launcher only: a view source or action that passes an
+input to an operation declared `s.void()` is refused at build time, the page
+sends nothing for an empty input on such a route, a candidate that served
+once and was replaced is never offered as ready to activate, and the engineer
+can search the web and read a page, each call approved first. v0.4.23 before
+it moved two packages: the AI panel, whose prompt bar pins each piece
 to its grid cell with the box at the left and every control at the right; and
 the launcher, whose page is rebuilt on it and whose applications table puts a
 row's three buttons side by side under it. v0.4.22 before it moved three
@@ -78,7 +83,7 @@ packages: the launcher, because a created application installs
 its starter now relies on; and the AI panel, because its portalled components
 and its corner radius were fixed. The launcher's peer range on the panel is
 `>=0.4.10`. A created application installs `broapp@^0.4.9` and
-`broapp-autoapp@^0.3.22`.
+`broapp-autoapp@^0.3.23`.
 
 ## Before publishing
 
