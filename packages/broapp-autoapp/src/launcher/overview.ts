@@ -26,7 +26,7 @@ import type { CandidateStates, StoredChecks } from '../engineer/state.ts';
 import { readCurrent, readRelease, type Layout } from '../spec/index.ts';
 
 import { listApps, type AppRow } from './apps.ts';
-import type { Journal } from './journal.ts';
+import type { Activation, Journal } from './journal.ts';
 import { readStanding } from './standing.ts';
 import type { Supervisor } from './supervisor.ts';
 
@@ -77,6 +77,27 @@ export interface CandidateView {
   /** The release serving now. */
   readonly current: string | null;
   readonly checks: StoredChecks | null;
+  /** It served once and something else serves now; see {@link supersededCandidate}. */
+  readonly superseded: boolean;
+}
+
+/**
+ * Whether a candidate has already served and been replaced.
+ *
+ * An activation to it finished, and the serving release is another one — so
+ * something newer was activated over it, from the engineer or from the
+ * command line. Its checks still say it passed, and it is still not what
+ * serves, which is exactly what "ready to activate" used to mean. Offering it
+ * then is offering a rollback in the words of an update, and a person who
+ * takes the offer gets the release they just moved away from.
+ */
+export function supersededCandidate(
+  history: readonly Activation[],
+  releaseId: string | null,
+  current: string | null,
+): boolean {
+  if (releaseId === null || releaseId === current) return false;
+  return history.some((activation) => activation.phase === 'done' && activation.toRelease === releaseId);
 }
 
 /** The longest title an item has. */
@@ -105,10 +126,10 @@ function adviceOf(task: TaskRecord): { advice: string; note: string; at: number 
   return { advice: advice.advice, note: advice.note, at: typeof advice.at === 'number' ? advice.at : (task.endedAt ?? 0) };
 }
 
-/** Whether a candidate's checks all passed on its own build, and it is not what serves. */
+/** Whether a candidate's checks all passed on its own build, and it is neither what serves nor what served before it. */
 export function readyToActivate(candidate: CandidateView): boolean {
   const { releaseId, checks } = candidate;
-  if (releaseId === null || releaseId === candidate.current) return false;
+  if (releaseId === null || releaseId === candidate.current || candidate.superseded) return false;
   if (checks === null || checks.releaseId !== releaseId || checks.results.length === 0) return false;
   return checks.results.every((check) => check.passed);
 }
@@ -343,7 +364,14 @@ export function readOverview(sources: OverviewSources): Overview {
   const question = progress?.question ?? null;
   const candidates: CandidateView[] = rows.map((row) => {
     const state = states.get(row.appId);
-    return { appId: row.appId, name: row.name, releaseId: state.releaseId, current: row.currentRelease, checks: state.checks };
+    return {
+      appId: row.appId,
+      name: row.name,
+      releaseId: state.releaseId,
+      current: row.currentRelease,
+      checks: state.checks,
+      superseded: supersededCandidate(sources.journal.history(row.appId), state.releaseId, row.currentRelease),
+    };
   });
   const needsYou = needsYouOf({
     question:

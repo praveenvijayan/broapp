@@ -46,7 +46,10 @@ import {
   createSupervisor,
   needsYouOf,
   openJournal,
+  readyToActivate,
   RUN_STAGE_NAMES,
+  supersededCandidate,
+  type Activation,
   type CandidateView,
   type LauncherTab,
 } from 'broapp-autoapp/launcher';
@@ -532,6 +535,7 @@ describe('17a: what needs the person', () => {
     releaseId: 'b'.repeat(32),
     current: 'a'.repeat(32),
     checks: checks('b'.repeat(32), [true, true], at),
+    superseded: false,
   });
 
   test('each of the four sources alone, and together newest first; nothing else ever is', () => {
@@ -604,7 +608,37 @@ describe('17a: what needs the person', () => {
     const failing = { ...ready('notes', 1), checks: checks('b'.repeat(32), [true, false], 1) };
     const elsewhere = { ...ready('notes', 1), checks: checks('c'.repeat(32), [true], 1) };
     const unchecked = { ...ready('notes', 1), checks: null };
-    expect(needsYouOf({ question: null, tasks: [], candidates: [serving, failing, elsewhere, unchecked] })).toEqual([]);
+    const replaced = { ...ready('notes', 1), superseded: true };
+    expect(needsYouOf({ question: null, tasks: [], candidates: [serving, failing, elsewhere, unchecked, replaced] })).toEqual([]);
+  });
+
+  test('a candidate that served once and was replaced is superseded, so never ready: that would be a rollback', () => {
+    const b = 'b'.repeat(32);
+    const c = 'c'.repeat(32);
+    const done = (toRelease: string, fromRelease: string | null, id: number): Activation => ({
+      id,
+      appId: 'notes',
+      fromRelease,
+      toRelease,
+      phase: 'done',
+      dataPrev: null,
+      snapshotDir: null,
+      checkDir: null,
+      checkCopyMs: null,
+      startedAt: id,
+      updatedAt: id,
+      error: null,
+    });
+    // b was activated, then c over it: the candidate file still names b.
+    const history = [done(c, b, 2), done(b, null, 1)];
+    expect(supersededCandidate(history, b, c)).toBe(true);
+    expect(readyToActivate({ ...ready('notes', 1), current: c, superseded: supersededCandidate(history, b, c) })).toBe(false);
+    // b serving now, or never activated, or a failed try at it: not superseded.
+    expect(supersededCandidate(history, b, b)).toBe(false);
+    expect(supersededCandidate([done(c, null, 1)], b, c)).toBe(false);
+    expect(supersededCandidate([{ ...done(b, null, 1), phase: 'failed-before-switch' }], b, c)).toBe(false);
+    expect(supersededCandidate(history, null, c)).toBe(false);
+    expect(readyToActivate({ ...ready('notes', 1), current: c, superseded: false })).toBe(true);
   });
 });
 

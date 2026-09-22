@@ -19,7 +19,7 @@ export type {
 } from './types.ts';
 
 export { parseViews, walkComponents } from './validate.ts';
-export { checkViewsAgainstContract } from './check.ts';
+export { checkViewsAgainstContract, takesNoInput } from './check.ts';
 export { autoappContractExport, withAutoappRoutes } from './merge-contract.ts';
 export { applyOverrides, NO_OVERRIDES } from './overrides.ts';
 export type { Conflict, Override, Overrides } from './overrides.ts';

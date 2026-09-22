@@ -45,7 +45,7 @@ export {
 } from './theme.ts';
 export type { ApplicationVariable, ThemeToken, TokenConsumer, TokenGroup } from './theme.ts';
 
-export { readPath, resolveInput, resolveValue } from './bind.ts';
+export { inputToSend, readPath, resolveInput, resolveValue } from './bind.ts';
 export type { Scope } from './bind.ts';
 export { formatValue } from './format.ts';
 

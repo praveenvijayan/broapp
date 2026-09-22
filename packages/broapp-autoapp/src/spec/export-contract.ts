@@ -14,27 +14,40 @@ import type { AnyContract, Effect, JsonSchema } from 'broapp/shared';
 import type { ContractExport, ExportedRoute } from './types.ts';
 
 /** The shape of one entry in a contract's two tables, as much as is needed here. */
+/** What a validator looks like from here: it can describe itself, and it may say what kind it is. */
+interface Describable {
+  readonly kind?: string;
+  readonly toJsonSchema?: () => JsonSchema;
+}
+
 interface RouteSpec {
   readonly summary?: string;
   readonly effect?: Effect;
-  readonly input?: { toJsonSchema?: () => JsonSchema };
-  readonly output?: { toJsonSchema?: () => JsonSchema };
-  readonly params?: { toJsonSchema?: () => JsonSchema };
-  readonly event?: { toJsonSchema?: () => JsonSchema };
+  readonly input?: Describable;
+  readonly output?: Describable;
+  readonly params?: Describable;
+  readonly event?: Describable;
 }
 
-/** Ask a validator to describe itself, or say which route cannot. */
-function describe(
-  validator: { toJsonSchema?: () => JsonSchema } | undefined,
-  route: string,
-  which: string,
-): JsonSchema {
+/**
+ * Ask a validator to describe itself, or say which route cannot.
+ *
+ * `s.void()` describes itself as an object with no properties, the same words
+ * `s.object({})` uses, because a provider asking for a tool's arguments wants
+ * an object either way. They are not the same to the host: void refuses `{}`,
+ * the empty object wants it. So an export says which is which — a void input
+ * carries `maxProperties: 0`, which is plain JSON Schema for "no members" and
+ * which an object with members to list never has — and the view check and the
+ * renderer read that rather than guessing from the shape.
+ */
+function describe(validator: Describable | undefined, route: string, which: string): JsonSchema {
   if (validator === undefined || typeof validator.toJsonSchema !== 'function') {
     throw new TypeError(
       `route ${JSON.stringify(route)} has a ${which} validator with no toJsonSchema(), so it cannot be exported`,
     );
   }
-  return validator.toJsonSchema();
+  const described = validator.toJsonSchema();
+  return validator.kind === 'void' ? { ...described, maxProperties: 0 } : described;
 }
 
 /** Turn one route's specification into its exported form. */

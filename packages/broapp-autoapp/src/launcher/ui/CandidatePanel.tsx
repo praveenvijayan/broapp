@@ -243,6 +243,12 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
             the terminal the launcher runs in.
           </p>
         )}
+        {current.superseded && (
+          <p className="launcher__message" role="status">
+            This build served before and was replaced. Activating it again is a rollback, not
+            an update; for the latest change, ask the engineer for a new candidate.
+          </p>
+        )}
         <button
           className="launcher__button"
           type="button"
@@ -258,7 +264,7 @@ export function CandidatePanel({ appId, onChanged }: CandidatePanelProps): React
               });
           }}
         >
-          Activate
+          {current.superseded ? 'Roll back to this build' : 'Activate'}
         </button>
       </div>
 

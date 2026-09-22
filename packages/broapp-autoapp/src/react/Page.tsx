@@ -14,7 +14,7 @@ import type { AnyContract } from 'broapp/shared';
 
 import type { Component, Page as PageSpec, ViewsSpec } from '../views/types.ts';
 
-import { coerceToSchema, resolveInput } from './bind.ts';
+import { coerceToSchema, inputToSend, resolveInput } from './bind.ts';
 import {
   PageProvider,
   useRunAction,
@@ -189,13 +189,15 @@ export function Page({
       for (const source of loading) {
         try {
           // As for actions: a source with no input sends nothing, because a
-          // route taking `s.void()` refuses an empty object.
+          // route taking `s.void()` refuses an empty object — and so does a
+          // source whose input resolves to nothing on such a route.
+          const schema = routes[source.operation]?.input;
           const input =
             source.input === undefined
               ? undefined
-              : coerceToSchema(
-                  resolveInput(source.input as Record<string, unknown>, { params: named }),
-                  routes[source.operation]?.input,
+              : inputToSend(
+                  coerceToSchema(resolveInput(source.input as Record<string, unknown>, { params: named }), schema),
+                  schema,
                 );
           const data = await client.call(source.operation as never, input as never);
           if (!live) return;

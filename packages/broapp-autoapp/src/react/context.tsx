@@ -20,7 +20,7 @@ import type { AnyContract, JsonSchema } from 'broapp/shared';
 
 import type { Action, ViewsSpec } from '../views/types.ts';
 
-import { coerceToSchema, resolveInput, resolveValue, type Scope } from './bind.ts';
+import { coerceToSchema, inputToSend, resolveInput, resolveValue, type Scope } from './bind.ts';
 
 /**
  * What the contract says about one operation.
@@ -121,7 +121,7 @@ export function useRunAction(
         input =
           action.input === undefined
             ? undefined
-            : coerceToSchema(resolveInput(action.input, scope), route?.input);
+            : inputToSend(coerceToSchema(resolveInput(action.input, scope), route?.input), route?.input);
       } catch (cause) {
         // An unresolvable binding is an authoring mistake, not a user error,
         // and saying so plainly is more useful than a validation message from

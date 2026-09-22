@@ -14,6 +14,8 @@
  */
 import type { JsonSchema } from 'broapp/shared';
 
+import { takesNoInput } from '../views/check.ts';
+
 import type { Path } from '../views/types.ts';
 
 /** Everything a reference may be resolved against. */
@@ -126,6 +128,22 @@ export function resolveInput(
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input ?? {})) out[key] = resolveDeep(value, scope);
   return out;
+}
+
+/**
+ * What actually goes on the wire for a resolved input.
+ *
+ * A route taking `s.void()` refuses `{}`, and a view that wrote `input: {}`
+ * for one — the natural thing to write for "no arguments" — would otherwise
+ * fail on every open with a message about validation. An empty input to a
+ * route that takes nothing is nothing. Everything else is sent as resolved,
+ * including `{}` to an `s.object({})`, which wants exactly that.
+ */
+export function inputToSend(
+  input: Readonly<Record<string, unknown>>,
+  schema: JsonSchema | null | undefined,
+): Record<string, unknown> | undefined {
+  return Object.keys(input).length === 0 && takesNoInput(schema) ? undefined : { ...input };
 }
 
 /**

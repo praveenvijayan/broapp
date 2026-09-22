@@ -57,7 +57,7 @@ import { launcherContract, type LauncherContract } from './contract.ts';
 import { createApplication } from './create.ts';
 import { createFolderChooser, type FolderChooserOptions } from './choose-folder.ts';
 import { checkLocation, locateApplication } from './location.ts';
-import { readOverview, type LiveUsage } from './overview.ts';
+import { readOverview, supersededCandidate, type LiveUsage } from './overview.ts';
 import type { Journal } from './journal.ts';
 import { removeApplication } from './remove.ts';
 import { addServing, removeServing } from './serving.ts';
@@ -762,6 +762,7 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       previewLost: status.previewLost,
       checksVerified: status.checksVerified,
       stagesRun: [...status.stagesRun],
+      superseded: supersededCandidate(journal.history(appId), status.releaseId, current),
     };
   });
 

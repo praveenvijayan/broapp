@@ -68,7 +68,9 @@ the \`--autoapp-*\` tokens in \`src/ui/styles.css\`, listed in the \`theme\` top
 
 ## Source
 \`id\` (unique on the page), \`operation\` (a route with effect \`read\`), \`input\`
-(a literal; a string \`$param.<name>\` is replaced by the page parameter).
+(a literal; a string \`$param.<name>\` is replaced by the page parameter). An
+operation whose input is \`s.void()\` takes no \`input\` key at all — it refuses
+\`{}\` — and the same holds for an action.
 
 ## Component — six kinds, all with \`id\` and \`kind\`; \`label\` and \`hidden\` optional
 A component keeps its \`id\` for ever: a person's customisations are keyed on it,

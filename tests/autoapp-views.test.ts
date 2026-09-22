@@ -23,10 +23,11 @@ import {
   autoappContract,
   checkViewsAgainstContract,
   parseViews,
+  takesNoInput,
 } from 'broapp-autoapp/shared';
 import type { Overrides, ViewsSpec } from 'broapp-autoapp/shared';
 import { createAutoappHost, createRunStore } from 'broapp-autoapp/host';
-import { readPath, resolveInput, resolveValue } from 'broapp-autoapp/react';
+import { inputToSend, readPath, resolveInput, resolveValue } from 'broapp-autoapp/react';
 
 import { contract as notesContract } from '../examples/notes/src/shared/contract.ts';
 import { notesViews } from '../examples/notes/src/shared/views.ts';
@@ -208,6 +209,67 @@ describe('checkViewsAgainstContract', () => {
     const problems = checkViewsAgainstContract(views, exported);
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('confirmText');
+  });
+
+  test('an input to an operation that takes none is refused, on a source and on an action', () => {
+    const views: ViewsSpec = {
+      specVersion: 1,
+      home: 'p',
+      pages: [
+        {
+          id: 'p',
+          title: 'P',
+          sources: [{ id: 'health', operation: 'notes.status', input: {} }],
+          children: [
+            {
+              id: 'save',
+              kind: 'button',
+              action: { id: 'go', label: 'Back up', operation: 'notes.backup', confirmText: 'Back up?', input: {} },
+            },
+          ],
+        },
+      ],
+    };
+    const problems = checkViewsAgainstContract(views, exported);
+    expect(problems).toHaveLength(2);
+    expect(problems[0]).toContain('source "health" passes an input to "notes.status", which takes none');
+    expect(problems[1]).toContain('action "go" passes an input to "notes.backup", which takes none');
+    // Leaving the input out is the fix, and `{}` to a route that takes an object is fine.
+    const fixed = { ...views, pages: [{ ...views.pages[0]!, sources: [{ id: 'all', operation: 'notes.list', input: {} }] }] };
+    expect(checkViewsAgainstContract(fixed, exported).filter((p) => p.includes('source'))).toEqual([]);
+  });
+
+  test('a source key the operation does not accept is refused', () => {
+    const views = copy(notesViews) as ViewsSpec;
+    const pages = views.pages.map((page) =>
+      page.id === 'notes' ? { ...page, sources: [{ id: 'all', operation: 'notes.list', input: { colour: 'red' } }] } : page,
+    );
+    const problems = checkViewsAgainstContract({ ...views, pages }, exported);
+    expect(problems.some((problem) => problem.includes('source "all" passes "colour"'))).toBe(true);
+  });
+
+  test('the renderer sends nothing for an empty input to a route that takes none, and the object otherwise', () => {
+    // The export marks void, because its shape alone is also what an empty object exports as.
+    const marked = exportContract(
+      defineContract({
+        operations: {
+          'x.none': { effect: 'read', summary: 'Takes nothing.', input: s.void(), output: s.void() },
+          'x.empty': { effect: 'read', summary: 'Takes an empty object.', input: s.object({}), output: s.void() },
+        },
+        streams: {},
+      }),
+    );
+    expect(marked.operations['x.none']?.input).toEqual({ type: 'object', properties: {}, additionalProperties: false, maxProperties: 0 });
+    expect(marked.operations['x.empty']?.input).toEqual({ type: 'object', properties: {}, required: [], additionalProperties: false });
+    expect(takesNoInput(marked.operations['x.none']?.input)).toBe(true);
+    expect(takesNoInput(marked.operations['x.empty']?.input)).toBe(false);
+    expect(takesNoInput({ type: 'object', properties: {} })).toBe(false);
+    expect(takesNoInput(exported.operations['notes.status']?.input)).toBe(true);
+    expect(takesNoInput(exported.operations['notes.list']?.input)).toBe(false);
+    expect(inputToSend({}, exported.operations['notes.status']?.input)).toBeUndefined();
+    expect(inputToSend({}, exported.operations['notes.list']?.input)).toEqual({});
+    expect(inputToSend({ done: true }, exported.operations['notes.list']?.input)).toEqual({ done: true });
+    expect(inputToSend({ stray: 1 }, exported.operations['notes.status']?.input)).toEqual({ stray: 1 });
   });
 
   test('an input key the operation does not accept is refused', () => {

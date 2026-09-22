@@ -102,7 +102,7 @@ export type { ActivateParams, ActivateResult } from './activate.ts';
 export { recover, restoreServing } from './recover.ts';
 export type { Recovered, RecoverParams, RestoreParams } from './recover.ts';
 
-export { needsYouOf, readOverview, readyToActivate, TITLE_CHARS } from './overview.ts';
+export { needsYouOf, readOverview, readyToActivate, supersededCandidate, TITLE_CHARS } from './overview.ts';
 export type {
   AppBlock,
   BacklogBlock,
