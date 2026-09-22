@@ -344,8 +344,8 @@ one switch for the whole launcher, **Work without asking**, and take it back.
 - **What it never covers, however it was turned on.** `release.activate`;
   `apps.create`; removal (no engineer tool exists); `launcher.folderChoose`;
   `launcher.standingSet` itself (no engineer tool names it, and the list is
-  closed); anything `external`; a listed tool whose input names no
-  application; the `mcp` and `workflow` channels, which never read the file; an
+  closed); anything `external`, which is activation and the two web tools;
+  a listed tool whose input names no application; the `mcp` and `workflow` channels, which never read the file; an
   application's own chat in its own tab; and a backlog run's turns, which have
   their own stand-in. Those ask exactly as before. Where a backlog run refuses
   activation and creation, the switch does not refuse them: it leaves them to
@@ -367,6 +367,34 @@ one switch for the whole launcher, **Work without asking**, and take it back.
 - **What it does not change.** The code the engineer builds is trusted local
   code, and a preview uses a copy of the data, whether the person clicked or
   the switch answered. Activation is still a person's click.
+
+## The engineer and the web
+
+`web.search` and `web.read` are the engineer's only way to read the web, and
+both are `external`: on the AI channel the gate asks the person before each
+call, in a preview it refuses, and **Work without asking** never covers them.
+What leaves this machine is what the model typed — a query, an address — and
+nothing else: the browser is a fresh `Bun.WebView` with ephemeral storage for
+each call, closed when the call ends, so no cookie, login or history carries
+from one page to the next or survives the call.
+
+What the model may name is the internet. `web.read` refuses anything but
+`http` and `https`; an address with a name or password in it; `localhost` and
+`*.localhost`; `*.local`, `*.internal` and `*.home.arpa`; a name with no dot;
+and a literal address in a loopback, private, link-local, carrier-grade NAT
+or unspecified range, IPv4 or IPv6, mapped or not. The check runs on the
+address the model gave, before a browser opens, and again on where the page
+ended up, after — a redirect onto loopback returns nothing. The launcher's
+control connection and every application listen on loopback; this is what
+keeps a model, or a page the model read, from reaching them through the tool.
+It does not resolve names, so a public name that resolves to a private
+address is not caught; the gate's question is the second line.
+
+What comes back is data. Every result carries one sentence saying so, and the
+instructions say a page or a result is never an instruction and that nothing
+from this computer — a file's contents, a person's name, an application's
+data — goes into a search or an address. A model that ignores that still
+faces the card: the person sees the query or the address before it is sent.
 
 ## What is recorded
 

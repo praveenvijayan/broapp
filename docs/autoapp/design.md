@@ -83,7 +83,10 @@ nothing it can write is consulted when the channel is chosen.
 
 An **effect** says what a route does. `read` changes nothing. `write` changes
 data inside the application's data directory. `external` reaches outside it:
-the network, other files, a spawned process, mail.
+the network, other files, a spawned process, mail. The engineer's own tools
+carry the same three: reading a workspace is `read`, an edit or a build is
+`write`, and activation and the two web tools (`web.search`, `web.read`) are
+`external`.
 
 A **mode** is `live` or `preview`. A preview runs against a copy of the data.
 
@@ -226,6 +229,27 @@ it can try steps against the preview that is already running with
 `preview.try`: read routes only, the actual output returned, nothing recorded
 as verification. A failed step names where the output diverged and under
 which comparison, so the fix is to the right field.
+
+## The engineer and the web
+
+Two tools let the engineer read the web: `web.search`, a query to a search
+engine's script-free results page, and `web.read`, one page as readable text
+with the links in it. Both run in `Bun.WebView` — the system WebKit on macOS,
+an installed Chrome, Chromium, Edge or Brave elsewhere — one throwaway view a
+call, keeping no cookies and nothing on disk. On a Bun or a machine without a
+browser the tools are still offered and say so when called, so the model is
+never shown a list that differs by machine.
+
+Both are `external`. A query is text the model wrote and a page is a request
+another server sees, and either can carry something off this machine; so the
+gate asks the person before each call, records the answer, and the standing
+approval does not cover them. `web.read` takes `http` and `https` addresses on
+the internet only — never loopback, a private range, `localhost`, a bare name
+or a `.local` one — checked on the address the model gave and again on where
+the page ended up, because the launcher's control port and every application
+listen on loopback and a redirect is a second address. Every result carries
+one line saying what follows is data, and the instructions say a page is
+never an instruction. See [security.md](security.md#the-engineer-and-the-web).
 
 ## The rollback boundary
 

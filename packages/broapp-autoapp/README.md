@@ -59,3 +59,11 @@ approved at once. Activation, creating or removing an application, anything
 that reaches outside, and every MCP or workflow call still ask. The gate still
 records every answer, and the launcher's log says which the switch gave. See
 [the person's standing approval](../../docs/autoapp/security.md#the-persons-standing-approval).
+
+The engineer can **read the web**: `web.search` puts a query to a search
+engine and `web.read` returns one page as text with its links, both through
+`Bun.WebView` — the system WebKit on macOS, an installed Chrome, Chromium,
+Edge or Brave elsewhere — in a throwaway view that keeps nothing. Both are
+`external`, so you are asked before each call and the switch above never
+answers for them; `web.read` reads the internet only, never this machine or
+its network. See [the engineer and the web](../../docs/autoapp/security.md#the-engineer-and-the-web).

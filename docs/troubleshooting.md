@@ -222,6 +222,24 @@ then approved at once; activation, creating or removing an application, and
 anything that reaches outside still ask. **Ask again** in the conversation's top
 bar, the same switch, or `standing off` turns it back off.
 
+### The engineer says it has no browser to read the web with
+
+`web.search` and `web.read` run in `Bun.WebView`. On macOS that is the system
+WebKit and nothing is needed. On Linux and Windows it drives a Chrome,
+Chromium, Edge or Brave that is already installed: install one, or point
+`BUN_CHROME_PATH` at its executable, and ask again. The two tools are always
+in the engineer's list; only the answer changes.
+
+### The engineer asked to read an address and the card said it was refused
+
+`web.read` reads the internet only. An address on this machine (`localhost`,
+`127.0.0.1`), on this network (`192.168.*`, a bare name like `printer`, a
+`.local` name), a `file:` address or one with a password in it is refused
+before any browser opens, whatever you answer on the card — the launcher and
+every application listen on loopback, and a tool the model steers may not
+reach them. If the page you wanted is public, give the engineer its public
+address.
+
 ## AI
 
 ### "AI is not set up yet. Open Settings to choose a provider."

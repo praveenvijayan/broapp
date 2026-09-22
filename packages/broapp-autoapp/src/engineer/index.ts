@@ -64,6 +64,27 @@ export {
 } from './intent-tools.ts';
 export type { IntentTools, IntentToolsOptions } from './intent-tools.ts';
 export type { EngineerKnowledge, EngineerToolsOptions, InputMemory, TurnRecord } from './tools.ts';
+export {
+  allowedWebUrl,
+  DEFAULT_PAGE_CHARS,
+  DEFAULT_RESULTS,
+  MAX_LINKS,
+  MAX_PAGE_CHARS,
+  MAX_RESULTS,
+  NO_BROWSER,
+  PAGE_TEXT_SCRIPT,
+  SEARCH_ENGINE,
+  SEARCH_RESULTS_SCRIPT,
+  searchUrl,
+  tidyText,
+  unwrapResultUrl,
+  WEB_DATA_NOTE,
+  WEB_TIMEOUT_MS,
+  WEB_TOOLS,
+  webTools,
+  webViewBrowser,
+} from './web.ts';
+export type { ViewFactory, ViewLike, WebBrowser, WebLink, WebPage, WebSearchResult, WebToolsOptions, WebViewBrowserOptions } from './web.ts';
 export { EXTERNAL_IN_PREVIEW, REFERENCE_TOPICS, specReference, SPLIT_RULES } from './reference.ts';
 export type { ReferenceTopic } from './reference.ts';
 export { DESIGN_CHECK, DESIGN_RULES, designTopic } from './design.ts';

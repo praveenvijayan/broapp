@@ -136,6 +136,11 @@ entire source workspace and starts the release anyway.
 
 | **Create offline** | Refused. The starter is in the binary, but the packages it depends on come from the registry. | A creation whose install fails keeps the workspace, writes no grant it did not earn, and reports what is missing; nothing pretends the dependencies arrived. | the same three |
 
+The engineer's `web.search` and `web.read` are outside every tier: they need
+the network, and a browser — `Bun.WebView`, which is the system WebKit on
+macOS and an installed Chrome, Chromium, Edge or Brave on Linux and Windows.
+Without one, the tools are still offered and answer with what is missing.
+
 What these cases do **not** do is sever the interface — a test may not, and a
 flag cannot be trusted to. Each proves the part that is under Broapp's control
 and says so in the file's own comment. The one thing genuinely outside it,

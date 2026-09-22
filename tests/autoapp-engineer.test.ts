@@ -1328,6 +1328,16 @@ describe('the engineer’s instructions', () => {
     expect(ENGINEER_INSTRUCTIONS).toContain('Do not call it sandboxed');
   });
 
+  test('offer the two web tools as external, beside the rest', () => {
+    if (!available) return;
+    const where = makeWorld();
+    for (const name of ['web.search', 'web.read']) {
+      expect(where.tools[name]).toBeDefined();
+      expect(where.tools[name]?.effect).toBe('external');
+    }
+    expect(ENGINEER_INSTRUCTIONS).toContain('`web.search`');
+  });
+
   test('are at most seventy-two lines, so they are read', () => {
     expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(72);
   });

@@ -2,9 +2,9 @@
  * What the engineer can do, and nothing else.
  *
  * Every tool is a `guardedTool`, so every one of them is a request through the
- * launcher's own gate: `read` runs, `write` asks, and `external` — which is
- * only ever `release.activate` — asks and is refused outright in a preview.
- * There is no bare `execute` in this file, and a test greps for one.
+ * launcher's own gate: `read` runs, `write` asks, and `external` — activation,
+ * and since 21a the two web tools in `web.ts` — asks and is refused outright
+ * in a preview. There is no bare `execute` in this file, and a test greps for one.
  *
  * Two things are deliberately *not* in any tool's output. A child's launch URL
  * is a credential; the tab gets it from a route a person calls, and the model is
@@ -71,6 +71,7 @@ import {
   searchWorkspace,
   snapshot,
 } from './workspace.ts';
+import { webTools, webViewBrowser, type WebBrowser } from './web.ts';
 
 /** What the engineer's tools need. */
 export interface EngineerToolsOptions {
@@ -113,6 +114,12 @@ export interface EngineerToolsOptions {
    * drops a turn from it when the turn ends; absent, the tools keep their own.
    */
   readonly inputs?: InputMemory;
+  /**
+   * What `web.search` and `web.read` read the web with. Absent, the runtime's
+   * own `Bun.WebView`; a test passes one that never opens a socket. The two
+   * tools are always offered — a machine without a browser says so when asked.
+   */
+  readonly browser?: WebBrowser;
 }
 
 /** The tools that write to an application, refused while a backlog run works on it from another turn. */
@@ -1749,6 +1756,12 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
       return { ok: true };
     },
   });
+
+  // The web, through the same gate. Both tools are `external`, so the person
+  // is asked before each call and a preview gate refuses them; nothing about
+  // planning, busy or standing approval applies to them, so they are merged
+  // before the wrappers below and those leave them alone.
+  Object.assign(tools, webTools({ gate, browser: options.browser ?? webViewBrowser() }));
 
   const intents = options.intents;
   const planning = options.planning;
