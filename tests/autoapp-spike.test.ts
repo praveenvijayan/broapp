@@ -188,7 +188,10 @@ describe('parseMessage', () => {
   /** A well-formed message, for a test to spoil one field at a time. */
   const hello = { v: 1, id: 'c1', type: 'hello', appId: 'a', releaseId: 'r', pid: 42 };
 
-  test('accepts each of the seven message types', () => {
+  test('accepts each of the eight message types', () => {
+    expect(parseMessage({ v: 1, id: 'c8', type: 'launch' }).type).toBe('launch');
+    const launched = parseMessage({ v: 1, id: 'c9', re: 'c8', type: 'launch', url: 'http://127.0.0.1:1/?bt=t' });
+    expect(launched.type === 'launch' ? launched.url : null).toBe('http://127.0.0.1:1/?bt=t');
     expect(parseMessage(hello).type).toBe('hello');
     expect(parseMessage({ v: 1, id: 'c2', type: 'ready', url: 'x://y', schemaVersion: 1 }).type).toBe('ready');
     expect(parseMessage({ v: 1, id: 'c3', type: 'health', state: 'serving', activeWork: 0 }).type).toBe('health');

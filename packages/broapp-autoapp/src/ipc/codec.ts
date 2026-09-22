@@ -12,7 +12,7 @@
 import { IPC_VERSION, MAX_MESSAGE_BYTES, type Message } from './messages.ts';
 
 /** Every `type` a message may have. */
-const TYPES = ['hello', 'ready', 'health', 'drain', 'shutdown', 'fatal', 'migrate', 'invoke', 'ask', 'answer'] as const;
+const TYPES = ['hello', 'ready', 'health', 'drain', 'shutdown', 'fatal', 'migrate', 'invoke', 'launch', 'ask', 'answer'] as const;
 
 /** The states a child may report. */
 const STATES = ['starting', 'serving', 'draining', 'stopping'] as const;
@@ -155,6 +155,8 @@ export function parseMessage(raw: unknown): Message {
         ...(record['message'] === undefined ? {} : { message: requireString(record, 'message') }),
       };
     }
+    case 'launch':
+      return { ...base, type: 'launch', ...(record['url'] === undefined ? {} : { url: requireString(record, 'url') }) };
     case 'ask': {
       if (record['what'] !== 'panel') {
         throw new TypeError(`ask.what must be "panel", not ${JSON.stringify(record['what'])}`);

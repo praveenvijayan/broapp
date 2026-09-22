@@ -172,12 +172,6 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
   const serving = (appId: string): ChildHandle | null => servingChild(supervisor, appId);
 
   const openBrowser = options.openBrowser ?? openSystemBrowser;
-  /**
-   * Children whose launch URL has been presented once. A launch token burns
-   * on its first valid presentation, so a second visit goes to the bare origin
-   * instead and rides on the session cookie that presentation minted.
-   */
-  const presented = new WeakSet<ChildHandle>();
 
   /**
    * Open a child's tab from the host, never from the launcher's page. A
@@ -186,10 +180,16 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
    * operating system opens arrives with `none`. When no browser can be
    * opened, the address goes to the launcher's terminal — the same place
    * `serve` prints it — and the tab is told so.
+   *
+   * Every open gets an address of its own, minted by the child for this
+   * click. The bare origin used to serve the second open, riding on the
+   * session cookie the first had minted — but the panel, a preview and every
+   * other application on this host set the same cookie, and a browser keeps
+   * one per host, so whichever bootstrapped last owned it and every other
+   * tab's reload or reopen was refused. A fresh token needs no cookie.
    */
   async function openTab(child: ChildHandle): Promise<{ opened: boolean }> {
-    const url = presented.has(child) ? `${new URL(child.url).origin}/` : child.url;
-    presented.add(child);
+    const url = await child.launchUrl();
     const opened = await openBrowser(url);
     if (!opened) {
       // The one line that must reach the terminal whole: the event log

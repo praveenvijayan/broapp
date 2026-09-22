@@ -409,6 +409,15 @@ export async function runChild(argv: readonly string[]): Promise<number> {
         );
         break;
 
+      case 'launch': {
+        // A fresh single-use address, minted here on the launcher's decision
+        // and handed straight back over the channel; it is never logged and
+        // never reaches a page. Nothing to mint before the bridge is up.
+        const url = child.running === null ? undefined : child.running.launchUrl();
+        post({ v: IPC_VERSION, id: nextId(), re: message.id, type: 'launch', ...(url === undefined ? {} : { url }) });
+        break;
+      }
+
       case 'invoke': {
         // One call, forwarded by the launcher. The envelope is built here, from
         // what this runtime knows — the channel is `mcp` because that is the

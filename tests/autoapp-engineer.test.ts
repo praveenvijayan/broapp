@@ -1087,15 +1087,23 @@ describe.skipIf(!available)('the launcher tab', () => {
     expect(listed.apps.map((app) => app.appId)).toEqual(['items']);
     expect(listed.apps[0]?.serving).toBe(false);
 
-    // The tab is opened by the host, with the launch URL the first time and
-    // the bare origin after that: the token has burnt, the cookie remains.
+    // The tab is opened by the host, with a launch URL of its own every time:
+    // never the bare origin, whose session cookie another broapp server on
+    // this host may have replaced since. Each address is live and single-use.
     expect(await client.call('launcher.appOpen', { appId: 'items' })).toEqual({ opened: true });
     expect(openedUrls).toHaveLength(1);
     expect(openedUrls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?bt=/);
     expect((await client.call('launcher.appsList', undefined)).apps[0]?.serving).toBe(true);
     expect(await client.call('launcher.appOpen', { appId: 'items' })).toEqual({ opened: true });
     expect(openedUrls).toHaveLength(2);
-    expect(openedUrls[1]).toBe(`${new URL(openedUrls[0] ?? '').origin}/`);
+    expect(openedUrls[1]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?bt=/);
+    expect(openedUrls[1]).not.toBe(openedUrls[0]);
+    expect(new URL(openedUrls[1] ?? '').origin).toBe(new URL(openedUrls[0] ?? '').origin);
+    const second = await fetch(openedUrls[1] ?? '', { redirect: 'manual' });
+    expect(second.status).toBe(303);
+    expect(second.headers.getSetCookie().some((cookie) => cookie.startsWith('bb_session='))).toBe(true);
+    // Burnt now: the same address again is refused.
+    expect((await fetch(openedUrls[1] ?? '', { redirect: 'manual' })).status).toBe(403);
 
     expect(await client.call('launcher.appStop', { appId: 'items' })).toEqual({ stopped: true });
     await client.close();

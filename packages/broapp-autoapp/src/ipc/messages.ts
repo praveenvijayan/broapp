@@ -74,6 +74,27 @@ export interface Migrate extends Base {
 }
 
 /**
+ * Launcher → child: mint a fresh address for a tab; child → launcher: the
+ * reply, same type and `re`, carrying it in `url`.
+ *
+ * Every open of an application gets an address of its own, never the bare
+ * origin. A launch token burns on its first presentation, and the bare origin
+ * would ride on the session cookie — which every broapp server on this host
+ * (the panel, a preview, another application) also sets, under one name, on a
+ * host a browser keeps one cookie for regardless of port. Whichever server
+ * bootstrapped last owns it, and a tab sent to the bare origin of any other is
+ * refused with a 403 that nothing explains. A fresh token bootstraps a fresh
+ * session whatever the cookie holds. The child mints it on the launcher's
+ * decision, which is a person's click in the panel; the bridge caps live
+ * tokens at eight and drops the oldest past that.
+ */
+export interface Launch extends Base {
+  readonly type: 'launch';
+  /** The address, in the reply. Absent when the child is not serving. */
+  readonly url?: string;
+}
+
+/**
  * Launcher → child request, and child → launcher reply with the same type and `re`.
  *
  * One operation call, forwarded from an MCP client. The child runs it through
@@ -159,6 +180,7 @@ export type Message =
   | Fatal
   | Migrate
   | Invoke
+  | Launch
   | Ask
   | Answer;
 

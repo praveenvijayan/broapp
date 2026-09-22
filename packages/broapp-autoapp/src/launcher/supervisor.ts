@@ -46,6 +46,12 @@ export interface ChildHandle {
   readonly spawnedAt: number;
   /** From `ready`. Never written to disk. */
   readonly url: string;
+  /**
+   * A fresh single-use address for a tab, minted by the child now. Every open
+   * after the first needs one: see `Launch` in the IPC messages for why the
+   * bare origin is not enough. Never log it.
+   */
+  launchUrl(): Promise<string>;
   readonly schemaVersion: number;
   health(): Promise<HealthReport>;
   /**
@@ -569,6 +575,17 @@ export function createSupervisor(options: SupervisorOptions = {}): Supervisor {
             activeWork: reply.activeWork ?? 0,
             attached: reply.attached ?? false,
           };
+        },
+
+        async launchUrl(): Promise<string> {
+          const reply = await request(
+            { v: IPC_VERSION, id: nextId(), type: 'launch' },
+            helloTimeoutMs,
+            'a launch address',
+          );
+          if (reply.type !== 'launch') throw new Error('the child answered launch with something else');
+          if (reply.url === undefined) throw new Error('the child is not serving, so it has no address to give');
+          return reply.url;
         },
 
         async invoke({ route, input, client, requestId, timeoutMs, as }): Promise<unknown> {

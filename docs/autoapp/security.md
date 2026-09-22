@@ -78,9 +78,13 @@ a `window.open` from the launcher's origin to an application's — same host,
 another port — arrives as `same-site` and is refused with a `403`. A tab the
 operating system opens arrives as `none`, the way the launcher's own does.
 
-A launch token burns on its first presentation, so a second Open on a running
-application goes to the bare origin and rides on the session cookie the first
-one minted. A supervised child's token lives eight hours rather than
+A launch token burns on its first presentation, so every Open on a running
+application asks the child for a fresh address of its own. It cannot go to the
+bare origin and ride on the session cookie the first one minted: the panel, a
+preview and every application on this host set a cookie of the same name, a
+browser keeps one per host with no regard for the port, and whichever
+bootstrapped last owns it — a tab of any other server, reloaded or reopened
+on the bare origin, is refused with a `403`. A supervised child's token lives eight hours rather than
 Brobridge's two-minute default: that default guards a URL in shell scrollback,
 and a supervised child's is never printed. Without it, a preview or an
 activated release that nobody clicked within two minutes could never be opened.
