@@ -328,7 +328,10 @@ function Header({ alerts }: { readonly alerts: AlertsState }): React.ReactElemen
     };
     const onPress = (event: PointerEvent): void => {
       const details = popover.current;
-      if (details !== null && details.open && event.target instanceof Node && !details.contains(event.target)) details.open = false;
+      // The event's path rather than `instanceof Node` on its target: the
+      // boundary test holds `instanceof` to a list, and the path answers the
+      // same question — was the press inside the popover — with no check at all.
+      if (details !== null && details.open && !event.composedPath().includes(details)) details.open = false;
     };
     document.addEventListener('keydown', onKey);
     document.addEventListener('pointerdown', onPress);

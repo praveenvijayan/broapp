@@ -2316,7 +2316,10 @@ code {
 }
 .launcher__ov-empty .launcher__button { margin-top: 16px; }
 .launcher__ov-section-title {
-  margin: 0 0 16px;
+  /* Top and bottom only: the sides are the column's auto margins, which
+     `.launcher__overview > *` sets and a `margin` shorthand here would undo. */
+  margin-top: 0;
+  margin-bottom: 16px;
   font-size: 22px;
   font-weight: 500;
   line-height: 1.25;
@@ -2647,7 +2650,8 @@ code {
 }
 
 .launcher__ov-standing {
-  margin: 0;
+  margin-top: 0;
+  margin-bottom: 0;
   font-size: 0.85rem;
   color: var(--launcher-muted);
 }
