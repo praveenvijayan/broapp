@@ -202,7 +202,15 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.21: an icon for each application, and a removed application no
+Version 0.4.22: work without asking. The engineer's edits, builds and
+previews can be approved once for every application — **Allow, and stop
+asking** on an approval card, **Work without asking** in Settings, or
+`broapp-autoapp standing on` — while activation, creating or removing an
+application and anything that reaches outside still ask; the gate still records
+every answer and the launcher's log says which the switch gave. The Overview
+now leads with the applications. `broapp` 0.4.9 (an optional `standIn` on
+`createAi`), `broapp-ai-elements` 0.4.9 and `broapp-autoapp` 0.3.21. Before it,
+0.4.21: an icon for each application, and a removed application no
 longer needs you. Each application has an icon beside its name on the Overview
 and in the applications table — a glyph for what its name says it is, else its
 first letter, on a tile whose colour comes from its id; nobody chooses it yet.

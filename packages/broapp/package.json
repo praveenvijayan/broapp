@@ -1,6 +1,6 @@
 {
   "name": "broapp",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "type": "module",
   "description": "Build tooling and runtime for local applications made of a Bun host, a browser UI, and a Brobridge connection between them",
   "license": "MIT",
