@@ -202,7 +202,13 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.26: a check that cannot fail is refused, and an `external` route
+Version 0.4.27: a reloaded tab is served. Every broapp server on `127.0.0.1`
+set a session cookie of the same name, and a browser keeps one per host with no
+regard for the port, so opening an application took the launcher's tab its
+session, and reloading either showed "Access to 127.0.0.1 was denied".
+Brobridge 0.2.3 names the cookie for the server's port, so each keeps its own.
+A tab opened before the upgrade needs one fresh Open. `broapp` 0.4.10,
+`broapp-autoapp` 0.3.26. Before it, 0.4.26: a check that cannot fail is refused, and an `external` route
 names what it reaches. A build refuses an acceptance step on an `external`
 route, which a preview refuses before the route runs, so such a step passed on
 the preview's own refusal and asserted nothing; it also refuses an `external`

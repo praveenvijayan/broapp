@@ -182,11 +182,11 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
    * `serve` prints it — and the tab is told so.
    *
    * Every open gets an address of its own, minted by the child for this
-   * click. The bare origin used to serve the second open, riding on the
-   * session cookie the first had minted — but the panel, a preview and every
-   * other application on this host set the same cookie, and a browser keeps
-   * one per host, so whichever bootstrapped last owned it and every other
-   * tab's reload or reopen was refused. A fresh token needs no cookie.
+   * click. A fresh token needs no cookie, so the open works whatever this
+   * browser holds for the child — nothing after a launcher restart, or a
+   * session that has aged out. Each server's cookie is named for its port
+   * (Brobridge 0.2.3), so this open no longer costs the panel's tab, or any
+   * other application's, its session.
    */
   async function openTab(child: ChildHandle): Promise<{ opened: boolean }> {
     const url = await child.launchUrl();

@@ -1,6 +1,6 @@
 {
   "name": "broapp",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "type": "module",
   "description": "Build tooling and runtime for local applications made of a Bun host, a browser UI, and a Brobridge connection between them",
   "license": "MIT",
@@ -49,9 +49,9 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@brobridgejs/client": "^0.2.2",
-    "@brobridgejs/core": "^0.2.2",
-    "brobridge": "^0.2.2"
+    "@brobridgejs/client": "^0.2.3",
+    "@brobridgejs/core": "^0.2.3",
+    "brobridge": "^0.2.3"
   },
   "peerDependencies": {
     "react": ">=18",

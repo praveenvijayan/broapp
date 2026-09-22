@@ -1089,8 +1089,8 @@ describe.skipIf(!available)('the launcher tab', () => {
     expect(listed.apps[0]?.serving).toBe(false);
 
     // The tab is opened by the host, with a launch URL of its own every time:
-    // never the bare origin, whose session cookie another broapp server on
-    // this host may have replaced since. Each address is live and single-use.
+    // never the bare origin, which a tab that has no session yet cannot pass.
+    // Each address is live and single-use.
     expect(await client.call('launcher.appOpen', { appId: 'items' })).toEqual({ opened: true });
     expect(openedUrls).toHaveLength(1);
     expect(openedUrls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?bt=/);
@@ -1102,7 +1102,10 @@ describe.skipIf(!available)('the launcher tab', () => {
     expect(new URL(openedUrls[1] ?? '').origin).toBe(new URL(openedUrls[0] ?? '').origin);
     const second = await fetch(openedUrls[1] ?? '', { redirect: 'manual' });
     expect(second.status).toBe(303);
-    expect(second.headers.getSetCookie().some((cookie) => cookie.startsWith('bb_session='))).toBe(true);
+    // The cookie is named for the application's port, so the panel's and
+    // every other server's on this host stay where they are.
+    const port = new URL(openedUrls[1] ?? '').port;
+    expect(second.headers.getSetCookie().some((cookie) => cookie.startsWith(`bb_session_${port}=`))).toBe(true);
     // Burnt now: the same address again is refused.
     expect((await fetch(openedUrls[1] ?? '', { redirect: 'manual' })).status).toBe(403);
 
