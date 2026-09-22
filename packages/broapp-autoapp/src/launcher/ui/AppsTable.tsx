@@ -687,7 +687,7 @@ export function AppsTable({
 
       {removed !== null && <RemovedNotice removed={removed} />}
 
-      <table className="launcher__table">
+      <table className="launcher__table launcher__apps-table">
         <thead>
           <tr>
             <th>Name</th>

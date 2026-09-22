@@ -16,7 +16,8 @@ before that. To generate from an unreleased checkout instead, see
 Repository release v0.4.23 ships the launcher binaries built from the same
 commit; it moves two packages: the AI panel, whose prompt bar pins each piece
 to its grid cell with the box at the left and every control at the right; and
-the launcher, whose page is rebuilt on it. v0.4.22 before it moved three
+the launcher, whose page is rebuilt on it and whose applications table puts a
+row's three buttons side by side under it. v0.4.22 before it moved three
 packages: the core, whose `createAi` gains an optional
 `standIn` that answers a chat turn's question before anybody is asked
 (additive, so a patch); the AI panel, whose approval card can offer a third

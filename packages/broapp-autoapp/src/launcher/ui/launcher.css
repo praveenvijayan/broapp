@@ -706,6 +706,49 @@ body {
   align-items: center;
 }
 
+/*
+ * The applications table lives in a column at most 30rem wide, where four
+ * cells on one line squeeze the actions into a stack. So each row is a grid:
+ * name, release and running on the first line, the three buttons side by
+ * side on the second, and the workspace line under them, spanning the row.
+ * The header keeps the same three columns; its fourth, empty heading goes.
+ */
+.launcher__apps-table tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.9fr);
+  column-gap: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--launcher-border);
+}
+
+.launcher__apps-table th,
+.launcher__apps-table td {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.launcher__apps-table th:empty {
+  display: none;
+}
+
+.launcher__apps-table td[colspan],
+.launcher__apps-table .launcher__row-actions {
+  grid-column: 1 / -1;
+}
+
+.launcher__apps-table .launcher__row-actions {
+  flex-wrap: nowrap;
+  margin-top: 0.6rem;
+}
+
+.launcher__apps-table .launcher__row-detail {
+  padding-top: 0;
+}
+
+.launcher__apps-table tr:has(+ .launcher__row-detail) {
+  border-bottom: 0;
+}
+
 .launcher__button {
   padding: 0.35rem 0.75rem;
   border: 1px solid var(--launcher-border);
