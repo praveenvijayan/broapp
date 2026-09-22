@@ -37,7 +37,7 @@ import { sourceRevision } from '../knowledge/ids.ts';
 import { stepsHash } from '../knowledge/evidence.ts';
 import { sanitise, type EventLog } from '../knowledge/log.ts';
 import { sourceProblem } from '../launcher/location.ts';
-import { readRelease, type Layout } from '../spec/index.ts';
+import { examplesOnExternal, readRelease, type Layout } from '../spec/index.ts';
 
 import { modelFor, readTierModels, type TierModels } from './models.ts';
 import { exampleIdFor, FAILURE_MARK, renderPlan, validateGraph } from './plan.ts';
@@ -890,14 +890,38 @@ export function createExecutor(options: CreateExecutorOptions): Executor {
   /**
    * The examples of every task of `appId` already completed, which a later
    * task may neither lose nor change, each with the hash kept when it finished.
+   *
+   * Except one with a step on an `external` route of the release its task
+   * completed at: that example passed on the preview's refusal, the build now
+   * refuses it (22a), and a later task has to remove it before anything builds.
+   * Holding a later task to it would fail that task for doing what the build
+   * told it. Dropped here and not in `verdictOf`, which judges what it is
+   * given; what is owed is decided where the releases are read.
    */
   function finishedExamples(appId: string): RequiredExample[] {
     const required: RequiredExample[] = [];
+    const refused = new Map<string, ReadonlySet<string>>();
+    const refusedAt = (releaseId: string | null): ReadonlySet<string> => {
+      if (releaseId === null) return new Set();
+      let ids = refused.get(releaseId);
+      if (ids === undefined) {
+        try {
+          ids = examplesOnExternal(readRelease(layout, appId, releaseId));
+        } catch {
+          ids = new Set();
+        }
+        refused.set(releaseId, ids);
+      }
+      return ids;
+    };
     for (const intent of store.list({ appId, limit: Number.MAX_SAFE_INTEGER })) {
       for (const task of store.runOrder(intent.id)) {
         if (task.stored !== 'completed') continue;
+        const onExternal = refusedAt(task.releaseId);
         for (const criterion of task.criteria) {
-          required.push({ id: exampleIdFor(task.slug, criterion.id), hash: task.exampleHashes[criterion.id] ?? null });
+          const id = exampleIdFor(task.slug, criterion.id);
+          if (onExternal.has(id)) continue;
+          required.push({ id, hash: task.exampleHashes[criterion.id] ?? null });
         }
       }
     }

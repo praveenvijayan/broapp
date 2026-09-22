@@ -17,6 +17,18 @@ nothing it can write is consulted when the channel is chosen.
 stops and asks. A `preview` refuses `external` outright, for everybody: a copy
 of the data is not a copy of the world.
 
+An `external` route costs a named capability. A build refuses a contract with
+one and a manifest whose `capabilities` is empty, and says which kinds there
+are — `network` with its hosts, `files` with its paths, `spawn` — so the route
+reaches the person twice: at `candidate.explain`, which names each `external`
+route beside what the candidate asks for, and at activation, which refuses a
+capability nobody granted. The capability is what the person is told and asked,
+not what the child is held to: a release is trusted local code, nothing checks
+at run time that it calls only the hosts it named, and enforcing that is a
+different design (the backlog's **Enforced capabilities**). Before 22a the
+`news` application's search route was `external` with no capability, and its
+person was never told it reaches the web.
+
 ## Where a workspace may be
 
 A person chooses where an application's source workspace lives: the

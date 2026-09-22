@@ -40,11 +40,13 @@ import { startFailure, type Supervisor } from '../launcher/supervisor.ts';
 import type { PrepareOptions } from '../launcher/workspace.ts';
 import {
   diffCapabilities,
+  externalRoutes,
   readCurrent,
   readGrants,
   readRelease,
   releasePageBytes,
   type AppSpec,
+  type Capability,
   type Layout,
   type RouteStep,
 } from '../spec/index.ts';
@@ -1630,7 +1632,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   tools['candidate.explain'] = guardedTool(gate, {
     name: 'candidate.explain',
     description:
-      'The facts about what a candidate changes, compared with what is running: routes, views, migrations, capabilities, schema version, and the page\'s size in bytes before and after. Turn these into the explanation; do not read them out.',
+      'The facts about what a candidate changes, compared with what is running: routes, views, migrations, capabilities, schema version, and the page\'s size in bytes before and after. externalRoutes says, for each route that reaches outside this machine, the capabilities the candidate asks for: say it in the same breath as the permissions. Turn these into the explanation; do not read them out.',
     inputSchema: releaseInput.toJsonSchema(),
     effect: 'read',
     run: (input) => {
@@ -1821,7 +1823,26 @@ function compare(
       .map((step) => ({ id: step.id, description: step.description })),
     capabilitiesAdded: diff.added,
     capabilitiesRemoved: diff.removed,
+    // Every `external` route of the candidate, in one sentence with what the
+    // manifest asks for, so the paragraph about permissions names the route
+    // the person is being asked about. The whole manifest, not what is new:
+    // which capability serves which route is not written down anywhere.
+    externalRoutes: externalRoutes(candidate.contract).map(
+      (route) => `${route} is external and asks for ${candidate.manifest.capabilities.map(capabilityText).join('; ')}`,
+    ),
     schemaVersionFrom: current?.manifest.schemaVersion ?? 0,
     schemaVersionTo: candidate.manifest.schemaVersion,
   };
+}
+
+/** A capability as the person reads it: `network: api.example.com`, `files (read): ~/Notes`, `spawn`. */
+function capabilityText(capability: Capability): string {
+  switch (capability.kind) {
+    case 'network':
+      return `network: ${(capability.hosts ?? []).join(', ')}`;
+    case 'files':
+      return `files (${capability.access ?? 'read'}): ${(capability.paths ?? []).join(', ')}`;
+    case 'spawn':
+      return 'spawn';
+  }
 }

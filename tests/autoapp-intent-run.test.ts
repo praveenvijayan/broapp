@@ -10,7 +10,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
@@ -82,7 +82,16 @@ import {
   openJournal,
   type LauncherTab,
 } from 'broapp-autoapp/launcher';
-import { layout, readCurrent, setCurrent, type Layout } from 'broapp-autoapp/spec';
+import {
+  layout,
+  readCurrent,
+  readRelease,
+  releaseId as computeReleaseId,
+  setCurrent,
+  writeRelease,
+  type AcceptanceExample,
+  type Layout,
+} from 'broapp-autoapp/spec';
 
 import {
   AFTER_ACTIVATING,
@@ -1260,6 +1269,11 @@ describe('a backlog run', () => {
 
 // ── 13d. Fix-ups to the run ─────────────────────────────────────────────────
 
+/** The first task's examples as a task completed before 22a left them: c1 on `items.ping`, which a preview refuses. */
+const FIRST_ON_PING =
+  '\n    { "id": "0001-first-part-c1", "title": "The ping is refused here", "steps": [{ "route": "items.ping", "input": null, "fails": {} }] },';
+const FIRST_ON_LIST = '\n    { "id": "0001-first-part-c2", "title": "The list reads", "steps": [{ "route": "items.list", "input": null }] },';
+
 describe('13d: holding a run to its earlier examples, and letting progress earn a turn', () => {
   const three = plan('three-part', {
     criteria: [
@@ -1297,6 +1311,58 @@ describe('13d: holding a run to its earlier examples, and letting progress earn 
     ]);
     // The builder was told not to.
     expect(prompts(w.fake).some((prompt) => prompt.includes('Do not remove, rename or change an acceptance example that is already there.'))).toBe(true);
+  }, 240_000);
+
+  // 22a.
+  test('a finished task’s example on an external route is not required of the next task; one that is not still is', async () => {
+    // The second task's builder does what 22a's build tells it: removes the
+    // first task's example on `items.ping`, which the build now refuses. It
+    // also removes the one on `items.list`, which nothing refuses.
+    const removed = tool('candidate.cycle', {
+      appId: 'items',
+      message: 'drop the step the build refuses, and the other one too',
+      hunks: [
+        { path: 'autoapp.json', find: FIRST_ON_PING, replace: '' },
+        { path: 'autoapp.json', find: FIRST_ON_LIST, replace: '' },
+        {
+          path: 'autoapp.json',
+          find: '"acceptance": [',
+          replace:
+            '"acceptance": [\n    { "id": "0002-second-part-c1", "title": "c1", "steps": [{ "route": "items.list", "input": null }] },\n    { "id": "0002-second-part-c2", "title": "c2", "steps": [{ "route": "items.list", "input": null }] },',
+        },
+      ],
+    });
+    const w = await world([removed, text('not advice')], { maxAttempts: 1 });
+    const { id } = submitted(w.intents, [plan('first-part'), plan('second-part', { blockedBy: ['first-part'] })]);
+
+    // The first task completed before 22a, at a release no build would make
+    // now: its example c1 passed on the preview's refusal of `items.ping`.
+    const serving = readRelease(w.root, 'items', readCurrent(w.root, 'items') ?? '');
+    const dir = w.root.app('items').release(serving.manifest.releaseId);
+    const page = readFileSync(join(dir, serving.manifest.entry.page));
+    const host = readFileSync(join(dir, serving.manifest.entry.host));
+    const acceptance = JSON.parse(`[${FIRST_ON_PING}${FIRST_ON_LIST.replace(/,$/, '')}]`) as AcceptanceExample[];
+    const draft = { ...serving, acceptance: [...serving.acceptance, ...acceptance] };
+    const before = computeReleaseId({ page, host, spec: draft });
+    writeRelease(w.root, { ...draft, manifest: { ...draft.manifest, releaseId: before } }, { page, host });
+    const [first] = w.intents.runOrder(id);
+    w.intents.moveTask(first?.id ?? 0, 'in-queue', 'queued');
+    w.intents.moveTask(first?.id ?? 0, 'in-progress', 'started', 'run-before');
+    w.intents.recordResult(first?.id ?? 0, { releaseId: before, passed: ['c1', 'c2'] });
+    w.intents.moveTask(first?.id ?? 0, 'completed', 'done', 'run-before');
+    // The workspace as that task left it.
+    const manifest = join(w.root.app('items').source, 'autoapp.json');
+    writeFileSync(manifest, readFileSync(manifest, 'utf8').replace('"acceptance": [', `"acceptance": [${FIRST_ON_PING}${FIRST_ON_LIST}`));
+    git(w.root.app('items').source, 'commit', '--quiet', '--no-gpg-sign', '-am', 'the first task');
+
+    const executor = executorOf(w);
+    await executor.start(id, 'the test');
+    await executor.idle();
+
+    const second = w.intents.runOrder(id)[1];
+    expect(second?.stored).toBe('failed');
+    expect(second?.criteria.map((criterion) => criterion.passed)).toEqual([true, true]);
+    expect(reasonsOf(w, second?.id ?? 0)).toEqual(['The example 0001-first-part-c2, from a finished task, is gone.']);
   }, 240_000);
 
   // 3.

@@ -18,6 +18,7 @@ import {
   REASONING,
   RISKS,
   type Criterion,
+  type CriterionInput,
   type PlanProblem,
   type StoredTaskStatus,
   type TaskInput,
@@ -193,19 +194,7 @@ export function validateTask(
   return problems;
 }
 
-/**
- * The routes of a contract whose effect is `external`: the ones a preview
- * refuses for everyone, the person's own click included.
- */
-export function externalRoutes(contract: {
-  readonly operations: Readonly<Record<string, { readonly effect: string }>>;
-  readonly streams: Readonly<Record<string, { readonly effect: string }>>;
-}): string[] {
-  return [...Object.entries(contract.operations), ...Object.entries(contract.streams)]
-    .filter(([, route]) => route.effect === 'external')
-    .map(([name]) => name)
-    .sort();
-}
+export { externalRoutes } from '../spec/release-problems.ts';
 
 /**
  * The routes of `routes` that `line` names, each as a whole word.
@@ -243,6 +232,43 @@ export function runbookProblems(runbook: readonly string[] | undefined, external
         message: `runbook line ${String(index + 1)} sends the person to the preview to try ${route}, an external route, which a preview refuses for everyone. Say "after activating" instead, and name the capability the person will be asked to allow.`,
       });
     }
+  });
+  return problems;
+}
+
+/**
+ * The words that say a criterion can be shown only once the application is
+ * activated. Each starts on a word; each ends on one where the phrase ends in
+ * a whole word, and `after activat` covers "activating" and "activation",
+ * quoted back whole.
+ */
+const ACTIVATED_ONLY: readonly RegExp[] = [/\bafter activat\w*/i, /\bnot in a preview\b/i, /\bonly after\b/i, /\bin the activated\b/i];
+
+/**
+ * A criterion that only the activated application could show.
+ *
+ * Every criterion becomes an acceptance example, and an example is run on a
+ * preview, which refuses an `external` route for everyone. The `news` plan of
+ * 2026-09-22 wrote "checked after activation, not in a preview" as a criterion,
+ * and its examples passed on the gate's refusal. Refused: a criterion naming a
+ * route in `external` — the contract as it stands, as for the runbook — or
+ * using the words that say so. A route the plan itself is about to add is not
+ * in `external`; the words catch that case, and the build catches the rest.
+ */
+export function criteriaProblems(criteria: readonly Pick<CriterionInput, 'text'>[], external: readonly string[]): PlanProblem[] {
+  const problems: PlanProblem[] = [];
+  criteria.forEach((criterion, index) => {
+    const routes = routesNamedIn(criterion.text, external);
+    const words = ACTIVATED_ONLY.map((pattern) => pattern.exec(criterion.text)?.[0]).find((match) => match !== undefined);
+    if (routes.length === 0 && words === undefined) return;
+    const why =
+      routes.length > 0
+        ? `${routes.join(', ')}, an external route, which a preview refuses for everyone`
+        : `the words "${String(words)}"`;
+    problems.push({
+      field: 'criteria',
+      message: `criterion ${String(index + 1)} can only be shown by the activated application (${why}). A criterion is an example the preview passes. Say what the preview can show, and put the rest in the runbook as "after activating, …".`,
+    });
   });
   return problems;
 }

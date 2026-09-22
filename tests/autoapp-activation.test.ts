@@ -41,8 +41,11 @@ import {
   listReleases,
   readCurrent,
   readRelease,
+  releaseId as computeReleaseId,
   setCurrent,
   writeGrants,
+  writeRelease,
+  type AcceptanceExample,
   type Layout,
 } from 'broapp-autoapp/spec';
 import { ensureLauncher, LAUNCHER } from './autoapp-launcher.ts';
@@ -151,8 +154,15 @@ async function build(
   return result.releaseId;
 }
 
+/**
+ * What the fixture asks for. `items.ping` is `external`, and since 22a a build
+ * refuses an `external` route in a manifest that asks for nothing.
+ */
+const FIXTURE_CAPABILITIES = (JSON.parse(readFileSync(join(fixture, 'autoapp.json'), 'utf8')) as { capabilities: unknown[] })
+  .capabilities;
+
 /** Grant whatever the release asks for, so activation is not blocked on it. */
-function grantAll(where: World, releaseId: string, capabilities: unknown[] = []): void {
+function grantAll(where: World, releaseId: string, capabilities: unknown[] = FIXTURE_CAPABILITIES): void {
   writeGrants(where.root, 'items', {
     appId: 'items',
     releaseId,
@@ -168,6 +178,24 @@ async function withAcceptance(where: World, acceptance: unknown[]): Promise<stri
   manifest.acceptance = acceptance;
   writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
   const releaseId = await build(where);
+  grantAll(where, releaseId);
+  return releaseId;
+}
+
+/**
+ * A release carrying `acceptance` that no build since 22a would make — a step
+ * on an `external` route — written the way a release built before it was:
+ * the fixture's own build, its examples replaced, its identity recomputed.
+ * What such a release does once stored is what this file holds to.
+ */
+async function storedWithAcceptance(where: World, acceptance: readonly AcceptanceExample[]): Promise<string> {
+  const built = readRelease(where.root, 'items', await build(where));
+  const dir = where.root.app('items').release(built.manifest.releaseId);
+  const page = readFileSync(join(dir, built.manifest.entry.page));
+  const host = readFileSync(join(dir, built.manifest.entry.host));
+  const draft = { ...built, acceptance };
+  const releaseId = computeReleaseId({ page, host, spec: draft });
+  writeRelease(where.root, { ...draft, manifest: { ...draft.manifest, releaseId } }, { page, host });
   grantAll(where, releaseId);
   return releaseId;
 }
@@ -1027,7 +1055,7 @@ describe.skipIf(!available)('examples at activation', () => {
 
   test('a route that reaches outside is refused the same way, with the same words, in both places', async () => {
     const where = makeWorld();
-    const pings = await withAcceptance(where, [
+    const pings = await storedWithAcceptance(where, [
       { id: 'ping', title: 'The ping answers', steps: [{ route: 'items.ping', input: null }] },
     ]);
     const [checked] = await previewCheck(where, pings);
@@ -1036,7 +1064,7 @@ describe.skipIf(!available)('examples at activation', () => {
     expect(said).toBe(`checked: an acceptance example failed: ping: ${checked?.detail ?? ''}`);
 
     // And an example that says so passes in both.
-    const refusedOutside = await withAcceptance(where, [
+    const refusedOutside = await storedWithAcceptance(where, [
       { id: 'ping-refused', title: 'The ping is refused here', steps: [{ route: 'items.ping', input: null, fails: {} }] },
     ]);
     expect((await previewCheck(where, refusedOutside)).map((result) => result.passed)).toEqual([true]);

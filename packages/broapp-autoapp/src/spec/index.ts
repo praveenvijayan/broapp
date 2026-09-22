@@ -17,6 +17,7 @@ export type {
   ViewStep,
   AppManifest,
   AppSpec,
+  BuildProblem,
   Capability,
   CapabilityDiff,
   ContractExport,
@@ -26,6 +27,8 @@ export type {
 } from './types.ts';
 
 export { parseGrants, parseSpec } from './validate.ts';
+
+export { examplesOnExternal, externalRoutes, releaseProblems } from './release-problems.ts';
 
 export { exportContract } from './export-contract.ts';
 

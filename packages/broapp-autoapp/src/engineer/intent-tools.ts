@@ -25,6 +25,7 @@ import type { Envelope, Gate, HostLogger } from 'broapp/host';
 import { s } from 'broapp/shared';
 
 import {
+  criteriaProblems,
   exampleIdFor,
   externalRoutes,
   modelFor,
@@ -427,9 +428,11 @@ ${SPLIT_RULES}`,
         }
       }
 
+      const external = knownExternal(intent.appId);
       const problems = [
         ...store.planProblems(intent.id, plan, replacing?.id),
-        ...runbookProblems(plan.runbook, knownExternal(intent.appId)),
+        ...criteriaProblems(plan.criteria, external),
+        ...runbookProblems(plan.runbook, external),
       ];
       if (problems.length > 0) {
         return Promise.resolve({ ok: false, problems: problems.map(asInput), next: FIX_FIELDS });

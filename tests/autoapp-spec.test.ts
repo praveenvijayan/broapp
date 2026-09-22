@@ -24,6 +24,7 @@ import {
   parseSpec,
   REFUSAL_CODES,
   readCurrent,
+  releaseProblems,
   readGrants,
   readRelease,
   canonicalJson,
@@ -868,3 +869,126 @@ describe('15a: an example, a step and its view refuse a key they do not know', (
     ]);
   });
 });
+
+describe('22a: what a build refuses in a specification that parses', () => {
+  /** The shape of the `news` release of 2026-09-22: two `read` routes and one `external`. */
+  const newsContract = {
+    operations: {
+      'stories.list': {
+        effect: 'read' as const,
+        summary: 'The stored stories, newest first.',
+        input: { type: 'null' },
+        output: { type: 'object', properties: {} },
+      },
+      'news.search': {
+        effect: 'external' as const,
+        summary: 'Search the web for news.',
+        input: { type: 'null' },
+        output: { type: 'object', properties: {} },
+      },
+    },
+    streams: {},
+  };
+  const newsViews = {
+    specVersion: 1 as const,
+    home: 'home',
+    pages: [
+      {
+        id: 'home',
+        title: 'News',
+        sources: [{ id: 'feed', operation: 'stories.list' }],
+        children: [{ id: 'headline', kind: 'text' as const, template: '{{feed.stories}}' }],
+      },
+    ],
+  };
+  const refusedThenListed = {
+    id: '0005-schedule-feed-c1',
+    title: 'In a preview the search is refused while the feed still lists newest first',
+    steps: [
+      { route: 'news.search', input: null, fails: {} },
+      { route: 'stories.list', input: null, match: { stories: [{ id: 's5', date: 1702200000 }] } },
+    ],
+  };
+  const news = (overrides: Partial<AppSpec> = {}): AppSpec =>
+    minimalSpec({
+      contract: newsContract,
+      views: newsViews,
+      acceptance: [
+        { id: 'home-exists', title: 'The home page is declared', steps: [{ view: { page: 'home' } }] },
+        { id: '0003-add-search-route-c1', title: 'The search is refused here', steps: [{ route: 'news.search', input: null, fails: {} }] },
+        refusedThenListed,
+        {
+          id: 'twice',
+          title: 'Two calls',
+          steps: [
+            { route: 'stories.list', input: null },
+            { route: 'news.search', input: null, match: { stories: [] } },
+            { route: 'news.search', input: null },
+          ],
+        },
+      ],
+      ...overrides,
+    });
+  const network: Capability = { kind: 'network', hosts: ['api.example.com'], reason: 'To search for news.' };
+  const messages = (spec: AppSpec): string[] => releaseProblems(spec).map((problem) => problem.message);
+
+  test('a step on an external route is refused, one problem per step, in example order, a fails step included', () => {
+    const spec = news({ manifest: { ...minimalSpec().manifest, capabilities: [network] } });
+    const problems = releaseProblems(spec);
+    expect(problems.every((problem) => problem.stage === 'spec')).toBe(true);
+    expect(problems.map((problem) => problem.message.slice(0, problem.message.indexOf(' calls')))).toEqual([
+      'example `0003-add-search-route-c1` step 1',
+      'example `0005-schedule-feed-c1` step 1',
+      'example `twice` step 2',
+      'example `twice` step 3',
+    ]);
+    expect(problems[0]?.message).toBe(
+      'example `0003-add-search-route-c1` step 1 calls `news.search`, an `external` route, which a preview refuses before the route sees it; no step can test it. Assert what the preview can show — the page, the form, a route that is not `external` — and put trying `news.search` in the runbook, after activating.',
+    );
+  });
+
+  test('a view step is never a problem, nor a step on a route that is not external', () => {
+    const spec = news({
+      manifest: { ...minimalSpec().manifest, capabilities: [network] },
+      acceptance: [
+        { id: 'home', title: 'Home', steps: [{ view: { page: 'home', component: 'headline' } }] },
+        { id: 'list', title: 'List', steps: [{ route: 'stories.list', input: null }] },
+      ],
+    });
+    expect(releaseProblems(spec)).toEqual([]);
+  });
+
+  test('an external route with no capability is one problem, naming every such route, sorted', () => {
+    const contract = {
+      operations: {
+        ...newsContract.operations,
+        'feed.fetch': { ...newsContract.operations['news.search'], summary: 'Fetch a feed.' },
+      },
+      streams: {
+        'news.watch': { effect: 'external' as const, summary: 'Watch for news.', input: { type: 'null' }, output: { type: 'object', properties: {} } },
+      },
+    };
+    const found = messages(news({ contract: contract as never, acceptance: [] }));
+    expect(found).toEqual([
+      'the contract has `feed.fetch`, `news.search` and `news.watch` as `external`, but `autoapp.json` asks for no capability. An `external` route reaches outside this machine or the data directory; say what it reaches — `network` with the hosts it will call, `files` with the paths, or `spawn` — with one sentence of reason, so the person is told and asked.',
+    ]);
+  });
+
+  test('a write route with no capability is fine, and so is a capability with no external route', () => {
+    const writes = {
+      operations: { ...minimalSpec().contract.operations, 'notes.add': { ...minimalSpec().contract.operations['notes.list'], effect: 'write' as const } },
+      streams: {},
+    };
+    expect(releaseProblems(minimalSpec({ contract: writes as never }))).toEqual([]);
+    expect(releaseProblems(minimalSpec({ manifest: { ...minimalSpec().manifest, capabilities: [network] } }))).toEqual([]);
+  });
+
+  test('parseSpec still reads a release of the news shape, with those examples and no capability', () => {
+    const spec = news();
+    expect(releaseProblems(spec)).toHaveLength(5);
+    const parsed = parseSpec(JSON.parse(JSON.stringify(spec)));
+    expect(parsed.acceptance.map((example) => example.id)).toEqual(spec.acceptance.map((example) => example.id));
+    expect(parsed.manifest.capabilities).toEqual([]);
+  });
+});
+

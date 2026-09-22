@@ -230,6 +230,23 @@ it can try steps against the preview that is already running with
 as verification. A failed step names where the output diverged and under
 which comparison, so the fix is to the right field.
 
+A preview refuses an `external` route before the route sees it, for everyone,
+so no step on one tests anything: a step that expects output always fails, and
+a `fails` step always passes, on the gate's refusal rather than the route's.
+The `news` application of 2026-09-22 completed three tasks on six such steps
+and activated a release that did nothing. So a build refuses an acceptance step
+that names an `external` route, with the reason and what to assert instead —
+the page, the form, a route that is not `external` — and the route goes in the
+task's runbook, to try after activating. A build also refuses a contract with an
+`external` route and a manifest that asks for no capability, naming the three
+kinds: the capability is how the person is told what the route reaches at
+`candidate.explain` and asked at activation. Both are build rules on the
+specification a build has just assembled, never in `parseSpec`, so a release
+built before them still reads, activates and rolls back with its examples. And
+host code runs only when a route is called: there is no timer or scheduled
+channel, so work on a schedule is out of reach until the gate has a channel for
+it.
+
 ## The engineer and the web
 
 Two tools let the engineer read the web: `web.search`, a query to a search

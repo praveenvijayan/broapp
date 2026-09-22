@@ -2,7 +2,9 @@
   "appId": "items",
   "name": "Items",
   "schemaVersion": 3,
-  "capabilities": [],
+  "capabilities": [
+    { "kind": "network", "hosts": ["example.com"], "reason": "items.ping says it reaches example.com; it never does." }
+  ],
   "migrations": [
     {
       "id": "001-create-items",

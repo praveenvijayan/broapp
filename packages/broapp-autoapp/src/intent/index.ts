@@ -39,6 +39,7 @@ export type {
 
 export {
   ambiguousReference,
+  criteriaProblems,
   exampleIdFor,
   externalRoutes,
   FAILURE_MARK,

@@ -61,6 +61,7 @@ import {
   INPUT_SCHEMAS,
   INTENT_TASK_INPUT,
   DOES_NOT_LOAD,
+  specReference,
 } from 'broapp-autoapp/engineer';
 import { validateTask, type TaskInput } from 'broapp-autoapp/intent';
 import { sourceRevision } from 'broapp-autoapp/knowledge';
@@ -958,7 +959,7 @@ describe.skipIf(!available)('the tools', () => {
       appId: 'items',
       releaseId: built.releaseId,
       grantedAt: Date.now(),
-      capabilities: [],
+      capabilities: built.spec.manifest.capabilities,
     });
     await expect(
       callTool(previewing, 'release.activate', { appId: 'items', releaseId: built.releaseId }),
@@ -978,7 +979,7 @@ describe.skipIf(!available)('the tools', () => {
       appId: 'items',
       releaseId: release.releaseId,
       grantedAt: Date.now(),
-      capabilities: [],
+      capabilities: release.spec.manifest.capabilities,
     });
     mkdirSync(app.data, { recursive: true });
 
@@ -1144,7 +1145,7 @@ describe.skipIf(!available)('the launcher tab', () => {
       appId: 'items',
       releaseId: built.releaseId,
       grantedAt: Date.now(),
-      capabilities: [],
+      capabilities: built.spec.manifest.capabilities,
     });
     mkdirSync(where.root.app('items').data, { recursive: true });
 
@@ -1770,4 +1771,100 @@ describe.skipIf(!available)('a release that builds and does not load', () => {
     expect(output.next).toContain('candidate.cycle');
     expect(where.states.get('items').cycle?.step).toBe('preview-failed');
   }, 120_000);
+
+  // 22a: what a preview cannot prove is refused by the build, before anything is built.
+  type Refused = { build: { ok: boolean; releaseId?: string; problems?: { stage: string; message: string }[] }; preview?: unknown };
+  const releasesOf = (where: World): string[] => {
+    const dir = join(where.root.app('items').dir, 'releases');
+    return existsSync(dir) ? readdirSync(dir) : [];
+  };
+
+  test('candidate.cycle refuses a step on an external route at the spec stage, and builds nothing', async () => {
+    const where = makeWorld();
+    const output = (await callApproving(
+      where,
+      'candidate.cycle',
+      {
+        appId: 'items',
+        message: 'Say the ping is refused',
+        hunks: [
+          {
+            path: 'autoapp.json',
+            find: '"acceptance": [',
+            replace: '"acceptance": [\n    { "id": "ping-refused", "title": "The ping is refused", "steps": [{ "route": "items.ping", "input": null, "fails": {} }] },',
+          },
+        ],
+      },
+      'run-x:call-1',
+    )) as Refused;
+    expect(output.build.ok).toBe(false);
+    expect(output.build.problems).toEqual([
+      {
+        stage: 'spec',
+        message:
+          'example `ping-refused` step 1 calls `items.ping`, an `external` route, which a preview refuses before the route sees it; no step can test it. Assert what the preview can show — the page, the form, a route that is not `external` — and put trying `items.ping` in the runbook, after activating.',
+      },
+    ]);
+    expect(output.preview).toBeUndefined();
+    expect(releasesOf(where)).toEqual([]);
+  }, 120_000);
+
+  test('candidate.cycle refuses an external route in a manifest that asks for no capability, naming the kinds', async () => {
+    const where = makeWorld();
+    const output = (await callApproving(
+      where,
+      'candidate.cycle',
+      {
+        appId: 'items',
+        message: 'Ask for nothing',
+        hunks: [
+          {
+            path: 'autoapp.json',
+            find: '{ "kind": "network", "hosts": ["example.com"], "reason": "items.ping says it reaches example.com; it never does." }',
+            replace: '',
+          },
+        ],
+      },
+      'run-x:call-2',
+    )) as Refused;
+    expect(output.build.ok).toBe(false);
+    expect(output.build.problems?.map((problem) => problem.stage)).toEqual(['spec']);
+    expect(output.build.problems?.[0]?.message).toStartWith(
+      'the contract has `items.ping` as `external`, but `autoapp.json` asks for no capability.',
+    );
+    expect(output.build.problems?.[0]?.message).toContain('`network` with the hosts it will call, `files` with the paths, or `spawn`');
+    expect(releasesOf(where)).toEqual([]);
+  }, 120_000);
+
+  test('candidate.explain names each external route with what the candidate asks for', async () => {
+    const where = makeWorld();
+    const built = await buildCandidate({ layout: where.root, appId: 'items' });
+    if (!built.ok) throw new Error(JSON.stringify(built.problems));
+    const facts = (await callTool(where, 'candidate.explain', { appId: 'items', releaseId: built.releaseId })) as {
+      externalRoutes: string[];
+    };
+    expect(facts.externalRoutes).toEqual(['items.ping is external and asks for network: example.com']);
+  }, 90_000);
+});
+
+describe('22a: what the engineer is told a preview cannot prove', () => {
+  const flat = (text: string): string => text.replace(/\s+/g, ' ');
+
+  test('the instructions forbid a typeof guard, and stay at seventy-two lines', () => {
+    expect(flat(ENGINEER_INSTRUCTIONS)).toContain(
+      'Do not guard a call on an API with `typeof` so that a feature silently does nothing. An API the runtime has is called; one it lacks is a build problem, or out of reach — say which.',
+    );
+    expect(ENGINEER_INSTRUCTIONS.split('\n').length).toBeLessThanOrEqual(72);
+  });
+
+  test('each reference topic carries its new sentence', () => {
+    expect(flat(specReference('acceptance'))).toContain('So the build refuses a step that calls one, a `fails` step included');
+    expect(flat(specReference('intents'))).toContain('`intent.task` refuses a criterion that names an `external` route or says "after activating", "not in a preview"');
+    const workspace = flat(specReference('workspace'));
+    expect(workspace).toContain('An `external` route needs a capability');
+    expect(workspace).toContain('not what the child enforces');
+    expect(workspace).toContain('Host code runs when a route is called and at no other time.');
+    expect(workspace).toContain('Do not reach for `Bun.cron`');
+    expect(flat(specReference('contract'))).toContain('`external` also means a capability in `autoapp.json`');
+  });
 });

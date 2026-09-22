@@ -29,6 +29,7 @@ import {
   parseSpec,
   readRelease,
   releaseId as computeReleaseId,
+  releaseProblems,
   stripIdentity,
   writeRelease,
   type AppSpec,
@@ -36,6 +37,7 @@ import {
   type Layout,
   type MigrationSpec,
   type AcceptanceExample,
+  type BuildProblem,
 } from '../spec/index.ts';
 
 import { sourceProblem } from './location.ts';
@@ -59,11 +61,7 @@ export interface BuildCandidateParams {
   readonly logger?: HostLogger;
 }
 
-/** One thing wrong with a source workspace, and which stage found it. */
-export interface BuildProblem {
-  readonly stage: 'contract' | 'views' | 'page' | 'host' | 'spec';
-  readonly message: string;
-}
+export type { BuildProblem } from '../spec/index.ts';
 
 /**
  * The stages of a build, in the order a result lists them.
@@ -372,6 +370,13 @@ export async function buildCandidate(params: BuildCandidateParams): Promise<Buil
     } catch (cause) {
       return failed([{ stage: 'spec', message: reason(cause) }]);
     }
+
+    // What the specification may not say, though it parses: a check that
+    // cannot fail, an `external` route nobody is asked about. Here and not in
+    // `parseSpec`, which reads stored releases back and must go on reading the
+    // ones built before these rules.
+    const refused = releaseProblems(draft);
+    if (refused.length > 0) return failed(refused);
 
     const releaseId = computeReleaseId({ page, host: hostBytes, spec: draft });
     const spec: AppSpec = { ...draft, manifest: { ...draft.manifest, releaseId } };

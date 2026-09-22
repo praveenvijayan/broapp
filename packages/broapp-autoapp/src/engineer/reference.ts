@@ -36,6 +36,29 @@ export type ReferenceTopic = (typeof REFERENCE_TOPICS)[number];
 export const EXTERNAL_IN_PREVIEW =
   'An `external` route is refused in a preview for everyone, the person’s own click included, so it can be tried only in the activated application.';
 
+/**
+ * What the build says to an acceptance step on an `external` route, for the
+ * `acceptance` topic. The `news` application's examples on 2026-09-22 called
+ * one with `fails: {}` and passed on the preview gate's own refusal (22a).
+ */
+export const EXTERNAL_STEP =
+  'So the build refuses a step that calls one, a `fails` step included: a preview refuses the route before the route sees it, and no step can test it. Assert what the preview can show — the page, the form, a route that is not `external` — and put trying the route in the runbook, after activating.';
+
+/** What `intent.task` says to a criterion only the activated application could show. */
+export const EXTERNAL_CRITERION =
+  'The same holds for a criterion, since each one is an example the preview passes: `intent.task` refuses a criterion that names an `external` route or says "after activating", "not in a preview", "only after" or "in the activated application". Say what the preview can show, and put the rest in `runbook` as "after activating, …".';
+
+/**
+ * When host code runs, for the `workspace` topic. The `news` application's
+ * engineer shipped a refresh on `globalThis.cron` behind a `typeof` guard,
+ * which did nothing; nothing had told it there is no clock (22a).
+ */
+export const HOST_TIME = `Host code runs when a route is called and at no other time. There is no timer, no cron
+and no scheduled channel: a call the host makes on its own clock passes no gate, is recorded
+in no run, and cannot be checked. Do not reach for \`Bun.cron\`, \`setInterval\` or a loop in
+\`start\`. A request for work on a schedule, such as "refresh every five minutes", is
+\`outOfReach\`, said so in \`intent.open\`, and never a task that ships a guard around it.`;
+
 const CONTRACT = `# contract — src/shared/contract.ts
 
 Exports \`contract\`, built with \`defineContract\`. Every operation and stream is
@@ -44,7 +67,8 @@ a route named \`group.member\`, with:
   data directory; \`external\` reaches outside it (network, other files, spawned
   processes). Required. The gate decides from it: a person's own click runs any
   effect; the engineer, an MCP client and a workflow are asked before \`write\` and
-  \`external\`. ${EXTERNAL_IN_PREVIEW}
+  \`external\`. ${EXTERNAL_IN_PREVIEW} \`external\` also means a capability in
+  \`autoapp.json\`; the build refuses the contract without one.
 - \`summary\`: one sentence, required. Shown to the person when the gate asks.
 - \`input\` and \`output\`: schemas from \`s\`. Input is validated before the handler
   runs; a bad input reaches the caller as \`invalid_input\` with the field's path.
@@ -145,6 +169,8 @@ asserts only a refusal. A crash is never a refusal. Such a step carries no \`exp
       "fails": { "code": "invalid_input", "message": "title" } },
     { "route": "items.list", "input": null, "match": { "count": 0 } } ] }
 
+${EXTERNAL_IN_PREVIEW} ${EXTERNAL_STEP}
+
 An example holds only \`id\`, \`title\` and \`steps\`, and a step only the keys named
 above; a key it does not know is refused when the specification is read.
 
@@ -159,6 +185,17 @@ const WORKSPACE = `# workspace — what may be changed, and how
 edited; \`schemaVersion\` equals the version the last migration reaches),
 \`capabilities\` (what host code asks to reach outside its data directory; a person
 grants them per release), \`acceptance\`.
+An \`external\` route needs a capability: the build refuses a contract with one and a
+manifest that asks for none. There are three kinds, each with a \`reason\` the person reads:
+- \`network\`, with \`hosts\`: the hostnames the host code will call, and no others.
+- \`files\`, with \`paths\` and \`access\` (\`read\` or \`write\`): what it reads or writes
+  outside the data directory.
+- \`spawn\`: it starts other programs.
+A capability is what the person is told at \`candidate.explain\` and asked at activation,
+not what the child enforces: a release is trusted local code, and nothing fences it.
+
+${HOST_TIME}
+
 \`src/shared/contract.ts\`, \`src/shared/views.ts\`, \`src/host/app.ts\` (exports
 \`start\` and \`migrate\`), \`src/ui/\`. Nothing outside \`src/\` and \`autoapp.json\` is
 written. Dependencies come from \`package.json\` as installed at import; a new one
@@ -292,7 +329,8 @@ export const SPLIT_RULES = `- One task is one change a person could accept or re
   the task that finishes it.
 - ${EXTERNAL_IN_PREVIEW} A \`runbook\` line that exercises one says "after activating", names
   the capability the person will be asked to allow, and never says "in the preview"; what a
-  preview can show of such a task is the page, the form and the failure path.`;
+  preview can show of such a task is the page, the form and the failure path.
+- ${EXTERNAL_CRITERION}`;
 
 const INTENTS = `# intents — planning a request as a backlog
 

@@ -27,11 +27,13 @@ import {
   MAX_TASKS_PER_INTENT,
   TASK_MOVES,
   TASK_STATUSES,
+  criteriaProblems,
   isAllowedMove,
   modelFor,
   openIntents,
   readTierModels,
   renderPlan,
+  runbookProblems,
   tierOf,
   validateGraph,
   validateTask,
@@ -788,3 +790,60 @@ describe('the launcher tab', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe('22a: a criterion only the activated application could show', () => {
+  const said = (text: string, external: readonly string[] = []): string[] =>
+    criteriaProblems([{ text }], external).map((problem) => `${problem.field}: ${problem.message}`);
+
+  test('a criterion naming a route known to be external is refused, with the field named', () => {
+    expect(said('news.search returns five stories', ['news.search'])).toEqual([
+      'criteria: criterion 1 can only be shown by the activated application (news.search, an external route, which a preview refuses for everyone). A criterion is an example the preview passes. Say what the preview can show, and put the rest in the runbook as "after activating, …".',
+    ]);
+    // Numbered by position, one problem per criterion.
+    const problems = criteriaProblems(
+      [{ text: 'stories.list returns the stored stories' }, { text: 'news.search is refused with unavailable' }],
+      ['news.search'],
+    );
+    expect(problems.map((problem) => problem.message.slice(0, 11))).toEqual(['criterion 2']);
+  });
+
+  test('each phrase is refused, whatever its case, and quoted as written', () => {
+    const cases: [string, string][] = [
+      ['start registers the job, checked after activation', 'after activation'],
+      ['After activating, the feed refreshes', 'After activating'],
+      ['The cron runs, not in a preview', 'not in a preview'],
+      ['Stories appear only after the first run', 'only after'],
+      ['In the activated application the feed refreshes', 'In the activated'],
+    ];
+    for (const [text, words] of cases) {
+      expect(said(text)).toEqual([
+        `criteria: criterion 1 can only be shown by the activated application (the words "${words}"). A criterion is an example the preview passes. Say what the preview can show, and put the rest in the runbook as "after activating, …".`,
+      ]);
+    }
+    // Whole words where the phrase has them.
+    expect(said('the list is not in a previewer')).toEqual([]);
+    expect(said('it runs commonly afterwards')).toEqual([]);
+    expect(said('it is shown in the activatedness column')).toEqual([]);
+  });
+
+  test('a route is found as a whole word, not inside a longer one', () => {
+    expect(said('image.removeAll empties the list', ['image.remove'])).toEqual([]);
+    expect(said('image.remove refuses an unknown id.', ['image.remove'])).toHaveLength(1);
+  });
+
+  test('a criterion naming a read route and the word preview is fine', () => {
+    expect(said('In the preview, stories.list returns the five sample stories', ['news.search'])).toEqual([]);
+  });
+
+  test('the runbook rule is unchanged', () => {
+    expect(runbookProblems(['Open the preview and try news.search'], ['news.search'])).toEqual([
+      {
+        field: 'runbook',
+        message:
+          'runbook line 1 sends the person to the preview to try news.search, an external route, which a preview refuses for everyone. Say "after activating" instead, and name the capability the person will be asked to allow.',
+      },
+    ]);
+    expect(runbookProblems(['After activating, try news.search'], ['news.search'])).toEqual([]);
+  });
+});
+

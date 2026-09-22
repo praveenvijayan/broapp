@@ -240,6 +240,30 @@ every application listen on loopback, and a tool the model steers may not
 reach them. If the page you wanted is public, give the engineer its public
 address.
 
+### A build says an example "calls … an `external` route, which a preview refuses before the route sees it"
+
+The whole problem reads: "example `<id>` step `<n>` calls `<route>`, an
+`external` route, which a preview refuses before the route sees it; no step can
+test it." Checks run on a preview, and a preview refuses every `external`
+route, for everyone, before the route runs — so a step that expects output
+always fails, and a step with `fails` always passes on the preview's refusal
+rather than the route's. Neither says anything about the application, so the
+build refuses both. Replace the step with what a preview can show: that the
+page or the form is declared, or what a route that is not `external` returns.
+Trying the route itself goes in the task's runbook, "after activating". An
+application built before this rule keeps its examples and still activates; its
+next build reports each such step once.
+
+### A build says "the contract has … as `external`, but `autoapp.json` asks for no capability"
+
+A route marked `external` reaches outside this machine or the application's
+data directory, and the person is told what it reaches, and asked, through the
+capabilities in `autoapp.json`. Add one: `network` with the hosts the route
+calls, `files` with the paths and `access`, or `spawn`, each with a one-sentence
+`reason`. The person is asked to allow it when the release is activated. It is
+what they are told, not a fence: the application is trusted local code, and
+nothing stops it calling a host it did not name.
+
 ## AI
 
 ### "AI is not set up yet. Open Settings to choose a provider."

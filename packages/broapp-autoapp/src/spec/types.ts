@@ -243,6 +243,17 @@ export interface Grants {
   readonly capabilities: readonly Capability[];
 }
 
+/**
+ * One thing wrong with a source workspace, and which stage of a build found it.
+ *
+ * Here rather than beside the build, so a rule over an assembled specification
+ * can say its problem in the build's own terms without importing the build.
+ */
+export interface BuildProblem {
+  readonly stage: 'contract' | 'views' | 'page' | 'host' | 'spec';
+  readonly message: string;
+}
+
 /** What changed between what is asked for and what was allowed. */
 export interface CapabilityDiff {
   readonly added: readonly Capability[];

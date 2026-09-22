@@ -179,6 +179,15 @@ so, and the `intents` topic of `spec.reference` has the details.
    own click included, so the line has to say "after activating". A route the
    task has yet to add is not known then, and a line that describes a button
    in words is not guessed at.
+   A criterion is refused the same way, since each one becomes an acceptance
+   example the preview has to pass: one that names an `external` route of the
+   serving release, or says "after activat…", "not in a preview", "only after"
+   or "in the activated" (case aside, whole words where the phrase has them).
+   The `news` plan of 2026-09-22 wrote "checked after activation, not in a
+   preview" as a criterion of a task scheduling a refresh, and its examples
+   passed on the gate's refusal. What only the activated application can show
+   goes in the runbook, as "after activating, …". A route the plan itself adds
+   is caught by the words, or by the build, which refuses a step on it.
 5. `intent.submit` checks the whole plan and stamps `submitted_at`. Until then
    the panel shows the draft as **Being written**. The engineer tells the person,
    in a sentence or two, that the plan is in the Backlog panel, and stops.
@@ -206,6 +215,7 @@ Each accepted call writes one `log` event: `intent 4 opened for notes`,
 | One draft per application; no new analysis while an intent runs | Whether the request needs questions answered first |
 | That nothing is split while questions are open | The questions |
 | Every field of a task against the plan format | Titles, summaries, criteria, labels, estimates, priority, reasoning |
+| That no criterion and no runbook line needs a preview to do what it refuses: an `external` route, or the words that say "after activating" | What the preview can show, and what goes in the runbook |
 | The slug's number, the criterion ids, the tier and the model | The slug's words |
 | That every `blocked_by` and `repaid_by` names a task, and that there is no cycle | How the work is split and what waits on what |
 | That a turn which planned does not edit or build | When to plan and when to change directly |
@@ -285,7 +295,11 @@ application's completed tasks is still among the checks ("The example
 0004-author-column-c2, from a finished task, is gone."), so none was removed to
 make that true, and each still has the steps it had when its task completed
 ("The example 0004-author-column-c2, from a finished task, was changed."), so
-none was rewritten to make that true either; and for every criterion an example named `<slug>-c<n>` ran. Otherwise each condition that did not hold is a
+none was rewritten to make that true either; and for every criterion an example named `<slug>-c<n>` ran.
+An example with a step on an `external` route of the release its task completed
+at is not held: it passed on the preview's refusal, the build now refuses it,
+and a later task has to remove it before anything builds. That is decided where
+the required examples are gathered, in the executor, not in the verdict. Otherwise each condition that did not hold is a
 sentence ("No example named 0007-add-tags-c2 was run.", "The turn ran out of
 time."). When nothing was built, the sentences after "Nothing was built." say
 what the tools refused, read from the gate's own record of the turn in the
