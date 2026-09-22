@@ -669,16 +669,28 @@ function judgeLauncher(
   return failures;
 }
 
-/** Build the launcher's reduced page and return where it was written. */
+/**
+ * Build the launcher's reduced page and return where it was written.
+ *
+ * Tried twice. Under `bun test <filter>` — CI's form, and `bun run check`'s —
+ * Bun 1.4.0's bundler fails the first build in a process that resolves a
+ * relative import into `packages/broapp-autoapp/src/launcher/`, whatever the
+ * file ("Could not resolve: \"../standing-words.ts\""), and resolves the same
+ * import on the next build. Under `bun test ./<path>` and `bun run` it never
+ * fails. A file that is really missing fails both times, so the second try
+ * hides nothing but the bug; report 12d's deviation 7 is the same family.
+ */
 async function buildLauncher(): Promise<{ file: string; bytes: number }> {
   const file = join(outDir, 'launcher.html');
-  const built = await buildPage({
-    entry: 'scripts/theme-check/launcher.tsx',
-    template: 'scripts/theme-check/index.html',
-    outFile: file,
-    root: repo,
-    minify: false,
-  });
+  const once = (): ReturnType<typeof buildPage> =>
+    buildPage({
+      entry: 'scripts/theme-check/launcher.tsx',
+      template: 'scripts/theme-check/index.html',
+      outFile: file,
+      root: repo,
+      minify: false,
+    });
+  const built = await once().catch(() => once());
   return { file, bytes: built.bytes };
 }
 
