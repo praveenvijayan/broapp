@@ -82,7 +82,7 @@ describe('styles.css', () => {
     // from a `:has()` that cannot match.
     expect(committed).toContain('.broapp-chat{flex-direction:column;min-height:0;display:flex}');
     expect(committed).toContain(
-      '.broapp-chat__form>[data-slot=input-group]{grid-template-columns:auto minmax(0,1fr) auto;align-items:end;height:auto;display:grid}',
+      '.broapp-chat__form>[data-slot=input-group]{grid-template-columns:minmax(0,1fr) auto auto;align-items:end;height:auto;display:grid}',
     );
     expect(committed).toContain(
       '.broapp-chat__form,.broapp-chat__usage,.broapp-chat>.message--error{flex:none}',

@@ -461,7 +461,7 @@
    */
   .broapp-chat__form > [data-slot='input-group'] {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: end;
     /*
      * Prompt 07c: the vendored group is `h-9` — 36px — with
@@ -491,11 +491,11 @@
   /*
    * Each piece is told its cell, rather than left to auto-placement: the chips
    * take the first row (which is empty, and so has no height, when there are
-   * none), and the image button, the box and the counter-and-send share the
-   * second, in that order — the box stretched across the middle, its text
-   * starting at the left, the controls held to the right. Auto-placement
-   * would let any extra child, or a right-to-left ancestor, push the box into
-   * the narrow end column and wrap the controls under the button.
+   * none), and the box, the image button and the counter-and-send share the
+   * second, in that order — the box stretched from the left, its text
+   * starting there, every control held to the right. Auto-placement would
+   * let any extra child, or a right-to-left ancestor, push the box into a
+   * narrow end column and wrap the controls under the button.
    */
   .broapp-chat__chips {
     grid-row: 1;
@@ -509,14 +509,14 @@
   }
 
   .broapp-chat__lead {
-    grid-column: 1;
-    justify-self: start;
-    padding-left: 0.35rem;
+    grid-column: 2;
+    justify-self: end;
+    padding-right: 0.25rem;
   }
 
   .broapp-chat__form > [data-slot='input-group'] > .contents > textarea {
     grid-row: 2;
-    grid-column: 2;
+    grid-column: 1;
     justify-self: stretch;
     width: 100%;
     direction: ltr;

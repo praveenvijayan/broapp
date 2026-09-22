@@ -548,7 +548,7 @@ export function BroappChatView({
         }}
       >
         {/*
-          One row: the image button, the box, then the counter and send. The
+          One row: the box, then the image button, the counter and send. The
           chips, when there are any, take a row of their own above it — which
           is what the grid in the stylesheet is for. The vendored input lays
           its children out with flex ordering, and ordering alone cannot put
