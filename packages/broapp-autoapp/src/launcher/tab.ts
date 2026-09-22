@@ -7,8 +7,9 @@
  * gate, and the AI layer that connects the two.
  *
  * The engineer's gate is the launcher's gate. That is deliberate: `spec.read`
- * runs, `source.change` and `candidate.build` ask, and `release.activate` —
- * the only `external` tool — always asks and could never run in a preview.
+ * runs, `source.change` and `candidate.build` ask, and the `external` tools —
+ * `release.activate` and the two web tools — ask and could never run in a
+ * preview. Only the person's standing approval below answers any of them.
  */
 import { formatModelRef } from 'broapp/ai';
 import { createAi, type Ai } from 'broapp/ai/host';
@@ -21,6 +22,7 @@ import { standingCovers } from '../engineer/standing.ts';
 import { createCandidateStates, type CandidateStates } from '../engineer/state.ts';
 import { intentTools, type IntentTools } from '../engineer/intent-tools.ts';
 import { createInputMemory, engineerTools, type TurnRecord } from '../engineer/tools.ts';
+import type { WebBrowser } from '../engineer/web.ts';
 import type { RunStore } from '../host/run-store.ts';
 import { createExecutor, recordUsage, refusalsOf, usageRowOf, type Executor, type IntentStore } from '../intent/index.ts';
 import { runRecord, sourceReads } from '../knowledge/attempts.ts';
@@ -77,6 +79,8 @@ export interface CreateLauncherTabOptions {
   /** Creation's two spawns, injectable so a test reaches no registry and no git. */
   readonly install?: PrepareOptions['install'];
   readonly initGit?: PrepareOptions['initGit'];
+  /** The browser behind `web.search` and `web.read`. Tests pass one that opens no socket. */
+  readonly browser?: WebBrowser;
   /** The system's folder window. Tests replace its spawn so nothing opens. */
   readonly folderChooser?: CreateLauncherAppOptions['folderChooser'];
   /**
@@ -401,6 +405,7 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     confirmTimeoutMs: options.confirmTimeoutMs ?? LAUNCHER_CONFIRM_TIMEOUT_MS,
     ...(options.install === undefined ? {} : { install: options.install }),
     ...(options.initGit === undefined ? {} : { initGit: options.initGit }),
+    ...(options.browser === undefined ? {} : { browser: options.browser }),
     session,
     inputs,
     ...(planning === null ? {} : { intents: planning }),
@@ -439,20 +444,22 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ...(options.contextBudgetChars === undefined ? {} : { contextBudgetChars: options.contextBudgetChars }),
     tools,
     // The person's standing approval, for the engineer's own conversations.
-    // Beside the executor's `answerFor`, with the same list and two
-    // differences: it covers every application, and it never refuses — what it
-    // does not cover is put to the person exactly as before. The file is read
-    // at every question, so the switch answers the next one whichever door it
-    // was flipped at. Backlog turns run through `Ai.turn`, which never
-    // consults this.
+    // Beside the executor's `answerFor`, with the same list and three
+    // differences: it covers every application, it covers the two web tools,
+    // and it never refuses — what it does not cover is put to the person
+    // exactly as before. The file is read at every question, so the switch
+    // answers the next one whichever door it was flipped at. Backlog turns run
+    // through `Ai.turn`, which never consults this.
     standIn: (question: StandInQuestion) => {
       if (!readStanding(options.layout, printed).standing) return 'defer';
       if (!standingCovers(question.tool, question.input)) return 'defer';
       if (knowledge !== undefined) {
-        const appId = (question.input as { appId: string }).appId;
+        // A web tool names no application; the log says so by leaving it out.
+        const named = (question.input as { appId?: unknown } | null | undefined)?.appId;
+        const appId = typeof named === 'string' && named !== '' ? named : null;
         try {
           knowledge.log.event('log', STANDING_WORDS.approved(question.tool, appId), undefined, {
-            appId,
+            ...(appId === null ? {} : { appId }),
             runId: question.runId,
             callId: question.callId,
           });

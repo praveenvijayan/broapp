@@ -14,7 +14,7 @@ export const STANDING_WORDS = {
   switchLabel: 'Work without asking',
   /** Under the switch: what it covers, and what it never does. */
   hint:
-    'Edits, builds and previews of any application are approved for the engineer without asking. Activation, creating or removing an application, and anything that reaches outside still ask.',
+    'Edits, builds and previews of any application, and the engineer’s web searches and page reads, are approved without asking. Activation, and creating or removing an application, still ask.',
   /** The card's third button, beside Allow and Decline. */
   cardLabel: 'Allow, and stop asking',
   /** The conversation's top bar while it is on. */
@@ -27,8 +27,9 @@ export const STANDING_WORDS = {
   onlyAPerson: 'Only a person turns working without asking on or off, from the launcher.',
   /** A write that did not reach the disk. */
   notSaved: (reason: string): string => `Working without asking could not be changed: ${reason}`,
-  /** The launcher's log, one event per question the standing approval answered. */
-  approved: (tool: string, appId: string): string => `the standing approval approved ${tool} for ${appId}`,
+  /** The launcher's log, one event per question the standing approval answered; a web tool names no application. */
+  approved: (tool: string, appId: string | null): string =>
+    appId === null ? `the standing approval approved ${tool}` : `the standing approval approved ${tool} for ${appId}`,
   /** The launcher's log, one event per change of the switch. */
   turned: (on: boolean): string => `the person turned working without asking ${on ? 'on' : 'off'}`,
   /** The command line's answer, and `status`'s line after `standing: `. */

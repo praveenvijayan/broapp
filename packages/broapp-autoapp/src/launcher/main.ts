@@ -132,9 +132,10 @@ Usage:
                                         activations. Without: whether a launcher is
                                         running over this root, and what it serves.
   broapp-autoapp standing [on|off]      Whether the engineer works without asking for
-                                        edits, builds and previews of any application.
-                                        Activation, creation and anything external
-                                        still ask. Settings has the same switch.
+                                        edits, builds and previews of any application,
+                                        and for its web searches and page reads.
+                                        Activation and creation still ask. Settings
+                                        has the same switch.
   broapp-autoapp stop                   Stop the launcher running over this root, and
                                         every application it serves. Its panel's Quit
                                         and Ctrl+C in its terminal do the same.

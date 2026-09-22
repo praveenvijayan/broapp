@@ -217,10 +217,10 @@ conversation said "proceed".
 
 To stop being asked for these, press **Allow, and stop asking** on the next
 card, or turn on **Work without asking** in the launcher's Settings, or run
-`broapp-autoapp standing on`. Edits, builds and previews of any application are
-then approved at once; activation, creating or removing an application, and
-anything that reaches outside still ask. **Ask again** in the conversation's top
-bar, the same switch, or `standing off` turns it back off.
+`broapp-autoapp standing on`. Edits, builds and previews of any application,
+and the engineer's web searches and page reads, are then approved at once;
+activation, and creating or removing an application, still ask. **Ask again** in
+the conversation's top bar, the same switch, or `standing off` turns it back off.
 
 ### The engineer says it has no browser to read the web with
 

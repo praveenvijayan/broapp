@@ -34,7 +34,8 @@ import {
 } from 'broapp-autoapp/launcher';
 import { layout, type Layout } from 'broapp-autoapp/spec';
 
-import { INTENT_APPROVES, standingCovers } from '../packages/broapp-autoapp/src/engineer/standing.ts';
+import { INTENT_APPROVES, STANDING_WEB, standingCovers } from '../packages/broapp-autoapp/src/engineer/standing.ts';
+import type { WebBrowser } from '../packages/broapp-autoapp/src/engineer/web.ts';
 import { clearStanding, readStanding, writeStanding } from '../packages/broapp-autoapp/src/launcher/standing.ts';
 import { STANDING_WORDS } from '../packages/broapp-autoapp/src/launcher/standing-words.ts';
 import { OverviewScreen } from '../packages/broapp-autoapp/src/launcher/ui/OverviewScreen.tsx';
@@ -96,10 +97,20 @@ describe('20a: the rule', () => {
     }
   });
 
-  test('the list is closed: nothing on it can widen it', () => {
+  test('standingCovers: the two web tools, which name no application', () => {
+    expect(standingCovers('web.search', { query: 'bun webview' })).toBe(true);
+    expect(standingCovers('web.read', { url: 'https://example.com/' })).toBe(true);
+    expect(standingCovers('web.read', {})).toBe(true);
+    // The person's switch only: a backlog run's answer puts them to the person.
+    expect(standingAnswer('items', { tool: 'web.search', input: { query: 'bun webview' } })).toBe('defer');
+    expect(standingAnswer('items', { tool: 'web.read', input: { url: 'https://example.com/' } })).toBe('defer');
+  });
+
+  test('the lists are closed: nothing on them can widen them', () => {
     expect([...INTENT_APPROVES].sort()).toEqual(
       ['candidate.build', 'candidate.cycle', 'candidate.preview', 'preview.stop', 'source.change', 'source.edit'].sort(),
     );
+    expect([...STANDING_WEB].sort()).toEqual(['web.read', 'web.search']);
     expect(INTENT_APPROVES.some((tool) => tool.startsWith('launcher.'))).toBe(false);
     // No engineer tool reaches the routes: nothing under engineer/ names them.
     const engineer = join(import.meta.dir, '..', 'packages', 'broapp-autoapp', 'src', 'engineer');
@@ -203,8 +214,24 @@ function addApp(root: Layout, appId: string): void {
   writeFileSync(manifest, `${JSON.stringify({ ...spec, appId, name: appId }, null, 2)}\n`);
 }
 
+/** A browser that answers from memory and remembers what it was asked; nothing opens a socket. */
+function fakeBrowser(): WebBrowser & { readonly calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    search: (query) => {
+      calls.push(`search ${query}`);
+      return Promise.resolve([{ title: `About ${query}`, url: 'https://example.com/1', snippet: query }]);
+    },
+    read: (url) => {
+      calls.push(`read ${url}`);
+      return Promise.resolve({ url, title: 'One', text: 'A page.', links: [] });
+    },
+  };
+}
+
 /** The launcher's tab over a real bridge, two applications, a scripted model. */
-async function start(script: readonly FakeStep[]): Promise<World> {
+async function start(script: readonly FakeStep[], browser?: WebBrowser): Promise<World> {
   mkdirSync(runRoot, { recursive: true });
   const directory = mkdtempSync(join(runRoot, 'standing-'));
   const root = layout(directory);
@@ -235,6 +262,7 @@ async function start(script: readonly FakeStep[]): Promise<World> {
     confirmTimeoutMs: 5_000,
     openBrowser: () => Promise.resolve(true),
     knowledge: { store: knowledge, log, evidence },
+    ...(browser === undefined ? {} : { browser }),
   });
   live = await harness((bridge) => tab.mount(bridge));
   const built: World = { directory, root, tab, store, journal, supervisor, knowledge, log };
@@ -343,6 +371,47 @@ describe.skipIf(!available)('20a: the stand-in in the launcher tab', () => {
     expect(logged.every((row) => row.runId === 'run-standing-on')).toBe(true);
     expect(logged.map((row) => row.appId)).toEqual(['items', 'items', 'items', 'books', 'books', 'books']);
     expect(logged[1]?.callId ?? '').toMatch(/\.build$/);
+  }, 120_000);
+
+  test('on: a web search and a page read ask nobody, the browser is reached, and the log names the tool alone', async () => {
+    const browser = fakeBrowser();
+    const w = await start(
+      [
+        {
+          kind: 'tool',
+          name: 'web.search',
+          input: { query: 'bun webview' },
+          then: [{ kind: 'tool', name: 'web.read', input: { url: 'https://example.com/1' }, then: [{ kind: 'text', chunks: ['read it'] }] }],
+        },
+      ],
+      browser,
+    );
+    writeStanding(w.root);
+    const events = await chat('run-standing-web', () => {
+      throw new Error('nobody should have been asked');
+    });
+    expect(events.filter((event) => event.type === 'confirm')).toEqual([]);
+    expect(events.some((event) => event.denied === true)).toBe(false);
+    expect(browser.calls).toEqual(['search bun webview', 'read https://example.com/1']);
+    expect(decisions(w.store, 'run-standing-web').map((step) => [step.route, step.decision])).toEqual([
+      ['web.search', 'confirmed'],
+      ['web.read', 'confirmed'],
+    ]);
+    const logged = approvals(w.knowledge);
+    expect(logged.map((row) => row.message)).toEqual([STANDING_WORDS.approved('web.search', null), STANDING_WORDS.approved('web.read', null)]);
+    expect(logged.map((row) => row.appId)).toEqual([null, null]);
+    expect(logged.every((row) => row.runId === 'run-standing-web')).toBe(true);
+  }, 120_000);
+
+  test('off: a web search is put to the person, and the browser is not reached when they decline', async () => {
+    const browser = fakeBrowser();
+    const w = await start([{ kind: 'tool', name: 'web.search', input: { query: 'bun webview' }, then: [{ kind: 'text', chunks: ['asked'] }] }], browser);
+    clearStanding(w.root);
+    const events = await chat('run-standing-web-off', () => false);
+    expect(events.filter((event) => event.type === 'confirm').map((event) => event.tool)).toEqual(['web.search']);
+    expect(browser.calls).toEqual([]);
+    expect(decisions(w.store, 'run-standing-web-off').map((step) => [step.route, step.decision])).toEqual([['web.search', 'denied']]);
+    expect(approvals(w.knowledge)).toEqual([]);
   }, 120_000);
 
   test('on: activation, creation, and a listed tool naming no application are put to the person', async () => {

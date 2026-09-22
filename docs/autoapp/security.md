@@ -359,12 +359,15 @@ one switch for the whole launcher, **Work without asking**, and take it back.
   `candidate.build`, `candidate.preview` and `preview.stop` — the run's list,
   one list in `engineer/standing.ts` — for **any** application the call names.
   A cycle's build and preview are asked as their own questions, and are covered
-  as the cycle is.
+  as the cycle is. And the engineer's two web tools, `web.search` and
+  `web.read`, which name no application: a person who reads the web through
+  the engineer often found the card before each search was the cost of the
+  tool, so the switch answers those too, and the log says so by the tool's
+  name alone. A backlog run's stand-in never answers them.
 - **What it never covers, however it was turned on.** `release.activate`;
   `apps.create`; removal (no engineer tool exists); `launcher.folderChoose`;
   `launcher.standingSet` itself (no engineer tool names it, and the list is
-  closed); anything `external`, which is activation and the two web tools;
-  a listed tool whose input names no application; the `mcp` and `workflow` channels, which never read the file; an
+  closed); a listed tool whose input names no application; the `mcp` and `workflow` channels, which never read the file; an
   application's own chat in its own tab; and a backlog run's turns, which have
   their own stand-in. Those ask exactly as before. Where a backlog run refuses
   activation and creation, the switch does not refuse them: it leaves them to
@@ -391,7 +394,9 @@ one switch for the whole launcher, **Work without asking**, and take it back.
 
 `web.search` and `web.read` are the engineer's only way to read the web, and
 both are `external`: on the AI channel the gate asks the person before each
-call, in a preview it refuses, and **Work without asking** never covers them.
+call, and in a preview it refuses. **Work without asking** covers them, as it
+covers edits and builds: the person who turned it on is not asked before each
+search or read, and the launcher's log records every answer the switch gave.
 What leaves this machine is what the model typed — a query, an address — and
 nothing else: the browser is a fresh `Bun.WebView` with ephemeral storage for
 each call, closed when the call ends, so no cookie, login or history carries
