@@ -80,9 +80,16 @@ export interface BroappChatViewProps {
    * `Loader.tsx`.
    */
   readonly statusLines?: readonly string[];
+  /**
+   * A third answer on an approval card, when the surrounding application
+   * offers one for that question; `null` offers none. See `BroappChatProps`.
+   */
+  readonly standing?: (call: StandingQuestion) => StandingOffer | null;
   onSend(message: { text: string; files: FileUIPart[] }): void;
   onStop(): void;
   onConfirm(callId: string, approve: boolean): void;
+  /** Where a standing answer that could not be recorded says why. */
+  onStandingError?(message: string): void;
 }
 
 /** The name a tool part carries, whichever kind of part it is. */
@@ -109,13 +116,60 @@ function descriptorOf(value: unknown): BroappApprovalDescriptor | null {
   };
 }
 
+/**
+ * A standing answer the surrounding application offers for one question: the
+ * words on the card's third button, and what saying them does.
+ *
+ * The panel does not know what "always" means for an application; the
+ * application does. So it is asked, per question, and offers one or nothing.
+ */
+export interface StandingOffer {
+  readonly label: string;
+  /** Records the standing answer. Rejecting leaves the question unanswered. */
+  grant(): Promise<void>;
+}
+
+/** What the card asks the surrounding application about one question. */
+export interface StandingQuestion {
+  readonly callId: string;
+  readonly tool: string;
+  readonly input: unknown;
+}
+
+/**
+ * The third button's click: the standing answer first, then this question.
+ *
+ * In that order, so a standing answer that could not be recorded leaves the
+ * card as it was — both buttons, nothing answered — with the reason where a
+ * failed answer is shown. A pure function, so it is tested without a DOM.
+ */
+export async function grantThenAllow(
+  offer: StandingOffer,
+  callId: string,
+  onConfirm: (callId: string, approve: boolean) => void,
+  onError: (message: string) => void,
+): Promise<boolean> {
+  try {
+    await offer.grant();
+  } catch (cause) {
+    onError(cause instanceof Error ? cause.message : String(cause));
+    return false;
+  }
+  onConfirm(callId, true);
+  return true;
+}
+
 /** Props for {@link ToolApproval}. */
 export interface ToolApprovalProps {
   readonly tool: string;
   readonly callId: string;
   readonly expiresAt?: number;
   readonly now: number;
+  /** A third answer, when the surrounding application offers one for this question. */
+  readonly standing?: StandingOffer | null;
   onConfirm(callId: string, approve: boolean): void;
+  /** Where a standing answer that could not be recorded says why. */
+  onStandingError?(message: string): void;
 }
 
 /** The question a person answers before a tool that changes something runs. */
@@ -124,11 +178,17 @@ export function ToolApproval({
   callId,
   expiresAt,
   now,
+  standing,
   onConfirm,
+  onStandingError,
 }: ToolApprovalProps): React.ReactElement {
   const urgent = expiresAt !== undefined && isUrgent(expiresAt, now);
+  // While the standing answer is being recorded the card is not answerable a
+  // second way; it says so by being disabled, not by vanishing.
+  const [granting, setGranting] = React.useState(false);
   return (
     <div
+      aria-busy={granting}
       aria-label={`Allow ${tool}?`}
       className={`broapp-chat__confirm${urgent ? ' broapp-chat__confirm--urgent' : ''}`}
       role="group"
@@ -139,12 +199,28 @@ export function ToolApproval({
       )}
       <button
         className="button button--primary"
+        disabled={granting}
         onClick={() => onConfirm(callId, true)}
         type="button"
       >
         Allow
       </button>
-      <button className="button" onClick={() => onConfirm(callId, false)} type="button">
+      {standing === undefined || standing === null ? null : (
+        <button
+          className="button"
+          disabled={granting}
+          onClick={() => {
+            setGranting(true);
+            void grantThenAllow(standing, callId, onConfirm, (message) => onStandingError?.(message)).finally(() =>
+              setGranting(false),
+            );
+          }}
+          type="button"
+        >
+          {standing.label}
+        </button>
+      )}
+      <button className="button" disabled={granting} onClick={() => onConfirm(callId, false)} type="button">
         Decline
       </button>
     </div>
@@ -199,11 +275,15 @@ function Parts({
   markdown,
   now,
   onConfirm,
+  standing,
+  onStandingError,
 }: {
   message: BroappUIMessage;
   markdown: boolean;
   now: number;
   onConfirm: (callId: string, approve: boolean) => void;
+  standing?: ((call: StandingQuestion) => StandingOffer | null) | undefined;
+  onStandingError?: ((message: string) => void) | undefined;
 }): React.ReactElement {
   return (
     <>
@@ -261,6 +341,10 @@ function Parts({
                 // step of a call is the step, not the call.
                 tool={descriptor?.tool ?? tool}
                 {...(descriptor?.expiresAt === undefined ? {} : { expiresAt: descriptor.expiresAt })}
+                {...(standing === undefined
+                  ? {}
+                  : { standing: standing({ callId: part.toolCallId, tool: descriptor?.tool ?? tool, input: part.input }) })}
+                {...(onStandingError === undefined ? {} : { onStandingError })}
               />
             ) : null}
           </React.Fragment>
@@ -350,9 +434,11 @@ export function BroappChatView({
   suggestionTip,
   maxLength = MESSAGE_MAX_LENGTH,
   statusLines,
+  standing,
   onSend,
   onStop,
   onConfirm,
+  onStandingError,
 }: BroappChatViewProps): React.ReactElement {
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   // The textarea is uncontrolled — the form is what reads it on submit — so
@@ -408,6 +494,8 @@ export function BroappChatView({
                   message={message}
                   now={now}
                   onConfirm={onConfirm}
+                  onStandingError={onStandingError}
+                  standing={standing}
                 />
               </MessageContent>
             </Message>

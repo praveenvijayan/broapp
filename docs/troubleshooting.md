@@ -207,6 +207,21 @@ field that replaced the button), and paste the folder's full path. Quotes that
 Finder's and Explorer's "copy as path" put around it are taken off. The form
 checks it as you type and says where the project will be made.
 
+### The build was declined although I told the engineer to go ahead
+
+A message in the conversation is not an answer. Every edit, build and preview
+the engineer makes is a question the gate asks, and only the card answers it:
+**Allow** on the card, before it expires (ten minutes). A card nobody answers
+is a denial, which is why `candidate.cycle` came back declined while the
+conversation said "proceed".
+
+To stop being asked for these, press **Allow, and stop asking** on the next
+card, or turn on **Work without asking** in the launcher's Settings, or run
+`broapp-autoapp standing on`. Edits, builds and previews of any application are
+then approved at once; activation, creating or removing an application, and
+anything that reaches outside still ask. **Ask again** in the conversation's top
+bar, the same switch, or `standing off` turns it back off.
+
 ## AI
 
 ### "AI is not set up yet. Open Settings to choose a provider."

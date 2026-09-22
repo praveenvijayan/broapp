@@ -17,6 +17,7 @@ export type {
   InProcessTurnOptions,
   InProcessTurnResult,
   RunEndDetail,
+  StandInQuestion,
 } from './create-ai.ts';
 export type { ChatEvent } from './run-types.ts';
 

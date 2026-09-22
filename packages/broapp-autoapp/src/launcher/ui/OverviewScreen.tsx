@@ -23,6 +23,7 @@ import { useOperation } from 'broapp/react';
 import type { OperationOutput } from 'broapp/shared';
 
 import type { LauncherContract } from '../contract.ts';
+import { STANDING_WORDS } from '../standing-words.ts';
 import { AppIcon } from './AppIcon.tsx';
 import { modelName, type ModelPlaces } from './IntentPanel.tsx';
 
@@ -236,6 +237,8 @@ export function OverviewScreen(props: OverviewScreenProps): React.ReactElement {
       ) : null}
 
       <Summary overview={overview} onPrices={() => setPricesOpen(true)} />
+      {/* A setting, not something that needs the person: one muted line. */}
+      {overview.standing === true ? <p className="launcher__ov-standing">{STANDING_WORDS.overviewLine}</p> : null}
 
       <section aria-label="Needs your attention" aria-live="polite" className={`launcher__ov-attention${items.length === 0 ? ' launcher__ov-attention--calm' : ''}`}>
         {items.length === 0 ? (

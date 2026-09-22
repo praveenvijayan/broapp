@@ -29,8 +29,8 @@ export type { BroappThreadListProps } from './BroappThreadList.tsx';
 
 export { transcriptOf } from './transcript.ts';
 
-export { BroappChatView, MESSAGE_MAX_LENGTH, Response, ToolApproval } from './BroappChatView.tsx';
-export type { BroappChatViewProps, ToolApprovalProps } from './BroappChatView.tsx';
+export { BroappChatView, grantThenAllow, MESSAGE_MAX_LENGTH, Response, ToolApproval } from './BroappChatView.tsx';
+export type { BroappChatViewProps, StandingOffer, StandingQuestion, ToolApprovalProps } from './BroappChatView.tsx';
 
 export { DEFAULT_STATUS_LINES, Loader, STATUS_LINE_MS, formatElapsed, statusLine } from './Loader.tsx';
 export type { LoaderProps } from './Loader.tsx';

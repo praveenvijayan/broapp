@@ -29,7 +29,7 @@ import { AdapterError } from './adapter.ts';
 import type { AdapterConfig, ProviderAdapter } from './adapter.ts';
 import type { Registry } from './registry.ts';
 import type { AiContextProviders, AiTool, ContextDocument } from './tool.ts';
-import type { DeliveredContext, RunEndDetail } from './create-ai.ts';
+import type { DeliveredContext, RunEndDetail, StandInQuestion } from './create-ai.ts';
 import type { ResponseMessage } from './threads.ts';
 
 /**
@@ -82,6 +82,11 @@ export interface RunDeps {
    * somebody who wants to say what a turn has cost before it ends.
    */
   readonly onUsageSoFar?: (runId: string, soFar: { inputTokens: number; outputTokens: number }) => void;
+  /**
+   * Answers a question before the person is asked, or defers it to them.
+   * See `CreateAiOptions.standIn`.
+   */
+  readonly standIn?: (question: StandInQuestion) => boolean | 'defer';
   /**
    * The turn transcripts. Absent, every history turn is text and nothing is
    * written, which is exactly the layer before transcripts existed.
@@ -581,10 +586,34 @@ function safeMessage(cause: unknown, logger: HostLogger): string {
 function createRunApprover(
   deps: RunDeps,
   sink: StreamSink<ChatEvent>,
+  runId: string,
   callIdOf: (requestId: string) => string,
 ): Approver {
   return {
     async ask(question: ApprovalQuestion, signal: AbortSignal): Promise<boolean> {
+      // A stand-in the person set up answers first. Its yes or no settles the
+      // question here, and the gate records it as it records a click; nothing
+      // is emitted and nothing waits in the approval table, because nobody is
+      // being asked. A stand-in that throws has answered nothing.
+      const standIn = deps.standIn;
+      if (standIn !== undefined) {
+        let answer: boolean | 'defer';
+        try {
+          answer = standIn({
+            runId,
+            tool: question.route,
+            input: question.input,
+            requestId: question.requestId,
+            callId: callIdOf(question.requestId),
+          });
+        } catch (cause) {
+          deps.logger.error(
+            `[broapp] ai standIn hook failed: ${String(cause instanceof Error ? cause.message : cause)}`,
+          );
+          answer = 'defer';
+        }
+        if (answer !== 'defer') return answer;
+      }
       await sink.emit({
         type: 'confirm',
         callId: callIdOf(question.requestId),
@@ -894,7 +923,7 @@ async function runTurn(
   // One approver per run. The request identifier the gate will use is
   // `<runId>:<callId>`, so the call a `confirm` event names can be recovered
   // from it — which is what keeps `ai.chatConfirm`'s wire shape unchanged.
-  const approver = createRunApprover(deps, sink, (requestId) =>
+  const approver = createRunApprover(deps, sink, params.runId, (requestId) =>
     requestId.startsWith(`${params.runId}:`) ? requestId.slice(params.runId.length + 1) : requestId,
   );
 

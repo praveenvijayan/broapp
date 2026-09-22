@@ -330,6 +330,12 @@ export interface Combination {
 
 export interface CheckReport {
   readonly combinations: readonly Combination[];
+  /**
+   * The launcher's own page, one combination a scheme: the switch it draws
+   * since prompt 20a, off and on, and the top-bar line beside it. Kept apart
+   * from `combinations`, which are the application page's nine.
+   */
+  readonly launcher?: readonly Combination[];
   readonly failures: readonly string[];
   readonly pageBytes: Readonly<Record<string, number>>;
   readonly seconds: number;
@@ -515,6 +521,167 @@ function judge(
   return failures;
 }
 
+/* ---------------------------------------------------------- the launcher */
+
+/**
+ * What is measured on the launcher's page.
+ *
+ * Its variables are its own (`--launcher-*`), set in `launcher.css` for each
+ * scheme, so the expected values come from that file rather than from a
+ * theme. The switch is the one control the launcher draws that has a state
+ * shown by more than words; its off and on are both measured.
+ */
+const LAUNCHER_TARGETS: readonly Target[] = [
+  {
+    id: 'switch-off',
+    selector: '[data-check="switch-off"] .launcher__switch',
+    drawnBy: 'renderer',
+    background: '--launcher-surface',
+    border: '--launcher-muted',
+  },
+  {
+    id: 'switch-on',
+    selector: '[data-check="switch-on"] .launcher__switch',
+    drawnBy: 'renderer',
+    background: '--launcher-accent',
+    border: '--launcher-accent',
+  },
+  { id: 'switch-label', selector: '[data-check="switch-off"] .launcher__switch-label', drawnBy: 'renderer', colour: '--launcher-heading', contrast: true },
+  { id: 'switch-hint', selector: '[data-check="switch-off"] .launcher__section-hint', drawnBy: 'renderer', colour: '--launcher-muted', contrast: true },
+  { id: 'standing-line', selector: '[data-check="top-bar"] .launcher__standing', drawnBy: 'renderer', colour: '--launcher-muted', contrast: true },
+  { id: 'standing-link', selector: '[data-check="top-bar"] .launcher__standing-link', drawnBy: 'renderer', colour: '--launcher-text', contrast: true },
+];
+
+/** 3:1, the WCAG 2 minimum for the parts of a control a person has to see. */
+const MINIMUM_CONTROL_CONTRAST = 3;
+
+/**
+ * What `launcher.css` sets on the root in each scheme: the first `:root` block
+ * for light, and the dark media block's `:root:not([data-scheme='light'])` over
+ * it for dark — the machine's preference, which is what the browser is told to
+ * emulate. The person's own choice (`data-scheme`) is the same values, and is
+ * not what a scheme emulation reaches.
+ */
+function launcherProperties(css: string): { light: Map<string, string>; dark: Map<string, string> } {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const light = new Map<string, string>();
+  const darkOnly = new Map<string, string>();
+  let at = 0;
+  for (;;) {
+    const brace = text.indexOf('{', at);
+    if (brace === -1) break;
+    const selector = text.slice(at, brace).trim();
+    const end = closing(text, brace);
+    const body = text.slice(brace + 1, end);
+    if (selector === ':root') {
+      propertiesIn(body, light);
+    } else if (selector === DARK_MEDIA) {
+      for (let inner = 0; ; ) {
+        const innerBrace = body.indexOf('{', inner);
+        if (innerBrace === -1) break;
+        const innerSelector = body.slice(inner, innerBrace).trim();
+        const innerEnd = closing(body, innerBrace);
+        if (innerSelector === ":root:not([data-scheme='light'])") propertiesIn(body.slice(innerBrace + 1, innerEnd), darkOnly);
+        inner = innerEnd + 1;
+      }
+    }
+    at = end + 1;
+  }
+  return { light, dark: new Map([...light, ...darkOnly]) };
+}
+
+/** A `#rgb` or `#rrggbb` colour's relative luminance, or `null` for anything else. */
+function hexLuminance(value: string): number | null {
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value.trim())?.[1];
+  if (hex === undefined) return null;
+  const full = hex.length === 3 ? [...hex].map((digit) => digit + digit).join('') : hex;
+  const channel = (at: number): number => {
+    const part = parseInt(full.slice(at, at + 2), 16) / 255;
+    return part <= 0.03928 ? part / 12.92 : Math.pow((part + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+}
+
+/** The contrast of two hex colours, or `null` when either is not one. */
+function hexContrast(one: string, two: string): number | null {
+  const a = hexLuminance(one);
+  const b = hexLuminance(two);
+  if (a === null || b === null) return null;
+  return Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100;
+}
+
+/**
+ * The launcher page's rules for one scheme.
+ *
+ * Every colour resolved to the value `launcher.css` sets in that scheme; every
+ * text pair meets 4.5:1; and the switch's parts a person has to see — its
+ * track's edge and its knob, off and on — meet 3:1 against what is behind
+ * them, so its state is never a colour that disappears.
+ */
+function judgeLauncher(
+  scheme: Scheme,
+  measured: readonly Measured[],
+  expected: Readonly<Record<string, string>>,
+  set: Map<string, string>,
+): readonly string[] {
+  const failures: string[] = [];
+  const where = `launcher/${scheme}`;
+  const byId = new Map(measured.map((one) => [one.id, one]));
+  for (const target of LAUNCHER_TARGETS) {
+    const found = byId.get(target.id);
+    if (found === undefined || !found.found) {
+      failures.push(`${where}: ${target.id} was not on the page`);
+      continue;
+    }
+    const check = (property: keyof Measured, wanted: string | undefined, label: string): void => {
+      if (wanted === undefined) return;
+      const want = expected[wanted];
+      if (want === undefined || want === '') {
+        failures.push(`${where}: ${target.id} ${label} has no expected value for ${wanted}`);
+        return;
+      }
+      const got = String(found[property]);
+      if (got !== want) failures.push(`${where}: ${target.id} ${label} is ${got}, launcher.css says ${wanted} is ${want}`);
+    };
+    check('backgroundColor', target.background, 'background');
+    check('color', target.colour, 'colour');
+    check('borderColor', target.border, 'border');
+    if (target.contrast === true && found.contrast !== null && found.contrast < MINIMUM_CONTRAST) {
+      failures.push(
+        `${where}: ${target.id} is ${String(found.contrast)}:1 (${found.color} on ${found.effectiveBackground}), under ${String(MINIMUM_CONTRAST)}:1`,
+      );
+    }
+  }
+  const value = (name: string): string => set.get(name) ?? '';
+  const pairs: readonly (readonly [string, string, string])[] = [
+    ['the switch’s edge, off, against the settings ground', '--launcher-muted', '--launcher-surface'],
+    ['the switch’s knob, off, against its track', '--launcher-muted', '--launcher-surface'],
+    ['the switch’s knob, on, against its track', '--launcher-accent-contrast', '--launcher-accent'],
+    ['the switch, on, against the settings ground', '--launcher-accent', '--launcher-surface'],
+  ];
+  for (const [what, front, back] of pairs) {
+    const ratio = hexContrast(value(front), value(back));
+    if (ratio === null) failures.push(`${where}: ${what}: ${front} or ${back} is not a hex colour in launcher.css`);
+    else if (ratio < MINIMUM_CONTROL_CONTRAST) {
+      failures.push(`${where}: ${what} is ${String(ratio)}:1 (${front} on ${back}), under ${String(MINIMUM_CONTROL_CONTRAST)}:1`);
+    }
+  }
+  return failures;
+}
+
+/** Build the launcher's reduced page and return where it was written. */
+async function buildLauncher(): Promise<{ file: string; bytes: number }> {
+  const file = join(outDir, 'launcher.html');
+  const built = await buildPage({
+    entry: 'scripts/theme-check/launcher.tsx',
+    template: 'scripts/theme-check/index.html',
+    outFile: file,
+    root: repo,
+    minify: false,
+  });
+  return { file, bytes: built.bytes };
+}
+
 /* ------------------------------------------------------------------- running */
 
 /** Expected values, per theme and scheme, for everything a rule names. */
@@ -572,6 +739,7 @@ export async function themeCheck(): Promise<CheckReport> {
   const all = themes();
   const pageBytes: Record<string, number> = {};
   const combinations: Combination[] = [];
+  const launcher: Combination[] = [];
   const failures: string[] = [];
 
   const browser = await chromium.launch();
@@ -632,11 +800,45 @@ export async function themeCheck(): Promise<CheckReport> {
         }
       }
     }
+
+    // The launcher's page: its own variables, three schemes.
+    const launcherBuilt = await buildLauncher();
+    pageBytes['launcher'] = launcherBuilt.bytes;
+    const properties = launcherProperties(read(repo, 'packages', 'broapp-autoapp', 'src', 'launcher', 'ui', 'launcher.css'));
+    for (const scheme of SCHEMES) {
+      const page = await browser.newPage();
+      try {
+        const errors: string[] = [];
+        page.on('pageerror', (error) => errors.push(String(error)));
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.goto(`file://${launcherBuilt.file}`);
+        await page.waitForSelector('.launcher__switch', { state: 'attached' });
+        const set = scheme === 'dark' ? properties.dark : properties.light;
+        const wanted: Record<string, string> = {};
+        for (const target of LAUNCHER_TARGETS) {
+          for (const property of [target.background, target.colour, target.border]) {
+            if (property !== undefined) wanted[property] = set.get(property) ?? '';
+          }
+        }
+        const result = (await page.evaluate(call({ targets: LAUNCHER_TARGETS, expected: wanted }))) as {
+          targets: readonly Measured[];
+          expected: Record<string, string>;
+        };
+        const combinationFailures = [
+          ...errors.map((error) => `launcher/${scheme}: the page threw ${error}`),
+          ...judgeLauncher(scheme, result.targets, result.expected, set),
+        ];
+        launcher.push({ theme: 'launcher', scheme, targets: result.targets, panelPrimary: '', rootAccentToken: '', failures: combinationFailures });
+        failures.push(...combinationFailures);
+      } finally {
+        await page.close();
+      }
+    }
   } finally {
     await browser.close();
     writeFileSync(join(fixtureDir, 'theme.css'), PLACEHOLDER, 'utf8');
   }
-  return { combinations, failures, pageBytes, seconds: Math.round((Date.now() - started) / 100) / 10 };
+  return { combinations, launcher, failures, pageBytes, seconds: Math.round((Date.now() - started) / 100) / 10 };
 }
 
 /** Whether a browser can be launched at all, so a test can skip instead of fail. */
@@ -669,6 +871,14 @@ function markdown(report: CheckReport): string {
       );
     }
   }
+  lines.push('', '## The launcher', '', '| scheme | target | background | colour | border | contrast |', '|---|---|---|---|---|---|');
+  for (const combination of report.launcher ?? []) {
+    for (const target of combination.targets) {
+      lines.push(
+        `| ${combination.scheme} | ${target.id} | ${target.backgroundColor || '—'} | ${target.color} | ${target.borderColor} | ${target.contrast === null ? '—' : `${String(target.contrast)}:1`} |`,
+      );
+    }
+  }
   lines.push('', '## What the panel resolved', '', '| theme | scheme | panel --primary | renderer --autoapp-accent |', '|---|---|---|---|');
   for (const combination of report.combinations) {
     lines.push(`| ${combination.theme} | ${combination.scheme} | ${combination.panelPrimary} | ${combination.rootAccentToken} |`);
@@ -686,7 +896,9 @@ async function main(): Promise<number> {
   for (const [theme, bytes] of Object.entries(report.pageBytes)) {
     console.log(`page    ${theme}  ${String(bytes)} bytes`);
   }
-  console.log(`checked ${String(report.combinations.length)} combinations in ${String(report.seconds)}s`);
+  console.log(
+    `checked ${String(report.combinations.length)} combinations and the launcher in ${String(report.launcher?.length ?? 0)} schemes in ${String(report.seconds)}s`,
+  );
   if (report.failures.length > 0) {
     for (const failure of report.failures) console.error(`FAIL    ${failure}`);
     return 1;

@@ -63,6 +63,8 @@ import { openJournal, type Journal } from './journal.ts';
 import { keepServing } from './keepalive.ts';
 import { recover, restoreServing } from './recover.ts';
 import { addServing, removeServing } from './serving.ts';
+import { clearStanding, readStanding, writeStanding } from './standing.ts';
+import { STANDING_WORDS } from './standing-words.ts';
 import { createSupervisor, type Supervisor } from './supervisor.ts';
 import { createLauncherGate } from './app.ts';
 import { createApplication } from './create.ts';
@@ -129,6 +131,10 @@ Usage:
   broapp-autoapp status [<appId>]       With an application: its release, grants and
                                         activations. Without: whether a launcher is
                                         running over this root, and what it serves.
+  broapp-autoapp standing [on|off]      Whether the engineer works without asking for
+                                        edits, builds and previews of any application.
+                                        Activation, creation and anything external
+                                        still ask. Settings has the same switch.
   broapp-autoapp stop                   Stop the launcher running over this root, and
                                         every application it serves. Its panel's Quit
                                         and Ctrl+C in its terminal do the same.
@@ -605,14 +611,34 @@ async function stopLauncher(root: Layout): Promise<number> {
 }
 
 /** `status` with no application — whether a launcher runs over this root, and what it does. */
+/**
+ * `standing [on|off]`: the person's standing approval, read or set.
+ *
+ * The same file Settings and the card's third button write, through the same
+ * functions. A launcher running over this root answers its next question by
+ * it; there is nothing to tell it.
+ */
+function standingCommand(root: Layout, value: string | undefined): number {
+  if (value !== undefined && value !== 'on' && value !== 'off') return usage('standing [on|off]');
+  const now = value === 'on' ? writeStanding(root) : value === 'off' ? clearStanding(root) : readStanding(root, console);
+  console.log(STANDING_WORDS.state(now.standing, now.since));
+  return 0;
+}
+
 async function launcherStatus(root: Layout): Promise<number> {
   let client: ControlClient | null = null;
   let status: LauncherStatus;
+  // Whether a launcher is running or not, the switch is a file under this root.
+  // Said only while it is on: a person who never touched it reads exactly what
+  // `status` said before the switch existed, and `standing` says `off`.
+  const standing = readStanding(root, console);
+  const standingLine = standing.standing ? `standing: ${STANDING_WORDS.state(standing.standing, standing.since)}` : null;
   try {
     client = await withTimeout(connectControl(root.control), JOIN_TIMEOUT_MS);
     status = await withTimeout(client.status(), JOIN_TIMEOUT_MS);
   } catch {
     console.log('No launcher is running over this root.');
+    if (standingLine !== null) console.log(standingLine);
     return 0;
   } finally {
     client?.close();
@@ -625,6 +651,7 @@ async function launcherStatus(root: Layout): Promise<number> {
       ? 'Backlog: no run.'
       : `Backlog: intent ${String(status.run.intentId)} on ${status.run.appId} is running${status.run.task === null ? '' : `, on ${status.run.task}`}.`,
   );
+  if (standingLine !== null) console.log(standingLine);
   return 0;
 }
 
@@ -941,6 +968,9 @@ async function main(): Promise<number> {
   // process opens anything a running launcher has open.
   if (command === 'stop') return await stopLauncher(root);
   if (command === 'status' && positional(argv, 1) === undefined) return await launcherStatus(root);
+  // A file, read at every question: neither needs the stores, and a launcher
+  // that is running answers its next question by what this writes.
+  if (command === 'standing') return standingCommand(root, positional(argv, 1));
 
   const wantsPanel = command === undefined || command === 'open' || (command === 'serve' && positional(argv, 1) === undefined);
   if (wantsPanel) {

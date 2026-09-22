@@ -1396,7 +1396,7 @@ export function engineerTools(options: EngineerToolsOptions): Record<string, Gua
   tools['candidate.cycle'] = guardedTool(gate, {
     name: 'candidate.cycle',
     description:
-      'Apply hunks (as source.edit takes them) and any new files, build, and when the build passes start the preview and run the acceptance examples. The person is asked before each of those steps. Returns each build problem with the lines it points at, whether it is the same failure as the last build, or which examples failed. Use it for every change, then fix what it reports with another candidate.cycle. With no hunks and no files it verifies the workspace as it is, which is how to finish a cycle that was interrupted. Three cycles in one turn that end with the same failure are the limit: after them, stop and ask the person.',
+      'Apply hunks (as source.edit takes them) and any new files, build, and when the build passes start the preview and run the acceptance examples. The person is asked before each of those steps, unless they turned on working without asking; then the answers come at once. Returns each build problem with the lines it points at, whether it is the same failure as the last build, or which examples failed. Use it for every change, then fix what it reports with another candidate.cycle. With no hunks and no files it verifies the workspace as it is, which is how to finish a cycle that was interrupted. Three cycles in one turn that end with the same failure are the limit: after them, stop and ask the person.',
     inputSchema: cycleInput.toJsonSchema(),
     effect: 'write',
     run: async (input, signal, envelope) => {

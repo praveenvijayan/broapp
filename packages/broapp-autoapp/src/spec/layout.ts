@@ -72,6 +72,13 @@ export interface Layout {
   readonly journal: string;
   readonly control: string;
   /**
+   * The person's standing approval for the engineer's edits, builds and
+   * previews, one switch for the whole launcher. Absent means off: turning it
+   * off removes the file, so a launcher never touched and one turned back off
+   * look the same on disk.
+   */
+  readonly standing: string;
+  /**
    * Where a removed application's directory is renamed to.
    *
    * Removal moves, and the launcher never empties this: a person who removed
@@ -149,6 +156,7 @@ export function layout(root: string): Layout {
     root,
     journal: join(root, 'journal.sqlite'),
     control: join(root, 'launcher.json'),
+    standing: join(root, 'standing.json'),
     trash: join(root, 'trash'),
     app(appId: string): AppLayout {
       // The pattern already forbids a separator and a dot, so this cannot fail

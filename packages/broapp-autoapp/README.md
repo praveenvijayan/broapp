@@ -50,3 +50,12 @@ engineer turn on the model its tier names, and a task counts as done only when a
 build passes an example for every criterion; nothing is activated. While a run
 goes it approves that application's edits, builds and previews for you and puts
 every other question to you. See [the backlog](../../docs/autoapp/intents.md).
+
+**Work without asking**, a switch in the launcher's Settings (also the third
+button on an approval card, **Allow, and stop asking**, and
+`broapp-autoapp standing on|off`), gives the engineer's own conversations the
+same standing answer, for every application: edits, builds and previews are
+approved at once. Activation, creating or removing an application, anything
+that reaches outside, and every MCP or workflow call still ask. The gate still
+records every answer, and the launcher's log says which the switch gave. See
+[the person's standing approval](../../docs/autoapp/security.md#the-persons-standing-approval).

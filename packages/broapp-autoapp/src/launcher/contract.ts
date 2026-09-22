@@ -382,6 +382,9 @@ const priceRow = s.object({
   output: s.number(),
 });
 
+/** The person's standing approval, as both of its routes answer. */
+const standingOutput = s.object({ standing: s.boolean(), since: s.nullable(s.number()) });
+
 const modelChoice = s.nullable(s.string({ min: 1, max: 200 }));
 const tierModels = s.object({ light: modelChoice, standard: modelChoice, deep: modelChoice });
 
@@ -875,6 +878,10 @@ export const launcherContract = defineContract({
         ),
         apps: s.array(appBlock, { max: 500 }),
         recent: s.array(runEvent, { max: 50 }),
+        // `true` while the person's standing approval is on, so the Overview
+        // and the top bar need no second read. Absent while it is off, so a
+        // launcher nobody turned it on in answers exactly what it did before.
+        standing: s.optional(s.boolean()),
       }),
       summary:
         'What needs the person, what is running and at what stage, what it has cost, what is left, and what each application is doing.',
@@ -896,6 +903,20 @@ export const launcherContract = defineContract({
       }),
       output: s.object({ models: s.array(priceRow, { max: 200 }), budgetDay: s.nullable(s.number({ min: 0 })) }),
       summary: 'Replace what each model costs and the daily budget. Shown, never enforced.',
+    },
+    'launcher.standingGet': {
+      effect: 'read',
+      input: s.void(),
+      output: standingOutput,
+      summary: 'Whether the engineer works without asking for edits, builds and previews, and since when.',
+    },
+    'launcher.standingSet': {
+      // A person's own switch. No engineer tool names it, and the standing
+      // approval never covers it: nothing it approves can widen it.
+      effect: 'write',
+      input: s.object({ standing: s.boolean() }),
+      output: standingOutput,
+      summary: 'Turn working without asking on or off for every application.',
     },
     'launcher.intentModelsSet': {
       effect: 'write',

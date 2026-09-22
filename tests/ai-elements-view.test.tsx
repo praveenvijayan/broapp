@@ -25,6 +25,7 @@ import {
   BroappThreadList,
   STATUS_LINE_MS,
   formatElapsed,
+  grantThenAllow,
   statusLine,
   transcriptOf,
 } from 'broapp-ai-elements/ui';
@@ -253,6 +254,92 @@ describe('the approval card', () => {
 
     expect(html).toContain('Declined notes.create');
     expect(html).not.toContain('Allow this?');
+  });
+});
+
+describe('20a: a third answer on the approval card', () => {
+  const pending: ToolUIPart = {
+    type: 'tool-candidate.cycle',
+    toolCallId: 'call-1',
+    state: 'approval-requested',
+    input: { appId: 'items', hunks: [] },
+    // A step of the call: the descriptor names the step.
+    approval: { id: 'req-1', descriptor: { tool: 'candidate.build', expiresAt: NOW + 60_000 } },
+  };
+  const buttons = (html: string): string[] => [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((match) => match[1] ?? '');
+
+  test('no third button without the prop, or when it offers nothing', () => {
+    const without = render({ messages: [toolMessage(pending)] });
+    expect(buttons(without).filter((label) => ['Allow', 'Decline', 'Allow, and stop asking'].includes(label))).toEqual(['Allow', 'Decline']);
+    const asked: unknown[] = [];
+    const none = render({
+      messages: [toolMessage(pending)],
+      standing: (call) => {
+        asked.push(call);
+        return null;
+      },
+    });
+    expect(buttons(none)).not.toContain('Allow, and stop asking');
+    // Asked about the step the card is about, with the call's own input.
+    expect(asked).toEqual([{ callId: 'call-1', tool: 'candidate.build', input: { appId: 'items', hunks: [] } }]);
+  });
+
+  test('with an offer, its label between Allow and Decline', () => {
+    const html = render({
+      messages: [toolMessage(pending)],
+      standing: () => ({ label: 'Allow, and stop asking', grant: () => Promise.resolve() }),
+    });
+    const labels = buttons(html).filter((label) => ['Allow', 'Decline', 'Allow, and stop asking'].includes(label));
+    expect(labels).toEqual(['Allow', 'Allow, and stop asking', 'Decline']);
+  });
+
+  test('clicking awaits grant(), then answers the question yes', async () => {
+    const order: string[] = [];
+    let release: () => void = () => undefined;
+    const granted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const offer = {
+      label: 'Allow, and stop asking',
+      grant: async () => {
+        order.push('grant');
+        await granted;
+        order.push('granted');
+      },
+    };
+    const click = grantThenAllow(offer, 'call-1', (callId, approve) => order.push(`confirm ${callId} ${String(approve)}`), (message) =>
+      order.push(`error ${message}`),
+    );
+    await Bun.sleep(5);
+    // Nothing is answered while the standing answer is being recorded.
+    expect(order).toEqual(['grant']);
+    release();
+    expect(await click).toBe(true);
+    expect(order).toEqual(['grant', 'granted', 'confirm call-1 true']);
+  });
+
+  test('a grant() that rejects shows its message and answers nothing', async () => {
+    const confirmed: unknown[] = [];
+    const errors: string[] = [];
+    const ok = await grantThenAllow(
+      { label: 'Allow, and stop asking', grant: () => Promise.reject(new Error('The switch could not be saved.')) },
+      'call-1',
+      (callId, approve) => confirmed.push([callId, approve]),
+      (message) => errors.push(message),
+    );
+    expect(ok).toBe(false);
+    expect(confirmed).toEqual([]);
+    expect(errors).toEqual(['The switch could not be saved.']);
+    // The card is still there, both buttons with it, and the message shows where a failed answer does.
+    const html = render({
+      messages: [toolMessage(pending)],
+      error: errors[0] ?? null,
+      standing: () => ({ label: 'Allow, and stop asking', grant: () => Promise.reject(new Error('no')) }),
+    });
+    expect(html).toContain('Allow this?');
+    expect(buttons(html)).toContain('Allow');
+    expect(buttons(html)).toContain('Decline');
+    expect(html).toContain('The switch could not be saved.');
   });
 });
 

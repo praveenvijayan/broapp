@@ -27,6 +27,7 @@ import { readCurrent, readRelease, type Layout } from '../spec/index.ts';
 
 import { listApps, type AppRow } from './apps.ts';
 import type { Journal } from './journal.ts';
+import { readStanding } from './standing.ts';
 import type { Supervisor } from './supervisor.ts';
 
 /** What a live turn has used so far, kept by the tab from the AI layer's `onUsageSoFar`. */
@@ -258,6 +259,8 @@ export interface Overview {
   readonly apps: readonly AppBlock[];
   /** What happened in runs since the launcher started, newest first: what alerts are raised from. */
   readonly recent: readonly RunEvent[];
+  /** Whether the person's standing approval is on. Not an attention item: it is a setting, drawn as one line. */
+  readonly standing: boolean;
 }
 
 /** What {@link readOverview} reads. */
@@ -421,6 +424,7 @@ export function readOverview(sources: OverviewSources): Overview {
     backlog,
     apps,
     recent: executor?.recent() ?? [],
+    standing: readStanding(layout).standing,
   };
 }
 

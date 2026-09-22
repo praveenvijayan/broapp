@@ -80,6 +80,20 @@ export interface BroappChatProps {
   readonly frame?: 'card' | 'plain';
   /** Filled in with {@link BroappChatControls} on every render. */
   readonly controlsRef?: React.MutableRefObject<BroappChatControls | null>;
+  /**
+   * A third answer on an approval card: asked once per question, it returns
+   * the button's words and what recording the standing answer does, or
+   * `null` for a question it does not cover. The click awaits `grant()` and
+   * then answers the question yes; a `grant()` that rejects shows its message
+   * where a failed answer is shown and leaves the card as it was.
+   *
+   * Not in the transport and not in the descriptor: only the surrounding
+   * application knows what "stop asking" means.
+   */
+  readonly standing?: (call: { callId: string; tool: string; input: unknown }) => {
+    label: string;
+    grant(): Promise<void>;
+  } | null;
 }
 
 /** Re-render once a second while `active`, so a countdown counts. */
@@ -136,6 +150,7 @@ export function BroappChat({
   frame = 'card',
   controlsRef,
   statusLines,
+  standing,
 }: BroappChatProps): React.ReactElement {
   const { settings } = useAiContext();
   const chat = useBroappChat({
@@ -159,6 +174,10 @@ export function BroappChat({
     confirm,
     clear,
   } = chat;
+
+  // A standing answer that could not be recorded, shown where a failed answer
+  // is; cleared by the next click that answers anything.
+  const [standingError, setStandingError] = React.useState<string | null>(null);
 
   // Once a second while a countdown runs, and while a turn runs: the running
   // mark shows the turn's elapsed time and changes its phrase on the tick.
@@ -207,12 +226,16 @@ export function BroappChat({
     <Frame frame={frame}>
       <BroappChatView
         emptyText={emptyText ?? 'Ask a question about what you are looking at.'}
-        error={confirmError ?? error?.message ?? null}
+        error={standingError ?? confirmError ?? error?.message ?? null}
         loading={loading}
         markdown={markdown}
         messages={messages}
         now={now}
-        onConfirm={(callId, approve) => void confirm(callId, approve)}
+        onConfirm={(callId, approve) => {
+          setStandingError(null);
+          void confirm(callId, approve);
+        }}
+        onStandingError={setStandingError}
         onSend={send}
         onStop={() => void stop()}
         placeholder={placeholder ?? 'Ask about these notes'}
@@ -223,6 +246,7 @@ export function BroappChat({
         {...(suggestionTip === undefined ? {} : { suggestionTip })}
         {...(maxLength === undefined ? {} : { maxLength })}
         {...(statusLines === undefined ? {} : { statusLines })}
+        {...(standing === undefined ? {} : { standing })}
       />
     </Frame>
   );

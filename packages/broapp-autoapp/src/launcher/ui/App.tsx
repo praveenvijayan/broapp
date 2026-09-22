@@ -29,7 +29,7 @@ import {
   BroappThreadList,
 } from 'broapp-ai-elements/ui';
 import type { BroappChatControls, BroappScheme } from 'broapp-ai-elements/ui';
-import { useConnection, useOperation } from 'broapp/react';
+import { useBroapp, useBroappReady, useConnection, useOperation } from 'broapp/react';
 import { announceOverview, announcePending, browserSurface, requestAlerts, titleWithPending } from 'broapp-autoapp/react';
 import type { OverviewAlerts } from 'broapp-autoapp/react';
 import {
@@ -57,6 +57,7 @@ import { OverviewScreen, type NeedsYouTarget } from './OverviewScreen.tsx';
 import { PanelHeader } from './PanelHeader.tsx';
 import { LauncherStopped, QuitControl } from './QuitControl.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
+import { StandingLine, StandingSection, standingOfferFor } from './StandingSettings.tsx';
 import { readScheme, applyScheme, SCHEME_KEY } from './scheme.ts';
 import { onReturn } from './on-return.ts';
 import { firstSelection } from './selection.ts';
@@ -252,6 +253,37 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
   }, []);
   const overview = overviewRead.data;
   const previousOverview = useRef<OverviewAlerts | null>(null);
+
+  // The person's standing approval, as the Overview's last read says. The
+  // card's third button, the top bar's line and Settings all change it through
+  // the one route, then read the Overview again so every place agrees.
+  const standingOn = overview?.standing === true;
+  const launcherClient = useBroapp<LauncherContract>();
+  const launcherReady = useBroappReady<LauncherContract>();
+  const clientRef = useRef({ launcherClient, launcherReady });
+  clientRef.current = { launcherClient, launcherReady };
+  const [askingAgain, setAskingAgain] = useState(false);
+  const setStanding = useCallback(
+    async (standing: boolean): Promise<void> => {
+      const connected = clientRef.current.launcherClient ?? (await clientRef.current.launcherReady);
+      try {
+        await connected.call('launcher.standingSet', { standing });
+      } finally {
+        void readOverview(undefined);
+      }
+    },
+    [readOverview],
+  );
+  const askAgain = useCallback((): void => {
+    setAskingAgain(true);
+    void setStanding(false)
+      .catch(() => undefined)
+      .finally(() => setAskingAgain(false));
+  }, [setStanding]);
+  const standingOffer = useCallback(
+    (call: { callId: string; tool: string; input: unknown }) => standingOfferFor(standingOn, call, () => setStanding(true)),
+    [standingOn, setStanding],
+  );
   // When the figures on screen were read, for a refresh that fails.
   const [readAt, setReadAt] = useState<number | null>(null);
   const needsYouCount = overview?.needsYou.length ?? 0;
@@ -715,6 +747,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
           }}
           placeholder="Ask for a change…"
           refs={selected === null ? [] : [`app:${selected}`]}
+          standing={standingOffer}
           suggestions={ENGINEER_SUGGESTIONS}
           threadId={activeId}
           topBar={
@@ -732,6 +765,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
                   {pending === 1 ? 'Waiting for your answer' : `${String(pending)} questions waiting`} · show
                 </button>
               ) : null}
+              {standingOn ? <StandingLine onAskAgain={askAgain} pending={askingAgain} /> : null}
               <span
                 className={`launcher__status launcher__status--${connection.phase}`}
                 role="status"
@@ -863,6 +897,7 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
           <aside aria-label="Settings" className="launcher__settings" ref={settingsRef}>
             <PanelHeader onClose={() => setShowSettings(false)} title="Settings" />
             <AiSettings />
+            <StandingSection known={overview?.standing} onChanged={() => void readOverview(undefined)} />
             <section aria-labelledby="launcher-conversations-title" className="launcher__section">
               <header className="launcher__section-header">
                 <h2 className="launcher__section-title" id="launcher-conversations-title">

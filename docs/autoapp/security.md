@@ -166,7 +166,9 @@ raises a notification **only if permission was already granted** — it never as
 for permission, because a program that asks the moment it wants something is a
 program people mute.
 
-An unanswered question is a **denial**, not a pause. Nothing runs unattended.
+An unanswered question is a **denial**, not a pause. Nothing runs unattended,
+unless the person has turned on working without asking, and then only what that
+covers ([below](#the-persons-standing-approval)).
 
 ## The control connection
 
@@ -317,6 +319,54 @@ panel and waits; activation is never approved this way.
 While a run works on an application, tools that write to it from any other
 turn, and `launcher.activate`, are refused with `conflict`, so two hands never
 edit one workspace.
+
+## The person's standing approval
+
+Every edit, build and preview the engineer makes in a chat turn is a question,
+and a question asked after minutes of thinking is asked of a tab nobody is
+looking at. Typing "go ahead" in the conversation answers none of them: a
+message is not an answer; the card's **Allow** is. So a person may give the
+engineer's own conversations the same standing answer a backlog run has, with
+one switch for the whole launcher, **Work without asking**, and take it back.
+
+- **Where it is turned on and off.** The card's third button, **Allow, and stop
+  asking**, shown only for a question the switch would cover while it is off;
+  the switch in the launcher's Settings, under *The engineer*; and
+  `broapp-autoapp standing on|off`. All three call `launcher.standingSet`,
+  which refuses every channel but `user`. While it is on, the conversation's top
+  bar says *Working without asking* with **Ask again**, and the Overview has one
+  muted line.
+- **What it covers.** `source.edit`, `source.change`, `candidate.cycle`,
+  `candidate.build`, `candidate.preview` and `preview.stop` — the run's list,
+  one list in `engineer/standing.ts` — for **any** application the call names.
+  A cycle's build and preview are asked as their own questions, and are covered
+  as the cycle is.
+- **What it never covers, however it was turned on.** `release.activate`;
+  `apps.create`; removal (no engineer tool exists); `launcher.folderChoose`;
+  `launcher.standingSet` itself (no engineer tool names it, and the list is
+  closed); anything `external`; a listed tool whose input names no
+  application; the `mcp` and `workflow` channels, which never read the file; an
+  application's own chat in its own tab; and a backlog run's turns, which have
+  their own stand-in. Those ask exactly as before. Where a backlog run refuses
+  activation and creation, the switch does not refuse them: it leaves them to
+  the person, so it only ever answers yes or nothing.
+- **The file.** `<root>/standing.json`, `{ "version": 1, "standing": true,
+  "since": <ms> }`, written atomically. Anything else — absent, unreadable,
+  another version, `standing` not `true` — is off; turning it off removes the
+  file, so a launcher never touched and one turned back off look the same. It
+  is read at every question, never cached: the switch flipped anywhere answers
+  the next question without a restart, and a question already waiting when it
+  is turned on keeps its card.
+- **Every answer is still asked and recorded.** The AI layer's `standIn` hook
+  (`createAi({ standIn })`) is consulted before the `confirm` event is sent. Its
+  yes settles the question there: no card, nothing waits in the approval table,
+  and the gate records `confirmed` exactly as for a click. The launcher's log
+  carries one `log` event per answer it gave, "the standing approval approved
+  `<tool>` for `<appId>`", with the run and call ids. `Ai.turn` never consults
+  the hook, so no question is answered twice.
+- **What it does not change.** The code the engineer builds is trusted local
+  code, and a preview uses a copy of the data, whether the person clicked or
+  the switch answered. Activation is still a person's click.
 
 ## What is recorded
 

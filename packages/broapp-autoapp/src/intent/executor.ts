@@ -31,6 +31,7 @@ import type { Envelope, HostLogger } from 'broapp/host';
 import { s } from 'broapp/shared';
 
 import type { CandidateStatus, CandidateStates } from '../engineer/state.ts';
+import { standingAnswer, type StandingAnswer } from '../engineer/standing.ts';
 import type { RunStore } from '../host/run-store.ts';
 import { sourceRevision } from '../knowledge/ids.ts';
 import { stepsHash } from '../knowledge/evidence.ts';
@@ -48,21 +49,11 @@ import { recordUsage } from './usage.ts';
 /**
  * The run's standing answer: the tools a builder's turn is approved for
  * without asking, and only when the call names the run's own application.
- *
- * These are what building a task is made of. Not a grant — `launcher.grants*`
- * already means capabilities — and never activation or creation.
+ * Moved to `engineer/standing.ts` when the person's own standing approval
+ * came to share the list; re-exported here, so nothing that imported them
+ * from this module changes.
  */
-export const INTENT_APPROVES: readonly string[] = [
-  'source.edit',
-  'source.change',
-  'candidate.cycle',
-  'candidate.build',
-  'candidate.preview',
-  'preview.stop',
-];
-
-/** Refused outright and never put to the person: a builder has no business with them. */
-export const INTENT_REFUSES: readonly string[] = ['release.activate', 'apps.create'];
+export { INTENT_APPROVES, INTENT_REFUSES, standingAnswer, type StandingAnswer } from '../engineer/standing.ts';
 
 /** How long one builder's turn may take: the evaluation harness's figure. */
 export const TASK_TURN_TIMEOUT_MS = 20 * 60_000;
@@ -161,23 +152,6 @@ export function reasonsFromNote(to: 'failed' | 'interrupted', note: string): str
     .split(/(?<=\.)\s+(?=[A-Z0-9])/)
     .map((sentence) => sentence.trim())
     .filter((sentence) => sentence !== '');
-}
-
-/** How the gate's question to a builder's turn is answered. */
-export type StandingAnswer = boolean | 'defer';
-
-/**
- * The run's standing answer to one question, as a pure rule.
- *
- * `true` for a listed tool whose input names `appId`; `false` for the two a
- * builder may never have; `'defer'` — put it to the person — for everything
- * else, including a listed tool naming another application.
- */
-export function standingAnswer(appId: string, question: { readonly tool: string; readonly input: unknown }): StandingAnswer {
-  if (INTENT_REFUSES.includes(question.tool)) return false;
-  const named = (question.input as { appId?: unknown } | null | undefined)?.appId;
-  if (INTENT_APPROVES.includes(question.tool) && named === appId) return true;
-  return 'defer';
 }
 
 /** What {@link verdictOf} decided. */

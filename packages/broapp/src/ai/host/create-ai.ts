@@ -87,6 +87,23 @@ export interface InProcessQuestion {
   readonly expiresAt?: number;
 }
 
+/**
+ * One question put to a chat turn's stand-in, before the person is asked.
+ *
+ * The same question the gate is asking, named as the approval table names it,
+ * with the run it belongs to: a stand-in that answers for the person has to
+ * know whose turn it is answering in, not only which call.
+ */
+export interface StandInQuestion {
+  readonly runId: string;
+  readonly tool: string;
+  readonly input: unknown;
+  /** The approval table's key, `<runId>:<callId>`. */
+  readonly requestId: string;
+  /** The call the question is about, as `ai.chatConfirm` names it with the run id. */
+  readonly callId: string;
+}
+
 /** How {@link Ai.turn} is answered and stopped. */
 export interface InProcessTurnOptions {
   /**
@@ -147,6 +164,20 @@ export interface CreateAiOptions {
   readonly maxSteps?: number;
   /** How long a `confirm` tool waits for the user. Default 300_000 ms. */
   readonly confirmTimeoutMs?: number;
+  /**
+   * Answers some of a chat turn's questions before anybody is asked.
+   *
+   * `true` or `false` settles the question without a `confirm` event: the
+   * gate still asked it and still records the answer — `confirmed` or
+   * `denied` — exactly as for a click. `'defer'`, or no hook, is the ordinary
+   * path: the event goes out and the person answers. For an application whose
+   * person has said, once, that some calls need not be put to them; the rule
+   * for which is the application's, not this layer's.
+   *
+   * Consulted by `ai.chat` only. {@link Ai.turn} has its own `answer`, and a
+   * question is never answered twice.
+   */
+  readonly standIn?: (question: StandInQuestion) => boolean | 'defer';
   /**
    * Called once when a chat turn ends, however it ends.
    *
@@ -580,7 +611,11 @@ export function createAi(options: CreateAiOptions): Ai {
     logger: options.logger ?? console,
   };
 
-  host.stream('ai.chat', (params, sink) => runChat(params, sink, runDeps));
+  // The stand-in belongs to the browser's turns only. `runDeps` is what an
+  // in-process turn is built from, and it has its own `answer`; handing it the
+  // stand-in as well would answer one question from two places.
+  const chatDeps: RunDeps = options.standIn === undefined ? runDeps : { ...runDeps, standIn: options.standIn };
+  host.stream('ai.chat', (params, sink) => runChat(params, sink, chatDeps));
   // The wire shape is unchanged: a run and a call name the question, and
   // `accepted` says whether anybody was waiting on it. What changed is where
   // the answer goes — into the same approval table the gate asks.

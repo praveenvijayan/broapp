@@ -12,11 +12,12 @@
  */
 import { formatModelRef } from 'broapp/ai';
 import { createAi, type Ai } from 'broapp/ai/host';
-import type { DeliveredContext, ProviderAdapter } from 'broapp/ai/host';
+import type { DeliveredContext, ProviderAdapter, StandInQuestion } from 'broapp/ai/host';
 import type { Gate, HostLogger } from 'broapp/host';
 import type { Bridge } from 'brobridge';
 
 import { ENGINEER_INSTRUCTIONS } from '../engineer/instructions.ts';
+import { standingCovers } from '../engineer/standing.ts';
 import { createCandidateStates, type CandidateStates } from '../engineer/state.ts';
 import { intentTools, type IntentTools } from '../engineer/intent-tools.ts';
 import { createInputMemory, engineerTools, type TurnRecord } from '../engineer/tools.ts';
@@ -46,6 +47,8 @@ import {
 import type { LiveUsage } from './overview.ts';
 import { appIds, listApps } from './apps.ts';
 import type { Journal } from './journal.ts';
+import { readStanding } from './standing.ts';
+import { STANDING_WORDS } from './standing-words.ts';
 import type { Templates } from './starter.ts';
 import type { Supervisor } from './supervisor.ts';
 import type { PrepareOptions } from './workspace.ts';
@@ -435,6 +438,30 @@ export function createLauncherTab(options: CreateLauncherTabOptions): LauncherTa
     ...(serve === null ? {} : { context: serve }),
     ...(options.contextBudgetChars === undefined ? {} : { contextBudgetChars: options.contextBudgetChars }),
     tools,
+    // The person's standing approval, for the engineer's own conversations.
+    // Beside the executor's `answerFor`, with the same list and two
+    // differences: it covers every application, and it never refuses — what it
+    // does not cover is put to the person exactly as before. The file is read
+    // at every question, so the switch answers the next one whichever door it
+    // was flipped at. Backlog turns run through `Ai.turn`, which never
+    // consults this.
+    standIn: (question: StandInQuestion) => {
+      if (!readStanding(options.layout, printed).standing) return 'defer';
+      if (!standingCovers(question.tool, question.input)) return 'defer';
+      if (knowledge !== undefined) {
+        const appId = (question.input as { appId: string }).appId;
+        try {
+          knowledge.log.event('log', STANDING_WORDS.approved(question.tool, appId), undefined, {
+            appId,
+            runId: question.runId,
+            callId: question.callId,
+          });
+        } catch (cause) {
+          logger.error(`[autoapp] could not record a standing approval: ${String(cause instanceof Error ? cause.message : cause)}`);
+        }
+      }
+      return true;
+    },
     onContext: (runId: string, delivered: DeliveredContext) => {
       // Which model the turn went to, for a running turn's cost and its usage
       // row. Named with its provider when that is not the one in use, so a

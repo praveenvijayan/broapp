@@ -61,6 +61,8 @@ import { readOverview, type LiveUsage } from './overview.ts';
 import type { Journal } from './journal.ts';
 import { removeApplication } from './remove.ts';
 import { addServing, removeServing } from './serving.ts';
+import { clearStanding, readStanding, writeStanding, type Standing } from './standing.ts';
+import { STANDING_WORDS } from './standing-words.ts';
 import type { Templates } from './starter.ts';
 import type { ChildHandle, Supervisor } from './supervisor.ts';
 import type { PrepareOptions } from './workspace.ts';
@@ -616,6 +618,9 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       })),
       apps: overview.apps.map((app) => ({ ...app, checks: app.checks === null ? null : { ...app.checks } })),
       recent: overview.recent.map((event) => ({ ...event })),
+      // Said only when it is on: a launcher nobody turned it on in answers
+      // exactly what it answered before the switch existed.
+      ...(overview.standing ? { standing: true } : {}),
     };
   });
 
@@ -639,6 +644,24 @@ export function createLauncherApp(options: CreateLauncherAppOptions): LauncherAp
       models: Object.entries(prices.models).map(([modelId, price]) => ({ modelId, input: price.input, output: price.output })),
       budgetDay: prices.budgetDay,
     };
+  });
+
+  /** Whether the engineer works without asking, read from the file as it stands. */
+  host.operation('launcher.standingGet', () => ({ ...readStanding(root, logger) }));
+
+  // The person's switch and nobody else's. Settings, the card's third button
+  // and the command line are all a person; a model reaching this route on any
+  // other channel would be asking to be trusted, and that is not its to ask.
+  host.operation('launcher.standingSet', ({ standing }, context) => {
+    if (context.channel !== 'user') throw publicError.rejected(STANDING_WORDS.onlyAPerson);
+    let now: Standing;
+    try {
+      now = standing ? writeStanding(root) : clearStanding(root);
+    } catch (cause) {
+      throw publicError.unavailable(STANDING_WORDS.notSaved(String(cause instanceof Error ? cause.message : cause)));
+    }
+    options.log?.event('log', STANDING_WORDS.turned(now.standing));
+    return { ...now };
   });
 
   host.operation('launcher.intentModelsSet', (models, context) => {

@@ -55,12 +55,12 @@ verified and what to do next. Create an application that does not exist yet with
    shows what a route really returns; neither shows the rendered page, so say so.
    Read a file's rules with \`spec.reference\`; for \`views.ts\`, the \`design\` topic
    too, and say its check's count when you ask the person to look.
-3. Read the file with \`source.read\`, then make the change with \`candidate.cycle\`:
-   it takes the hunks \`source.edit\` takes, applies them, builds, and when the
-   build passes starts the preview and runs the checks, asking the person at each.
-   Make each \`find\` the smallest block that occurs only once — three to eight
-   lines is right. Leading whitespace need not match: the file keeps its own
-   indentation. Send several small hunks rather than one large one; hunks under a
+3. Read the file with \`source.read\`, then make the change with \`candidate.cycle\`: it takes the
+   hunks \`source.edit\` takes, applies them, builds, and when the build passes starts the preview and
+   runs the checks, asking the person at each, unless they have turned on working without asking, in
+   which case those answers come at once and you are not told which. Make each \`find\` the smallest
+   block that occurs only once — three to eight lines is right. Leading whitespace need not match: the
+   file keeps its own indentation. Send several small hunks rather than one large one; hunks under a
    kilobyte land. Use \`source.change\` only to create a new file, or \`create\` in the cycle.
 4. If the cycle reports problems, each names the lines it points at: fix them
    with another \`candidate.cycle\` until every check passes. When a build fails, its
