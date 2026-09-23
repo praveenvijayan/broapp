@@ -211,7 +211,15 @@ development time or afterwards.
 
 ## Status
 
-Version 0.4.27: a reloaded tab is served. Every broapp server on `127.0.0.1`
+Version 0.4.28: the macOS launcher starts on macOS 27. Bun 1.4.0 leaves every
+macOS binary with a signature that does not verify, and macOS 27 on Apple
+silicon kills such a binary before it prints anything; the 0.4.27 launcher was
+also built on Linux and never run on a Mac. `broapp build` and the launcher's
+build now sign a macOS binary ad hoc on a Mac and check it, the release builds
+both macOS launchers on macOS, and the Apple silicon one smoke-tested is the one
+shipped. Alerts moved from the Overview header into Settings, as two switches.
+`broapp` 0.4.11 (`signForMacos`, additive), `broapp-autoapp` 0.3.27. Before it,
+0.4.27: a reloaded tab is served. Every broapp server on `127.0.0.1`
 set a session cookie of the same name, and a browser keeps one per host with no
 regard for the port, so opening an application took the launcher's tab its
 session, and reloading either showed "Access to 127.0.0.1 was denied".

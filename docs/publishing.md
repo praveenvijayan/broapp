@@ -6,15 +6,19 @@ what a maintainer has to do, and what they have to decide.
 ## Status
 
 Published on npm from the `Publish to npm` workflow, each with provenance:
-`broapp` at 0.4.10, `create-broapp` and `broapp-ai-anthropic` at 0.4.1,
+`broapp` at 0.4.11, `create-broapp` and `broapp-ai-anthropic` at 0.4.1,
 `broapp-ai-compatible` at 0.4.2, `broapp-ai-elements` at 0.4.10, and
-`broapp-autoapp` at 0.3.26 (2026-09-22). Earlier: 0.4.26 with the launcher at 0.3.25 (2026-09-22), 0.4.25 with the launcher at 0.3.24 (2026-09-22), 0.4.24 with the launcher at 0.3.23 (2026-09-22), 0.4.23 with the launcher at 0.3.22 and the panel at 0.4.10 (2026-09-22), 0.4.22 with the launcher at 0.3.21, the core and the panel at 0.4.9 (2026-09-22), 0.4.21 with the launcher at 0.3.20 (2026-09-21), 0.4.20 with the launcher at 0.3.19 (2026-09-21), 0.4.19 with the launcher at 0.3.18, the core and the panel at 0.4.8 (2026-09-21), 0.4.18 with the launcher at 0.3.17, the core and the panel at 0.4.7 and `broapp-ai-compatible` at 0.4.2 (2026-09-19), 0.4.17 with the launcher at 0.3.16 and the core at 0.4.6 (2026-09-19), 0.4.16 with the launcher at 0.3.15 and the core at 0.4.5 (2026-09-19), 0.4.15 with the launcher at 0.3.14 and the core at 0.4.4 (2026-09-19), 0.4.14 with the launcher at 0.3.13 (2026-09-18), 0.4.13 with the launcher at 0.3.12 (2026-09-18), 0.4.12 with the launcher at 0.3.11 (2026-09-18), 0.4.11 with the launcher at 0.3.10 (2026-09-13), 0.4.10 with the launcher at 0.3.9, 0.4.9 with the launcher at 0.3.8 and the panel at 0.4.5, 0.4.8 with the launcher at 0.3.7 and the panel at 0.4.4, 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
+`broapp-autoapp` at 0.3.27 (2026-09-23). Earlier: 0.4.27 with the launcher at 0.3.26 and the core at 0.4.10 (2026-09-22), 0.4.26 with the launcher at 0.3.25 (2026-09-22), 0.4.25 with the launcher at 0.3.24 (2026-09-22), 0.4.24 with the launcher at 0.3.23 (2026-09-22), 0.4.23 with the launcher at 0.3.22 and the panel at 0.4.10 (2026-09-22), 0.4.22 with the launcher at 0.3.21, the core and the panel at 0.4.9 (2026-09-22), 0.4.21 with the launcher at 0.3.20 (2026-09-21), 0.4.20 with the launcher at 0.3.19 (2026-09-21), 0.4.19 with the launcher at 0.3.18, the core and the panel at 0.4.8 (2026-09-21), 0.4.18 with the launcher at 0.3.17, the core and the panel at 0.4.7 and `broapp-ai-compatible` at 0.4.2 (2026-09-19), 0.4.17 with the launcher at 0.3.16 and the core at 0.4.6 (2026-09-19), 0.4.16 with the launcher at 0.3.15 and the core at 0.4.5 (2026-09-19), 0.4.15 with the launcher at 0.3.14 and the core at 0.4.4 (2026-09-19), 0.4.14 with the launcher at 0.3.13 (2026-09-18), 0.4.13 with the launcher at 0.3.12 (2026-09-18), 0.4.12 with the launcher at 0.3.11 (2026-09-18), 0.4.11 with the launcher at 0.3.10 (2026-09-13), 0.4.10 with the launcher at 0.3.9, 0.4.9 with the launcher at 0.3.8 and the panel at 0.4.5, 0.4.8 with the launcher at 0.3.7 and the panel at 0.4.4, 0.4.7 with the launcher at 0.3.6, 0.4.6 with the launcher at 0.3.5 and the panel at 0.4.3, 0.4.5 with the launcher at 0.3.4, 0.4.4 with 0.3.3, 0.4.3 with the launcher at 0.3.2 and the panel at 0.4.2, then 0.4.2 with 0.3.1, 0.4.1 with 0.3.0, and
 0.4.0 with 0.2.0, all on 2026-09-11; 0.3.0 on 2026-09-08; 0.2.0 and 0.1.0
 before that. To generate from an unreleased checkout instead, see
 [troubleshooting.md](troubleshooting.md).
 
-Repository release v0.4.27 ships the launcher binaries built from the same
-commit; it moves the core and the launcher: `broapp` requires Brobridge 0.2.3,
+Repository release v0.4.28 ships the launcher binaries built from the same
+commit; it moves the core and the launcher: every macOS binary is signed ad hoc
+on a Mac and verified, because macOS 27 on Apple silicon kills the unverifiable
+signature Bun 1.4.0 leaves, and both macOS launchers are built on `macos-latest`
+with the Apple silicon one smoke-tested as shipped. v0.4.27 before it moved the
+core and the launcher: `broapp` requires Brobridge 0.2.3,
 whose session cookie is named for the server's port, so the panel, a preview
 and every application on the host no longer evict each other's cookie and a
 reloaded tab is served. v0.4.26 before it moved the launcher only: a build refuses an acceptance step on an
@@ -94,7 +98,7 @@ packages: the launcher, because a created application installs
 its starter now relies on; and the AI panel, because its portalled components
 and its corner radius were fixed. The launcher's peer range on the panel is
 `>=0.4.10`. A created application installs `broapp@^0.4.9` and
-`broapp-autoapp@^0.3.26`.
+`broapp-autoapp@^0.3.27`.
 
 ## Before publishing
 
