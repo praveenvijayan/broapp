@@ -12,6 +12,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { currentTarget, signForMacos } from 'broapp/build';
+
 import { isMessage, parseMessage } from '../packages/broapp-autoapp/src/ipc/codec.ts';
 import { MAX_MESSAGE_BYTES } from '../packages/broapp-autoapp/src/ipc/messages.ts';
 
@@ -54,7 +56,10 @@ async function compile(): Promise<string | null> {
     new Response(built.stdout).text(),
     new Response(built.stderr).text(),
   ]);
-  return code === 0 ? null : stderr.trim();
+  if (code !== 0) return stderr.trim();
+  // Bun's own signature does not verify, and macOS 27 kills the binary for it.
+  await signForMacos(join(packageDir, 'spike', 'dist', 'launcher'), currentTarget());
+  return null;
 }
 
 const failure = await compile();

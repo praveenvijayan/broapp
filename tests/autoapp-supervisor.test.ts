@@ -12,6 +12,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
+import { currentTarget, signForMacos } from 'broapp/build';
 import { INTERNAL_ERROR_MESSAGE, isPublicError, PublicError } from 'broapp/shared';
 import {
   buildCandidate,
@@ -67,6 +68,8 @@ describe('isCompiled', () => {
       stderr: 'pipe',
     });
     expect(await built.exited).toBe(0);
+    // Bun's own signature does not verify, and macOS 27 kills the binary for it.
+    await signForMacos(outfile, currentTarget());
     const ran = Bun.spawn({ cmd: [outfile], stdout: 'pipe', stderr: 'pipe' });
     const [code, out] = await Promise.all([ran.exited, new Response(ran.stdout).text()]);
     expect(code).toBe(0);
