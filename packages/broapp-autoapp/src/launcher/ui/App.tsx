@@ -57,6 +57,7 @@ import { OverviewScreen, type NeedsYouTarget } from './OverviewScreen.tsx';
 import { PanelHeader } from './PanelHeader.tsx';
 import { LauncherStopped, QuitControl } from './QuitControl.tsx';
 import { ReleasesPanel } from './ReleasesPanel.tsx';
+import { AlertsSection } from './AlertsSettings.tsx';
 import { StandingLine, StandingSection, standingOfferFor } from './StandingSettings.tsx';
 import { readScheme, applyScheme, SCHEME_KEY } from './scheme.ts';
 import { onReturn } from './on-return.ts';
@@ -69,6 +70,8 @@ const APPS_OPEN = 'broapp-autoapp:apps-open';
 const ACTIVE_THREAD = 'broapp-autoapp:thread';
 /** Whether alerts may play a tone, remembered the way the scheme is. */
 export const SOUND_KEY = 'broapp-autoapp:sound';
+/** Whether alerts may raise a notification: the person's switch, apart from the browser's permission. */
+export const NOTIFY_KEY = 'broapp-autoapp:notifications';
 
 /**
  * Four things the engineer can actually do, offered before anything is said.
@@ -227,10 +230,16 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
   }, [connection.phase, readOverview]);
   useEffect(() => poller.current?.setMode(view, visible), [view, visible]);
 
-  // Alerts: permission is asked only by the Overview's button, sound is the
-  // person's switch, and each read is compared with the one before it.
+  // Alerts: two switches in Settings. Permission is asked only when the
+  // Notifications switch is turned on; each is remembered; and each read of
+  // the overview is compared with the one before it.
   const [permission, setPermission] = useState<string>(() => browserSurface()?.notify?.permission ?? 'unsupported');
+  const [notifyOn, setNotifyOn] = useState(() => remembered(NOTIFY_KEY, true));
   const [soundOn, setSoundOn] = useState(() => remembered(SOUND_KEY, false));
+  useEffect(() => {
+    const notify = browserSurface()?.notify;
+    if (notify !== undefined) notify.enabled = notifyOn;
+  }, [notifyOn]);
   useEffect(() => {
     const sound = browserSurface()?.sound;
     if (sound !== undefined) sound.enabled = soundOn;
@@ -239,13 +248,15 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
     setSoundOn(on);
     remember(SOUND_KEY, String(on));
   }, []);
-  const turnOnAlerts = useCallback((): void => {
+  const chooseNotifications = useCallback((on: boolean): void => {
+    setNotifyOn(on);
+    remember(NOTIFY_KEY, String(on));
+    if (!on) return;
     const surface = browserSurface();
     if (surface === null) return;
-    // The click is the gesture that lets the page start audio, so sound comes on with it.
-    chooseSound(true);
+    // The switch's click is the gesture a browser needs before it asks.
     void requestAlerts(surface).then(setPermission);
-  }, [chooseSound]);
+  }, []);
   const testSound = useCallback((): void => {
     const sound = browserSurface()?.sound;
     if (sound === undefined) return;
@@ -698,7 +709,6 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
 
       {view === 'overview' ? (
         <OverviewScreen
-          alerts={{ permission, sound: soundOn, onTurnOn: turnOnAlerts, onSound: chooseSound, onTestSound: testSound }}
           onOpenApp={(appId) => void openApp(appId)}
           onOpenBacklog={openBacklogAt}
           onOpenPreview={(appId) => void openPreview({ appId })}
@@ -898,6 +908,14 @@ function Workspace({ onStopped }: { readonly onStopped: () => void }): React.Rea
             <PanelHeader onClose={() => setShowSettings(false)} title="Settings" />
             <AiSettings />
             <StandingSection known={overview?.standing} onChanged={() => void readOverview(undefined)} />
+            <AlertsSection
+              notifications={notifyOn}
+              onNotifications={chooseNotifications}
+              onSound={chooseSound}
+              onTestSound={testSound}
+              permission={permission}
+              sound={soundOn}
+            />
             <section aria-labelledby="launcher-conversations-title" className="launcher__section">
               <header className="launcher__section-header">
                 <h2 className="launcher__section-title" id="launcher-conversations-title">

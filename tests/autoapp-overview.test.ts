@@ -65,6 +65,7 @@ import {
 } from 'broapp-autoapp/react';
 import { layout } from 'broapp-autoapp/spec';
 
+import { AlertsSection, type AlertsSectionProps } from '../packages/broapp-autoapp/src/launcher/ui/AlertsSettings.tsx';
 import { App } from '../packages/broapp-autoapp/src/launcher/ui/App.tsx';
 import { overviewInterval, startOverviewPoller } from '../packages/broapp-autoapp/src/launcher/ui/overview-poll.ts';
 import {
@@ -1015,8 +1016,6 @@ const MOCKUP: OverviewData = {
   recent: [],
 };
 
-const ALERTS = { permission: 'granted', sound: false, onTurnOn: () => undefined, onSound: () => undefined, onTestSound: () => undefined };
-
 function screen(overview: OverviewData | null, overrides: Partial<OverviewScreenProps> = {}): string {
   return renderToString(
     createElement(BroappProvider, {
@@ -1024,7 +1023,6 @@ function screen(overview: OverviewData | null, overrides: Partial<OverviewScreen
       children: createElement(OverviewScreen, {
         overview,
         stale: false,
-        alerts: ALERTS,
         now: NOW,
         onOpenTarget: () => undefined,
         onOpenBacklog: () => undefined,
@@ -1178,13 +1176,33 @@ describe('17b: the Overview screen', () => {
     expect(screen({ ...MOCKUP, backlog: [] }).split('launcher__ov-fill').length - 1).toBe(0);
   });
 
-  // 9, the half without a browser.
-  test('"Turn on alerts" shows only for default permission; blocked says so; requestAlerts is called from one place', async () => {
-    expect(words(screen(EMPTY_OVERVIEW, { alerts: { ...ALERTS, permission: 'default' } }))).toContain('Turn on alerts');
-    for (const permission of ['granted', 'denied', 'unsupported']) {
-      expect(words(screen(EMPTY_OVERVIEW, { alerts: { ...ALERTS, permission } }))).not.toContain('Turn on alerts');
+  // 9, the half without a browser: the Alerts section lives in Settings, not the Overview's header.
+  test('Alerts in Settings: two switches; Notifications is on only when the browser allows it; blocked disables it; requestAlerts is called from one place', async () => {
+    expect(words(screen(EMPTY_OVERVIEW))).not.toContain('Notifications');
+    const base = { notifications: true, sound: false, onNotifications: () => undefined, onSound: () => undefined, onTestSound: () => undefined };
+    const section = (overrides: Partial<AlertsSectionProps>): string =>
+      renderToString(createElement(AlertsSection, { ...base, permission: 'granted', ...overrides })).replaceAll('<!-- -->', '');
+    /** The one `<input>` tag with this id, attributes and all. */
+    const input = (html: string, id: string): string => html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0] ?? '';
+    const checked = (html: string, id: string): boolean => input(html, id).includes('checked=""');
+    const disabled = (html: string, id: string): boolean => input(html, id).includes('disabled=""');
+    // Two switches, each announced as one.
+    expect(section({}).match(/role="switch"/g)?.length).toBe(2);
+    // Granted and wanted: on. Granted and turned off: off. Not yet asked: off, and the hint says the browser asks, and asks again after a restart.
+    expect(checked(section({}), 'launcher-notifications')).toBe(true);
+    expect(checked(section({ notifications: false }), 'launcher-notifications')).toBe(false);
+    expect(checked(section({ permission: 'default' }), 'launcher-notifications')).toBe(false);
+    expect(words(section({ permission: 'default' }))).toContain('asks again after a restart');
+    // Blocked, or a browser without notifications: the switch is disabled and the hint says why; sound still works.
+    for (const permission of ['denied', 'unsupported']) {
+      expect(disabled(section({ permission }), 'launcher-notifications')).toBe(true);
+      expect(words(section({ permission }))).toContain('Sound still works');
     }
-    expect(words(screen(EMPTY_OVERVIEW, { alerts: { ...ALERTS, permission: 'denied' } }))).toContain('Notifications are blocked');
+    expect(disabled(section({ permission: 'default' }), 'launcher-notifications')).toBe(false);
+    // Sound: its own switch, and a way to hear it.
+    expect(checked(section({ sound: true }), 'launcher-sound')).toBe(true);
+    expect(checked(section({}), 'launcher-sound')).toBe(false);
+    expect(words(section({}))).toContain('Test sound');
     const ui = join(import.meta.dir, '..', 'packages', 'broapp-autoapp', 'src', 'launcher', 'ui');
     const callers: string[] = [];
     for (const name of readdirSync(ui)) {
@@ -1192,8 +1210,6 @@ describe('17b: the Overview screen', () => {
       for (const line of text.split('\n')) if (line.includes('requestAlerts(')) callers.push(`${name}: ${line.trim()}`);
     }
     expect(callers).toEqual(['App.tsx: void requestAlerts(surface).then(setPermission);']);
-    expect(words(screen(EMPTY_OVERVIEW, { alerts: { ...ALERTS, sound: true } }))).toContain('Test sound');
-    expect(screen(EMPTY_OVERVIEW, { alerts: { ...ALERTS, sound: true } })).toContain('checked=""');
   });
 
   // 10.
@@ -1560,7 +1576,7 @@ describe.skipIf(!browserAvailable)('17b: the Overview in a browser', () => {
   }, 90_000);
 
   // 9, the half a render cannot show.
-  test('Turn on alerts asks once, on its click; the Sound switch follows it, survives a reload, is off when storage refuses; Test sound plays once', async () => {
+  test('The Notifications switch asks once, on its click, and off stops the raising; both switches survive a reload; sound is off when storage refuses; Test sound plays once', async () => {
     const stubs = `
       window.__asked = 0;
       window.__notes = 0;
@@ -1587,16 +1603,24 @@ describe.skipIf(!browserAvailable)('17b: the Overview in a browser', () => {
       };
     `;
     const { page } = await openInBrowser({ init: stubs });
-    await page.getByText('Notifications', { exact: true }).click();
-    const sound = page.getByRole('checkbox', { name: 'Sound' });
+    // Nothing about alerts on the Overview itself: the header has no popover.
+    expect(await page.locator('.launcher__ov-header').getByText('Notifications').count()).toBe(0);
+    await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+    await page.waitForSelector('.launcher__settings');
+    const notifications = page.getByRole('switch', { name: 'Notifications' });
+    const sound = page.getByRole('switch', { name: 'Sound' });
+    expect(await notifications.isChecked()).toBe(false);
     expect(await sound.isChecked()).toBe(false);
     // Two reads go by; nothing asks.
     await page.waitForTimeout(4_500);
     expect(await page.evaluate(() => (window as unknown as { __asked: number }).__asked)).toBe(0);
-    await page.getByRole('button', { name: 'Turn on alerts' }).click();
+    await notifications.click();
     await page.waitForFunction(() => (window as unknown as { __asked: number }).__asked === 1);
+    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('#launcher-notifications')?.checked === true);
+    // Sound is its own switch: the ask did not turn it on.
+    expect(await sound.isChecked()).toBe(false);
+    await sound.click();
     expect(await sound.isChecked()).toBe(true);
-    expect(await page.getByRole('button', { name: 'Turn on alerts' }).count()).toBe(0);
     await page.getByRole('button', { name: 'Test sound' }).click();
     // The attention tone is two notes, played once.
     await page.waitForFunction(() => (window as unknown as { __notes: number }).__notes === 2);
@@ -1605,16 +1629,26 @@ describe.skipIf(!browserAvailable)('17b: the Overview in a browser', () => {
 
     await page.reload();
     await page.waitForSelector('[data-view="overview"]', { timeout: 20_000 });
-    await page.getByText('Notifications', { exact: true }).click();
-    expect(await page.getByRole('checkbox', { name: 'Sound' }).isChecked()).toBe(true);
+    await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+    await page.waitForSelector('.launcher__settings');
+    expect(await page.getByRole('switch', { name: 'Notifications' }).isChecked()).toBe(true);
+    expect(await page.getByRole('switch', { name: 'Sound' }).isChecked()).toBe(true);
+    expect(await page.evaluate(() => (window as unknown as { __asked: number }).__asked)).toBe(0);
+    // Off is the page's own flag: the browser's permission stays granted, nothing is asked, and it is remembered.
+    await page.getByRole('switch', { name: 'Notifications' }).click();
+    expect(await page.getByRole('switch', { name: 'Notifications' }).isChecked()).toBe(false);
+    expect(await page.evaluate(() => localStorage.getItem('broapp-autoapp:notifications'))).toBe('false');
+    expect(await page.evaluate(() => window.Notification.permission)).toBe('granted');
     expect(await page.evaluate(() => (window as unknown as { __asked: number }).__asked)).toBe(0);
 
-    // Storage that refuses: the switch is off.
+    // Storage that refuses: the sound switch is off; notifications follow the browser's answer alone.
     const refusing = await openInBrowser({
       init: `${stubs}; Storage.prototype.getItem = function () { throw new Error('refused'); };`,
     });
-    await refusing.page.getByText('Notifications', { exact: true }).click();
-    expect(await refusing.page.getByRole('checkbox', { name: 'Sound' }).isChecked()).toBe(false);
+    await refusing.page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+    await refusing.page.waitForSelector('.launcher__settings');
+    expect(await refusing.page.getByRole('switch', { name: 'Sound' }).isChecked()).toBe(false);
+    expect(await refusing.page.getByRole('switch', { name: 'Notifications' }).isChecked()).toBe(false);
   }, 120_000);
 });
 

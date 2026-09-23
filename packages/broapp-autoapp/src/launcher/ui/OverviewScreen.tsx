@@ -17,8 +17,8 @@
  * `App` reads the route and hands the data in, so this component can be drawn
  * from fixed values: nothing here reads the bridge but the prices section.
  */
-import { useEffect, useRef, useState } from 'react';
-import { Bell, Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, ChevronRight } from 'lucide-react';
 
 import { useOperation } from 'broapp/react';
 import type { OperationOutput } from 'broapp/shared';
@@ -159,22 +159,11 @@ function tokensOf(total: SpendTotal | null): string {
 
 // ── The screen ──────────────────────────────────────────────────────────────
 
-/** What the alerts control needs. */
-export interface AlertsState {
-  /** The browser's notification permission, or `unsupported`. */
-  readonly permission: string;
-  readonly sound: boolean;
-  onTurnOn(): void;
-  onSound(on: boolean): void;
-  onTestSound(): void;
-}
-
 export interface OverviewScreenProps {
   /** The last good read, or `null` before the first one. */
   readonly overview: OverviewData | null;
   /** The last read failed; what is shown is the one before it. */
   readonly stale: boolean;
-  readonly alerts: AlertsState;
   /** The moment the figures are drawn at; tests fix it. */
   readonly now?: number;
   /** Open the panel an attention row, or an application's review, names. */
@@ -205,14 +194,14 @@ export function runningModel(ref: string | null, places: ModelPlaces | undefined
 }
 
 export function OverviewScreen(props: OverviewScreenProps): React.ReactElement {
-  const { overview, stale, alerts } = props;
+  const { overview, stale } = props;
   const now = props.now ?? Date.now();
   const [pricesOpen, setPricesOpen] = useState(false);
 
   if (overview === null) {
     return (
       <main aria-label="Overview" className="launcher__overview">
-        <Header alerts={alerts} />
+        <Header />
         <p className="launcher__ov-note" role="status">
           {stale ? 'Could not refresh' : 'Reading the overview…'}
         </p>
@@ -230,7 +219,7 @@ export function OverviewScreen(props: OverviewScreenProps): React.ReactElement {
 
   return (
     <main aria-label="Overview" className="launcher__overview">
-      <Header alerts={alerts} />
+      <Header />
       {stale ? (
         <p className="launcher__ov-note launcher__ov-warn" role="status">
           Could not refresh.{props.readAt === undefined || props.readAt === null ? '' : ` Showing figures from ${ago(now - props.readAt)}.`}
@@ -314,61 +303,13 @@ export function OverviewScreen(props: OverviewScreenProps): React.ReactElement {
   );
 }
 
-function Header({ alerts }: { readonly alerts: AlertsState }): React.ReactElement {
-  // The notifications popover closes on Escape and on a press outside it, as
-  // a menu does; <details> alone would stay open until its summary is pressed.
-  const popover = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      const details = popover.current;
-      if (event.key === 'Escape' && details !== null && details.open) {
-        details.open = false;
-        details.querySelector('summary')?.focus();
-      }
-    };
-    const onPress = (event: PointerEvent): void => {
-      const details = popover.current;
-      // The event's path rather than `instanceof Node` on its target: the
-      // boundary test holds `instanceof` to a list, and the path answers the
-      // same question — was the press inside the popover — with no check at all.
-      if (details !== null && details.open && !event.composedPath().includes(details)) details.open = false;
-    };
-    document.addEventListener('keydown', onKey);
-    document.addEventListener('pointerdown', onPress);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.removeEventListener('pointerdown', onPress);
-    };
-  }, []);
+function Header(): React.ReactElement {
   return (
     <header className="launcher__ov-header">
       <div>
         <h1 className="launcher__ov-title">Overview</h1>
         <p className="launcher__ov-lede">Everything you need to keep work moving.</p>
       </div>
-      <details className="launcher__ov-notifications" ref={popover}>
-        <summary>
-          <Bell aria-hidden="true" size={16} /> Notifications <ChevronDown aria-hidden="true" size={14} />
-        </summary>
-        <div aria-label="Alerts" className="launcher__ov-alerts" role="group">
-          {alerts.permission === 'default' ? (
-            <button className="launcher__ov-link" onClick={alerts.onTurnOn} type="button">
-              Turn on alerts
-            </button>
-          ) : alerts.permission === 'denied' ? (
-            <span className="launcher__ov-muted">Notifications are blocked in this browser’s settings. Sound still works.</span>
-          ) : alerts.permission === 'unsupported' ? (
-            <span className="launcher__ov-muted">This browser shows no notifications.</span>
-          ) : null}
-          <label className="launcher__ov-switch">
-            <input checked={alerts.sound} onChange={(event) => alerts.onSound(event.currentTarget.checked)} type="checkbox" />
-            Sound
-          </label>
-          <button className="launcher__ov-link" onClick={alerts.onTestSound} type="button">
-            Test sound
-          </button>
-        </div>
-      </details>
     </header>
   );
 }

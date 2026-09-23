@@ -650,7 +650,6 @@ describe('20a: the launcher page', () => {
           children: createElement(OverviewScreen, {
             overview,
             stale: false,
-            alerts: { permission: 'default', sound: false, onTurnOn: () => undefined, onSound: () => undefined, onTestSound: () => undefined },
             now: Date.UTC(2026, 8, 22, 12),
             onOpenTarget: () => undefined,
             onOpenBacklog: () => undefined,

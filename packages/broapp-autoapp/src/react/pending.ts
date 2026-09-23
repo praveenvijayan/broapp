@@ -13,7 +13,8 @@
  * has *already* granted permission: asking for it is a dialogue nobody
  * invited, and a program that asks the moment it wants something is a program
  * people say no to. The one place permission is asked is
- * {@link requestAlerts}, which only a button calls. And for the events that
+ * {@link requestAlerts}, which only the Notifications switch in Settings
+ * calls; the same switch turned off stops the page raising any. And for the events that
  * need the person, a short generated tone, only when they have turned sound
  * on and are not looking at the tab — nobody looking at it is beeped at.
  */
@@ -45,6 +46,12 @@ export interface PendingSurface {
   /** The browser's notification constructor, when there is one. */
   readonly notify?: {
     readonly permission: string;
+    /**
+     * Whether the person wants notifications: their switch in Settings. A
+     * browser's permission cannot be given back by a page, so turning them
+     * off is this flag, not the permission. Absent means on.
+     */
+    enabled?: boolean;
     raise(title: string, body: string): void;
     /** Ask for permission. Only {@link requestAlerts} calls it. */
     request?(): Promise<string>;
@@ -75,7 +82,7 @@ export function announcePending(
   const notify = surface.notify;
   // Never `requestPermission()`. A permission that was not already given is an
   // answer, and asking again is how a tab becomes something people mute.
-  if (notify === undefined || notify.permission !== 'granted') return;
+  if (notify === undefined || notify.permission !== 'granted' || notify.enabled === false) return;
   notify.raise(
     'Autoapp needs an answer',
     pending === 1
@@ -139,7 +146,7 @@ function raiseAlert(surface: PendingSurface, event: AlertEvent): void {
   }
   const notify = surface.notify;
   // Never `requestPermission()` here: see `announcePending`.
-  if (notify !== undefined && notify.permission === 'granted') {
+  if (notify !== undefined && notify.permission === 'granted' && notify.enabled !== false) {
     try {
       notify.raise(event.title, event.body);
     } catch {
@@ -338,6 +345,7 @@ export function browserSurface(): PendingSurface | null {
       ? {}
       : {
           notify: {
+            enabled: true,
             get permission() {
               return constructor.permission;
             },
