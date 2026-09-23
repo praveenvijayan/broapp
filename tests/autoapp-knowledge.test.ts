@@ -2044,7 +2044,8 @@ describe('12c: freshness', () => {
     expect(review(fresh)).toEqual({ status: 'provisional', review: 'needs_review:autoapp_upgraded' });
     expect(review(curated)).toEqual({ status: 'confirmed', review: null });
     expect(review(helpedOnce)).toEqual({ status: 'provisional', review: 'needs_review:autoapp_upgraded' });
-  });
+    // Dozens of SQLite writes and reopens: 8 s once on a Windows runner.
+  }, 30_000);
 
   test('a flagged lesson is labelled when it is served', async () => {
     const where = makeWorld({ serve: true });
