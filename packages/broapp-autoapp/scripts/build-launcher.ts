@@ -10,6 +10,14 @@
  *   bun run scripts/build-launcher.ts                     # this machine
  *   bun run scripts/build-launcher.ts --target linux-x64  # one target
  *   bun run scripts/build-launcher.ts --all-targets       # every target
+ *   bun run scripts/build-launcher.ts --all-targets --only-macos
+ *   bun run scripts/build-launcher.ts --all-targets --skip-macos
+ *
+ * A macOS binary is given an ad-hoc signature on a Mac, because the one Bun
+ * writes does not verify and Apple silicon kills it (`broapp/build`'s
+ * `signForMacos` says why). Built anywhere else it stays unsigned, so the
+ * release workflow builds the macOS targets on a Mac: `--only-macos` there,
+ * `--skip-macos` on Linux for the rest.
  *
  * A cross-compiled binary is compiled, not run. `bun:sqlite` links a platform
  * SQLite into the executable, so the only evidence a target works is a run on
@@ -19,7 +27,7 @@
  */
 import { join, resolve } from 'node:path';
 
-import { findTarget, TARGETS, type Target } from 'broapp/build';
+import { currentTarget, findTarget, signForMacos, TARGETS, type Target } from 'broapp/build';
 
 // `import.meta.dir` rather than a URL's `pathname`: on Windows the latter is
 // `/D:/a/...`, which resolves against the drive again and fails to open.
@@ -59,8 +67,11 @@ async function compile(target: Target | null): Promise<number> {
     stderr: 'inherit',
   });
   if ((await built.exited) !== 0) throw new Error(`compiling ${outfile} failed`);
+  const signature = await signForMacos(join(packageDir, outfile), target ?? currentTarget());
   const size = (await Bun.file(join(packageDir, outfile)).stat()).size;
-  console.log(`${outfile}  ${(size / 1024 / 1024).toFixed(1)} MB`);
+  const note =
+    signature === 'signed' ? '  signed ad hoc' : signature === 'unsigned' ? '  UNSIGNED: macOS kills it' : '';
+  console.log(`${outfile}  ${(size / 1024 / 1024).toFixed(1)} MB${note}`);
   return size;
 }
 
@@ -79,7 +90,17 @@ async function main(): Promise<number> {
   if ((await assets.exited) !== 0) return 1;
 
   if (argv.includes('--all-targets')) {
-    for (const target of TARGETS) await compile(target);
+    const onlyMacos = argv.includes('--only-macos');
+    const skipMacos = argv.includes('--skip-macos');
+    if (onlyMacos && skipMacos) {
+      console.error('--only-macos and --skip-macos leave nothing to build');
+      return 1;
+    }
+    for (const target of TARGETS) {
+      const macos = target.id.startsWith('darwin-');
+      if ((onlyMacos && !macos) || (skipMacos && macos)) continue;
+      await compile(target);
+    }
     return 0;
   }
 

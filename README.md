@@ -71,6 +71,15 @@ runs:
 xattr -d com.apple.quarantine broapp-autoapp-darwin-arm64
 ```
 
+**Killed on start, with no other output?** Launchers up to 0.4.27 carry a
+signature that does not verify, and macOS 27 on Apple silicon stops such a
+binary before it runs. Later releases are signed ad hoc on a Mac. For an older
+one, sign it yourself:
+
+```bash
+codesign --force --sign - broapp-autoapp-darwin-arm64
+```
+
 Windows shows SmartScreen's "protected your PC" for the same reason; choose
 *More info*, then *Run anyway*. Signing and notarisation are the fix, and they
 are in the backlog.
@@ -91,7 +100,7 @@ unzip notes-starter.zip
 ./broapp-autoapp-darwin-arm64 serve notes
 ```
 
-The binaries are unsigned; on macOS remove the quarantine
+The binaries carry no developer identity; on macOS remove the quarantine
 attribute first (`xattr -d com.apple.quarantine <binary>`), and see
 [docs/packaging.md](docs/packaging.md) for Windows.
 

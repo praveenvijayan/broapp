@@ -10,6 +10,7 @@
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
+import { type MacosSignature, signForMacos } from './sign-macos.ts';
 import type { Target } from './targets.ts';
 import { currentTarget, findTarget, TARGETS } from './targets.ts';
 
@@ -45,6 +46,11 @@ export interface BuiltBinary {
   readonly bytes: number;
   /** True when this binary can run on the machine that built it. */
   readonly native: boolean;
+  /**
+   * For a macOS target, whether it was given a valid ad-hoc signature. A macOS
+   * binary built anywhere but a Mac is `unsigned`, and Apple silicon kills it.
+   */
+  readonly signature: MacosSignature;
 }
 
 /** Compile one executable per requested target. */
@@ -92,6 +98,7 @@ export async function buildBinary(options: BuildBinaryOptions): Promise<BuiltBin
       path: outFile,
       bytes: (await stat(outFile)).size,
       native: target.id === native.id,
+      signature: await signForMacos(outFile, target),
     });
   }
   return built;

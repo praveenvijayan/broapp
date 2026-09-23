@@ -11,7 +11,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { buildPage } from 'broapp/build';
-import { currentTarget, findTarget, TARGETS } from 'broapp/build';
+import { currentTarget, findTarget, signForMacos, TARGETS } from 'broapp/build';
 
 let root = '';
 
@@ -336,5 +336,35 @@ describe('targets', () => {
 
   test('an unknown target is not silently accepted', () => {
     expect(findTarget('plan9-vax')).toBeUndefined();
+  });
+});
+
+describe('the macOS signature', () => {
+  test('a target that is not macOS is left alone', async () => {
+    const linux = findTarget('linux-x64');
+    if (linux === undefined) throw new Error('no linux-x64 target');
+    expect(await signForMacos(join(root, 'no-such-file'), linux)).toBe('not-needed');
+  });
+
+  // Bun 1.4.0 writes a signature that does not verify, and macOS 27 kills the
+  // binary for it. Only a Mac has `codesign`, so only a Mac can show the fix.
+  test.skipIf(process.platform !== 'darwin')(
+    'a compiled macOS binary verifies once signed, and runs',
+    async () => {
+      await write('hello.ts', "console.log('signed');\n");
+      const out = join(root, 'dist', 'hello');
+      const built = Bun.spawnSync(['bun', 'build', '--compile', join(root, 'src', 'hello.ts'), '--outfile', out]);
+      expect(built.exitCode).toBe(0);
+      expect(await signForMacos(out, currentTarget())).toBe('signed');
+      expect(Bun.spawnSync(['codesign', '--verify', '--strict', out]).exitCode).toBe(0);
+      expect(Bun.spawnSync([out]).stdout.toString().trim()).toBe('signed');
+    },
+    60_000,
+  );
+
+  test.skipIf(process.platform === 'darwin')('elsewhere a macOS target is reported unsigned', async () => {
+    const macos = findTarget('darwin-arm64');
+    if (macos === undefined) throw new Error('no darwin-arm64 target');
+    expect(await signForMacos(join(root, 'no-such-file'), macos)).toBe('unsigned');
   });
 });

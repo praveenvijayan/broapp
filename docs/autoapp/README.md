@@ -29,8 +29,9 @@ unzip notes-starter.zip
 ./broapp-autoapp-darwin-arm64 serve notes
 ```
 
-The binaries are unsigned; the other targets, and what macOS and Windows say
-about an unsigned binary, are in [Packaging and offline](packaging.md).
+The binaries carry no developer identity (the macOS ones are signed ad hoc, so
+Apple silicon will start them); the other targets, and what macOS and Windows
+say about such a binary, are in [Packaging and offline](packaging.md).
 
 ## Stopping it
 

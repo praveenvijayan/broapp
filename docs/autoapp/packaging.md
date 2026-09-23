@@ -15,13 +15,14 @@ the hashes the build computed.
 ```bash
 bun run --cwd packages/broapp-autoapp build:launcher            # this machine
 bun run --cwd packages/broapp-autoapp build:all                 # every target
+bun run --cwd packages/broapp-autoapp scripts/build-launcher.ts --all-targets --only-macos
 bun run --cwd packages/broapp-autoapp scripts/build-launcher.ts --target linux-x64
 ```
 
 | Target | Suffix | Size | Smoke-tested in CI |
 | --- | --- | --- | --- |
-| `darwin-arm64` | — | 72.2 MB | yes — `macos-latest` |
-| `darwin-x64` | — | 78.6 MB | no runner; compiled only |
+| `darwin-arm64` | — | 72.2 MB | yes — `macos-latest`, the shipped binary |
+| `darwin-x64` | — | 78.6 MB | no runner; compiled on `macos-latest` only |
 | `linux-x64` | — | 89.9 MB | yes — `ubuntu-latest` |
 | `linux-arm64` | — | 89.8 MB | no runner; compiled only |
 | `linux-x64-musl` | — | 83.9 MB | no runner; compiled only |
@@ -62,6 +63,14 @@ workspace outside the repository through the binary so the case stays covered.
 | `scripts/autoapp-smoke.ts` | The **compiled binary**: import, serve, the loopback control connection, build, activate, a crash past the switch, recovery, and the control file's removal | the same three |
 | `scripts/autoapp-dry-run.ts` | Packs every publishable package, installs them outside the workspace, imports the Notes workspace through them and builds a candidate | the same three |
 | `bun run --cwd packages/broapp-autoapp build:all` | Compiles all six targets | `ubuntu-latest` |
+
+A macOS launcher is signed ad hoc by the build script, and only on a Mac:
+Bun 1.4.0 leaves every macOS binary with a signature that does not verify, and
+macOS 27 on Apple silicon kills such a binary before it prints anything. So the
+release workflow builds the two macOS targets in `launcher-macos` on
+`macos-latest`, checks them with `codesign --verify --strict`, and smoke-tests
+the Apple silicon binary it archives. Built on Linux, a macOS launcher is
+labelled `UNSIGNED` and will not start on a current Mac.
 
 The CI job is `autoapp` in `.github/workflows/ci.yml`. Nothing is skipped by
 platform; if a case ever has to be, it belongs in the table below with its

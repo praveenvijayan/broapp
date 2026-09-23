@@ -43,9 +43,10 @@ jobs:
           # `macos-13` was the last hosted Intel runner and is retired: a job
           # asking for it queued for ten hours and was cancelled by GitHub,
           # which cancelled the draft with it — on v0.3.0 and again on v0.3.1.
-          # Intel macOS is cross-compiled from Linux and labelled, like the
-          # two Linux targets below and every launcher target.
-          - { os: ubuntu-latest, target: darwin-x64, native: false }
+          # Intel macOS is cross-compiled and labelled, but on a Mac: only
+          # there can the build give it a signature that verifies, and Apple
+          # silicon kills a binary whose signature does not.
+          - { os: macos-latest, target: darwin-x64, native: false }
           - { os: ubuntu-latest, target: linux-x64, native: true }
           - { os: windows-latest, target: windows-x64, native: true }
           # No hosted runner for these, so they are cross-compiled and labelled.
@@ -71,6 +72,14 @@ jobs:
           binary="./release/${name}-${{ matrix.target }}"
           [ -f "$binary.exe" ] && binary="$binary.exe"
           bun run ../../scripts/smoke-binary.ts "$binary"
+
+      # The build signs a macOS binary ad hoc; this is the check that it did.
+      # A runner's macOS may still start a binary whose signature is broken,
+      # so a passing smoke test above is not evidence of this.
+      - name: Verify the macOS signature
+        if: startsWith(matrix.target, 'darwin-')
+        working-directory: examples/${{ github.event.inputs.example || 'notes' }}
+        run: codesign --verify --strict --verbose=2 "./release/${{ github.event.inputs.example || 'notes' }}-${{ matrix.target }}"
 
       - name: Archive
         working-directory: examples/${{ github.event.inputs.example || 'notes' }}
@@ -99,8 +108,9 @@ jobs:
   # built once per target rather than once per example. Cross-compiled from
   # Linux, because `bun build --compile` can target every platform from one —
   # and then labelled as compiled-but-not-executed, exactly as the examples are.
+  # Every target but macOS: those are built by `launcher-macos`, below.
   launcher:
-    name: Launcher — every target
+    name: Launcher — Linux and Windows targets
     needs: check
     runs-on: ubuntu-latest
     steps:
@@ -109,9 +119,9 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
-      - name: Build every target
+      - name: Build every target but macOS
         working-directory: packages/broapp-autoapp
-        run: bun run build:all
+        run: bun run scripts/build-launcher.ts --all-targets --skip-macos
       - name: Archive
         working-directory: packages/broapp-autoapp/dist
         shell: bash
@@ -140,9 +150,55 @@ jobs:
             packages/broapp-autoapp/dist/*.zip
           if-no-files-found: error
 
-  # The evidence for the launcher, on the three platforms with a runner: build
-  # it natively and drive the compiled binary through import, serve, the control
-  # connection, activation, a crash past the switch, and recovery.
+  # The macOS launchers, built on a Mac so they can be signed. Bun 1.4.0 leaves
+  # every macOS binary with a signature that does not verify, and macOS 27 kills
+  # such a binary on Apple silicon before it prints anything: v0.4.27 shipped a
+  # launcher that did exactly that. The build script signs ad hoc; the step
+  # after it checks, because the runner's macOS may start a broken binary anyway.
+  # The Apple silicon binary smoke-tested is the one archived, not a second build.
+  launcher-macos:
+    name: Launcher — macOS targets
+    needs: check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - name: Build the macOS targets
+        working-directory: packages/broapp-autoapp
+        run: bun run scripts/build-launcher.ts --all-targets --only-macos
+      - name: Verify the signatures
+        working-directory: packages/broapp-autoapp/dist
+        run: |
+          for file in broapp-autoapp-darwin-*; do
+            codesign --verify --strict --verbose=2 "$file"
+          done
+      # `autoapp-smoke.ts` drives `dist/broapp-autoapp`, so the shipped binary
+      # is copied to that name rather than a native one built beside it.
+      - name: Smoke test the Apple silicon binary
+        run: |
+          cp packages/broapp-autoapp/dist/broapp-autoapp-darwin-arm64 packages/broapp-autoapp/dist/broapp-autoapp
+          bun run scripts/autoapp-smoke.ts
+      - name: Archive
+        working-directory: packages/broapp-autoapp/dist
+        run: |
+          for file in broapp-autoapp-darwin-*; do
+            case "$file" in *.tar.gz) continue ;; esac
+            chmod +x "$file"
+            tar -czf "$file.tar.gz" "$file"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-macos
+          path: packages/broapp-autoapp/dist/*.tar.gz
+          if-no-files-found: error
+
+  # The evidence for the launcher on Linux and Windows: build it natively and
+  # drive the compiled binary through import, serve, the control connection,
+  # activation, a crash past the switch, and recovery. macOS is smoke-tested in
+  # `launcher-macos`, on the binary it ships.
   launcher-smoke:
     name: Launcher smoke — ${{ matrix.os }}
     needs: check
@@ -150,7 +206,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -162,7 +218,7 @@ jobs:
 
   draft:
     name: Draft release
-    needs: [binaries, launcher, launcher-smoke]
+    needs: [binaries, launcher, launcher-macos, launcher-smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -194,23 +250,26 @@ jobs:
             | Target | Compiled | Executed in CI |
             | --- | --- | --- |
             | darwin-arm64 | yes | yes |
-            | darwin-x64 | yes | **no** — cross-compiled, no Intel runner |
+            | darwin-x64 | yes | **no** — cross-compiled on macOS, no Intel runner |
             | linux-x64 | yes | yes |
             | windows-x64 | yes | yes |
             | linux-arm64 | yes | **no** — cross-compiled, no runner |
             | linux-x64-musl | yes | **no** — cross-compiled, no runner |
 
             The `broapp-autoapp-<target>` archives are the Autoapp launcher,
-            which supervises applications and hosts the engineer. Every one of
-            them is cross-compiled from Linux; the launcher is smoke-tested
-            natively on linux-x64, darwin-arm64 and windows-x64, and compiled
-            only on the other three targets. It runs applications as **trusted
-            local code**: crash isolated from the launcher, not permission
-            isolated from you. See `docs/autoapp/packaging.md` and
+            which supervises applications and hosts the engineer. The two
+            macOS ones are built on macOS and signed ad hoc there; the rest are
+            cross-compiled from Linux. The launcher is smoke-tested on
+            linux-x64, darwin-arm64 (the archived binary itself) and
+            windows-x64, and compiled only on the other three targets. It runs
+            applications as **trusted local code**: crash isolated from the
+            launcher, not permission isolated from you. See `docs/autoapp/packaging.md` and
             `docs/autoapp/security.md`.
 
-            Binaries are **not signed**. macOS will need Gatekeeper bypassed or
-            the binary signed and notarised; Windows will show SmartScreen. See
+            Binaries carry **no developer identity**. The macOS ones are signed
+            ad hoc, which is what lets Apple silicon start them at all; it does
+            not satisfy Gatekeeper, so a browser download still needs the
+            quarantine removed (below). Windows will show SmartScreen. See
             `docs/packaging.md`.
 
             ## Getting started with the launcher

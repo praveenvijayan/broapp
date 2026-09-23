@@ -69,9 +69,17 @@ Each of those is exercised by the release dry run.
 
 ## Signing and distribution
 
-Broapp does not sign anything. Here is what each platform needs.
+Broapp signs nothing with an identity. Here is what each platform needs.
 
 ### macOS
+
+Every macOS binary `broapp build` produces on a Mac is signed **ad hoc**
+(`codesign --force --sign -`) and verified. Bun 1.4.0's `--compile` leaves a
+signature that does not verify, and macOS 27 on Apple silicon kills such a
+binary before it prints anything; a terminal shows only `killed`. An ad-hoc
+signature carries no identity, so it fixes that and nothing below. A macOS
+binary built on Linux or Windows cannot be signed there: `broapp build` marks it
+`unsigned`, and it needs `codesign --force --sign -` on a Mac before it runs.
 
 An unsigned binary downloaded from the internet carries a quarantine attribute,
 and Gatekeeper refuses it. Users can bypass this per-file
@@ -95,7 +103,9 @@ for a downloaded file. A single binary cannot be stapled; ship it inside a `.dmg
 or `.pkg` and staple that, or accept that the check happens online at first
 launch.
 
-Signing must run on macOS, so it cannot be done from a Linux CI runner.
+Signing must run on macOS, so it cannot be done from a Linux CI runner. Build
+the macOS targets on a macOS runner even when you ship them unsigned: that is
+the only place they get the ad-hoc signature they need to start.
 
 ### Windows
 

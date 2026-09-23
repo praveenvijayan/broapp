@@ -169,7 +169,7 @@ async function main(): Promise<number> {
     });
     for (const binary of built) {
       console.log(
-        `bin ${binary.path}  ${(binary.bytes / 1024 / 1024).toFixed(1)} MiB  ${binary.target.label}${binary.native ? '' : '  (cross-compiled, not run)'}`,
+        `bin ${binary.path}  ${(binary.bytes / 1024 / 1024).toFixed(1)} MiB  ${binary.target.label}${binary.native ? '' : '  (cross-compiled, not run)'}${binary.signature === 'unsigned' ? '  (unsigned: macOS kills it until `codesign --force --sign -` runs on a Mac)' : ''}`,
       );
     }
     return 0;

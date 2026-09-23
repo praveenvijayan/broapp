@@ -9,6 +9,8 @@ export { buildPage } from './build-page.ts';
 export type { BuildPageOptions, BuildPageResult } from './build-page.ts';
 export { buildBinary } from './build-binary.ts';
 export type { BuildBinaryOptions, BuiltBinary } from './build-binary.ts';
+export { signForMacos } from './sign-macos.ts';
+export type { MacosSignature } from './sign-macos.ts';
 export { currentTarget, findTarget, TARGETS } from './targets.ts';
 export type { Target } from './targets.ts';
 export { defineConfig, loadConfig } from './config.ts';
